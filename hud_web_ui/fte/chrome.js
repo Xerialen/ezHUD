@@ -200,6 +200,15 @@ function renderDrift(report) {
 		body.append(line(report.unpreviewed.join(', ')));
 	}
 
+	if (report.translated?.length) {
+		body.append(line(
+			'Applied under FTE\'s own name too, so the preview follows the same file:',
+			'fte-drift__head'));
+		for (const t of report.translated) {
+			body.append(line(`${t.from} "${t.value}" → ${t.to}`));
+		}
+	}
+
 	if (report.refused.length) {
 		body.append(line('Refused by the command allowlist:', 'fte-drift__head'));
 		for (const r of report.refused) {

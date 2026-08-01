@@ -50,7 +50,10 @@ function commandAllowed(line) {
 	if (name.startsWith('hud_web')) {
 		return false;
 	}
-	if (BARE_COMMANDS.has(name) || name === 'gl_consolefont') {
+	// gl_font is FTE's spelling of gl_consolefont — same file convention
+	// (textures/charsets/<name>.png), different cvar. The import pipeline
+	// translates one into the other; both go through this gate.
+	if (BARE_COMMANDS.has(name) || name === 'gl_consolefont' || name === 'gl_font') {
 		return true;
 	}
 	return PREFIXES.some((p) => name.startsWith(p));

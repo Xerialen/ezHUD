@@ -27,6 +27,18 @@ const APPLY_EXACT = new Set([
 	// The con-size family: it decides what "console pixels" means, so the
 	// preview is laid out at the wrong size without it.
 	'vid_conwidth', 'vid_conheight', 'vid_conautoscale',
+	// The charset. ezQuake resolves it as textures/charsets/<name>.png; FTE
+	// does exactly the same — through its own cvar. See TRANSLATE below.
+	'gl_consolefont',
+]);
+
+// Cvars whose ezQuake spelling has a different FTE name for the same file
+// convention. The ezQuake cvar is applied as itself (harmless, keeps the
+// export honest) and then again under the FTE name so the preview follows.
+// gl_font is how hub.quakeworld.nu's fmf loads charsets (`+set gl_font
+// povo5f_xtm` against textures/charsets/povo5f_xtm.png in their assets).
+const TRANSLATE = new Map([
+	['gl_consolefont', 'gl_font'],
 ]);
 
 // The placement fields live on hud_t rather than in a params array, so they
@@ -161,11 +173,35 @@ function driftReport(entries, state, bridge, refused) {
 	};
 }
 
+// The engine keeps mounting its filesystem for a while after boot, and a
+// config applied into that window half-takes: the cvars land, but gl_font
+// cannot find the charset file yet and the classic bar's geometry shifts
+// every screen-placed element. Measured: the same drop 5 seconds after a
+// reload lost the charset and moved health 119px; on a settled engine it
+// applied completely. So wait until the engine is actually drawing — that is
+// also when app.js reports Live, so the user sees the same readiness.
+async function engineLive(bridge, timeoutMs = 15000) {
+	const until = Date.now() + timeoutMs;
+	for (;;) {
+		try {
+			const state = await bridge.state();
+			if (state.elements?.some((e) => e.rect)) {
+				return state;
+			}
+		} catch { /* still booting */ }
+		if (Date.now() > until) {
+			return null; // apply anyway; the drift report says what stuck
+		}
+		await new Promise((resolve) => setTimeout(resolve, 500));
+	}
+}
+
 /**
  * Parse a config, apply what the preview can show, keep the rest verbatim.
  * @returns {Promise<object>} a report for the host page's drift panel.
  */
 export async function importCfg(text, name, bridge) {
+	await engineLive(bridge);
 	// Defaults have to be pre-import, or every value the file sets looks like
 	// an editor change and exportFullCfg appends the lot. cvarSnapshot reads
 	// lastState, so there has to be one before we ask.
@@ -185,6 +221,7 @@ export async function importCfg(text, name, bridge) {
 	});
 
 	const refused = [];
+	const translated = [];
 	for (const entry of entries) {
 		if (!appliable(entry.cvar)) {
 			continue;
@@ -196,6 +233,14 @@ export async function importCfg(text, name, bridge) {
 			entry.applied = true;
 		} catch (err) {
 			refused.push({ cvar: entry.cvar, reason: err?.message ?? String(err) });
+			continue;
+		}
+		const twin = TRANSLATE.get(entry.cvar);
+		if (twin) {
+			try {
+				await bridge.setCvar(twin, entry.value);
+				translated.push({ from: entry.cvar, to: twin, value: entry.value });
+			} catch { /* the drift report's unpreviewed list already covers it */ }
 		}
 	}
 
@@ -212,7 +257,7 @@ export async function importCfg(text, name, bridge) {
 	bridge.importedName = name;
 
 	const applied = entries.filter((e) => e.applied).length;
-	return { kind: 'cfg', name, applied, lines: entries.length, ...driftReport(entries, state, bridge, refused) };
+	return { kind: 'cfg', name, applied, lines: entries.length, translated, ...driftReport(entries, state, bridge, refused) };
 }
 
 // ---- files that have to go through a reload --------------------------------

@@ -111,6 +111,22 @@ test('importCfg applies what it can, retains the rest in file order, and recalcu
 	assert.equal(bridge.defaults.get('hud_health_scale'), '1');
 });
 
+test('gl_consolefont applies and is translated to FTE\'s gl_font', async () => {
+	const bridge = fakeBridge();
+	bridge.state = async () => bridge.state_();
+
+	const report = await importCfg('gl_consolefont "6"\n', 'font.cfg', bridge);
+
+	// Applied as itself (the export must keep the ezQuake spelling) and again
+	// under the FTE name, so textures/charsets/6.png actually loads.
+	assert.deepEqual(bridge.applied, [['gl_consolefont', '6'], ['gl_font', '6']]);
+	assert.deepEqual(report.translated, [{ from: 'gl_consolefont', to: 'gl_font', value: '6' }]);
+	// The translation is preview plumbing, not a config line: only the
+	// original may be marked applied/retained.
+	assert.deepEqual(bridge.retainedLines.map((l) => [l.cvar, l.applied]),
+		[['gl_consolefont', true]]);
+});
+
 test('the drift report names elements FTE does not register and cvars it never reports back', async () => {
 	const bridge = fakeBridge();
 	bridge.state = async () => bridge.state_();

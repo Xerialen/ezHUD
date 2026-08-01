@@ -64,7 +64,35 @@ was not on the issue's list at all). 29 applied cvars are set but never
 reported back (`scr_*`/`cl_*`/`vid_*` families — the export still cannot lose
 them, because unchanged lines are written back verbatim).
 
-## HUD art does not preview (found by importing the owner's real art)
+## HUD art: now previews (was caveat 0; fixed in this spike)
+
+Update, same evening: the gap below was closed with two measured fixes, and
+`shots/fte-owner-hud-fullart.png` shows the owner's charset ("REPPIE", the
+53/66 digits, teaminfo, tracker) and wad number art rendering in FTE from a
+single GUI drop of the config onto a freshly reloaded page.
+
+1. **Wad/gfx art** — `EZHud_LoadReplaceable()` in the plugin
+   (`ezquakeisms.c`, in `fteqw.diff`): `Draw_CacheWadPic`/`Draw_CachePicSafe`
+   now honour ezQuake's replacement conventions (`textures/wad/<lump>.<ext>`,
+   `textures/gfx/<base>.<ext>`, png/tga/jpg) by uploading the replacement
+   bytes over the engine's texture name at init time. Verified live: the
+   gameclock's digits render the owner's 96×96 art instead of stock sb_nums.
+2. **Charset** — the import pipeline translates `gl_consolefont` to FTE's
+   `gl_font`, which resolves `textures/charsets/<name>.png` exactly like
+   ezQuake (hub.quakeworld.nu's own fmf relies on this). Unit-tested.
+3. **The race that hid both** — a config applied while the engine is still
+   mounting its filesystem half-takes: gl_font finds no charset yet and the
+   classic bar's transient geometry shifts every screen-placed element
+   (measured: same drop, 5s after reload vs settled engine — health moved
+   119px and the charset was lost). `importCfg` now waits for the engine to
+   actually draw (`engineLive()`), the same condition app.js calls Live.
+
+Still open in this area: ezQuake tints (the orange clock) reproduce only as
+far as the element's own drawing does; crosshair images (`crosshairimage`)
+have no FTE mapping; and `scr_newhud` has no FTE equivalent, so which
+engine-side bars draw can differ per boot until the plugin grows that switch.
+
+## The original finding (kept for the record)
 
 The owner's HUD look comes from ezQuake's replacement conventions:
 `textures/wad/anum_*.png` for the status-bar digits, `textures/charsets/` for
@@ -117,10 +145,9 @@ four small build patches (`fteqw.diff`).
 
 The caveats, in order of user-visible weight:
 
-0. **Custom HUD art does not preview.** ezQuake's `textures/wad/`, charset
-   and crosshair replacement conventions are not consulted by FTE even with
-   the packages mounted (see above). The single biggest gap for "preview the
-   look, not just the positions"; needs its own ticket before the real build.
+0. ~~Custom HUD art does not preview.~~ **Fixed in this spike** — see "HUD
+   art: now previews" above. Remaining art gaps: ezQuake colour tints,
+   `crosshairimage`, and the `scr_newhud` classic-bar switch.
 1. **Font rendering differs** throughout (FTE's own font system) — the layout
    is right, the glyphs are not ezQuake's. Known going in.
 2. **teaminfo and face place differently** than ezQuake with the same cvars —
