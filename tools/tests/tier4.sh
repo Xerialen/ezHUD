@@ -47,8 +47,17 @@ export HUD_WEB_ARTIFACT_DIR=${HUD_WEB_ARTIFACT_DIR:-/tmp/ezquake-hud-tier4-artif
 # 1280x1024 at a depth that leaves the engine with a 0-bit z-buffer, and renders at
 # a size the -width/-height arguments did not ask for.
 if [[ -n "${EZHUD_USE_DISPLAY:-}" ]]; then
-	echo "tier 4: using display ${EZHUD_USE_DISPLAY} (GALLIUM_DRIVER=${GALLIUM_DRIVER:-default})"
-	export DISPLAY="$EZHUD_USE_DISPLAY"
-	exec bash "$repo_dir/tools/tests/tier4_under_xvfb.sh"
+	# Prove the display answers before committing to it. On WSL, :0 comes from
+	# WSLg, which is tied to a Windows user session -- it can be absent after a
+	# reboot or a logoff even though the runner itself is perfectly healthy.
+	# Falling back keeps the nightly meaningful instead of failing on a missing
+	# X server, and says which mode it actually used.
+	if DISPLAY="$EZHUD_USE_DISPLAY" timeout 20 xdpyinfo >/dev/null 2>&1; then
+		echo "tier 4: display ${EZHUD_USE_DISPLAY}, GALLIUM_DRIVER=${GALLIUM_DRIVER:-default}"
+		export DISPLAY="$EZHUD_USE_DISPLAY"
+		exec bash "$repo_dir/tools/tests/tier4_under_xvfb.sh"
+	fi
+	echo "tier 4: EZHUD_USE_DISPLAY=${EZHUD_USE_DISPLAY} is set but not reachable;" \
+	     "falling back to Xvfb (software rendering)" >&2
 fi
 exec xvfb-run -a -s "-screen 0 1280x720x24" bash "$repo_dir/tools/tests/tier4_under_xvfb.sh"
