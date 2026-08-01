@@ -1,0 +1,50 @@
+name: Test case
+description: Durable reusable check for behavior that agents should rerun
+title: "Test case: "
+labels: ["type:test-case", "status:inbox"]
+body:
+  - type: input
+    id: test_id
+    attributes:
+      label: Test case ID
+      description: Example TC-WEB-001
+    validations:
+      required: true
+  - type: input
+    id: area
+    attributes:
+      label: Area
+      description: Feature, screen, subsystem, or workflow.
+  - type: dropdown
+    id: automation
+    attributes:
+      label: Automation target
+      options:
+        - Manual browser
+        - Playwright/browser automation
+        - Unit/integration test
+        - CI
+        - Not automatable yet
+    validations:
+      required: true
+  - type: textarea
+    id: preconditions
+    attributes:
+      label: Preconditions
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence required
+      description: What must be captured when this test is run?

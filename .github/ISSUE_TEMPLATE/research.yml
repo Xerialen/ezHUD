@@ -1,0 +1,23 @@
+name: Research
+description: A research question or source investigation
+title: "Research: "
+labels: ["type:research", "status:inbox"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Research question
+    validations:
+      required: true
+  - type: textarea
+    id: sources
+    attributes:
+      label: Sources to inspect
+  - type: textarea
+    id: output
+    attributes:
+      label: Expected output
+  - type: textarea
+    id: docs
+    attributes:
+      label: Docs to update

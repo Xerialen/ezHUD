@@ -1,0 +1,47 @@
+name: Experiment
+description: A measurable experiment or spike
+title: "Experiment: "
+labels: ["type:experiment", "status:inbox"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What are we trying to prove or learn?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why this matters
+      description: How does this connect to the north star?
+    validations:
+      required: true
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: Hypothesis
+      description: What do we expect to happen?
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: What should be done?
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Expected evidence
+      description: What output will prove the result?
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of done
+  - type: textarea
+    id: docs
+    attributes:
+      label: Docs to update
+  - type: textarea
+    id: stop
+    attributes:
+      label: Stop condition
+      description: When should the agent stop and ask instead of continuing?

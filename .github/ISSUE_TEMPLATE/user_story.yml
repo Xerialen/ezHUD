@@ -1,0 +1,32 @@
+name: User story
+description: A user-facing behavior or workflow to build and validate
+title: "Story: "
+labels: ["type:story", "status:inbox"]
+body:
+  - type: textarea
+    id: story
+    attributes:
+      label: User story
+      description: "As a <user>, I want <capability>, so that <outcome>."
+    validations:
+      required: true
+  - type: textarea
+    id: value
+    attributes:
+      label: Why this matters
+      description: How does this connect to the current stage or north star?
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable conditions that must be true.
+  - type: textarea
+    id: test_cases
+    attributes:
+      label: Linked or proposed test cases
+      description: Durable checks to rerun when this behavior changes.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence expectations
+      description: Commands, browser checks, screenshots, logs, or metrics expected.

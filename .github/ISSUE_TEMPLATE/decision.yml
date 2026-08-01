@@ -1,0 +1,23 @@
+name: Decision
+description: A decision that needs evidence and alternatives
+title: "Decision: "
+labels: ["type:decision", "status:inbox"]
+body:
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision to make
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence needed
+  - type: textarea
+    id: revisit
+    attributes:
+      label: Revisit conditions

@@ -1,0 +1,38 @@
+name: docs-guard
+
+# Warn-only guardrail: if code/config changed but no docs/prompts did, print a
+# warning. This NEVER fails the build. Promote to a hard fail only once the
+# project is mature enough that the noise is worth it.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  docs-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Warn if code changed without docs
+        run: |
+          base="origin/${{ github.base_ref }}"
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+
+          changed="$(git diff --name-only "$base"...HEAD)"
+          echo "Changed files:"
+          echo "$changed"
+
+          code_changed="$(echo "$changed" | grep -E '^(src/|scripts/|experiments/|[^/]+\.(ya?ml|json|toml|cfg|ini|config))$' || true)"
+          docs_changed="$(echo "$changed" | grep -E '^(docs/|prompts/|README\.md|AGENTS\.md)' || true)"
+
+          if [ -n "$code_changed" ] && [ -z "$docs_changed" ]; then
+            echo "::warning::Code or config changed but no documentation (docs/, prompts/, README.md, AGENTS.md) was updated. Documentation is a first-class deliverable (see AGENTS.md). This is a warning only and does not fail the build."
+          else
+            echo "Docs-guard check passed (or not applicable)."
+          fi
