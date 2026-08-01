@@ -75,8 +75,11 @@
     <div class="stage__frame" id="stage">
       <!-- FTE draws straight into this. It is the "framebuffer" that /frame.png
            is on the ezQuake backend, which is why the adapter reads `physical`
-           from canvas.width/height rather than from the engine. -->
-      <canvas id="canvas" width="640" height="480"></canvas>
+           from canvas.width/height rather than from the engine. The attributes
+           are only the pre-engine fallback: FTE's own resize glue replaces the
+           backing store with the CSS-displayed rect × devicePixelRatio, so
+           fte/fte.css is what decides the real render size. -->
+      <canvas id="canvas" width="1280" height="720"></canvas>
       <!-- What app.js believes is an <img>. fte/boot.js gives it
            naturalWidth/naturalHeight getters over the canvas and a src setter
            that dispatches 'load'. It is transparent and sits on top so that

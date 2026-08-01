@@ -9,16 +9,21 @@
 /* ---- stage layering ------------------------------------------------------ */
 
 /* The canvas is now the thing with a size: .stage__frame is position:relative
- * with no dimensions of its own, so it takes them from here. These are the
- * rules ui.css gives #frame, moved onto what is actually being displayed.
- * A canvas is a replaced element, so max-width/max-height shrink it with its
- * aspect ratio intact, exactly as they did for the <img>. */
+ * with no dimensions of its own, so it takes them from here.
+ *
+ * Unlike the ezQuake <img>, which can only be displayed at the size the engine
+ * captured, this canvas *dictates* the render size: FTE's glue
+ * (engine/web/ftejslib.js, window.onresize) reads the canvas's on-screen rect,
+ * sets the backing store to rect × devicePixelRatio, and tells the engine —
+ * so the bigger this displays, the higher the resolution FTE actually renders
+ * at. Fill the stage, then: as wide as the panel allows, 16:9 (what people
+ * actually play at), capped so the fte-bar row below stays on screen
+ * (44px header + 40px stage padding + ~46px bar row and gap). */
 #canvas {
 	display: block;
-	max-width: 100%;
-	max-height: calc(100vh - 44px - 40px);
-	width: auto;
-	image-rendering: pixelated;
+	width: min(100%, calc((100vh - 130px) * 16 / 9));
+	height: auto;
+	aspect-ratio: 16 / 9;
 	/* Pointer isolation, and the single rule the whole interaction model rests
 	 * on: FTE registers mousedown/move/wheel/drop on the canvas in the capture
 	 * phase (engine/web/ftejslib.js:600), so anything that reaches it is a
