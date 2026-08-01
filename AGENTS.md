@@ -22,7 +22,6 @@ capable agent may act as Coder or Reviewer when the owner assigns that role.
 
 - Coder role: `coder.md`
 - Reviewer role: `reviewer.md`
-- ML/data reviewer layer: `machine-learning-reviewer.md`
 
 Do not assume a tool brand owns a role. The same agent must not act as both
 Coder and independent Reviewer for the same PR unless the owner explicitly
@@ -98,9 +97,8 @@ place of that. If review tooling is unavailable, say so — do not skip it.
 
 Use `reviewer.md` for review work.
 
-For pull requests that touch machine learning, datasets, generated evidence,
+For pull requests that touch generated evidence,
 model evaluation, data contracts, feature pipelines, or model-serving behavior,
-also apply `machine-learning-reviewer.md` inside the same review gate. This is a
 specialized reviewer layer, not a second merge gate or extra label system.
 
 ## 4.5. Test cases and web evidence
@@ -167,5 +165,5 @@ For each (or "None."): Severity / File-area / Problem / Why this blocks merge / 
 Concrete technical notes only (or "None.").
 ```
 
-Before applying a gate decision, classify whether the PR is ML-impacting. If it touches data extraction, datasets, training, model behavior, evaluation, metrics, inference, ML documentation, or evidence ledgers, read and apply `machine-learning-reviewer.md`. For non-ML PRs, say explicitly that the PR is not ML-impacting.
+Before applying a gate decision, state what evidence backs the change: for engine or bridge changes, a build plus a live run against a real ezQuake; for UI logic, the pure-function tests; for anything visual, screenshots of the affected states.
 <!-- codex-review-gate:end -->

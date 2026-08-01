@@ -1,254 +1,228 @@
-# AI-Assisted GitHub Project Template
+# ez-hud
 
-A tiered, anti-drift project scaffold for AI-assisted software and research
-projects with a single owner who needs strong structure, continuity, and
-anti-drift safeguards — especially across multi-day breaks and context switches.
+A HUD editor for [ezQuake](https://github.com/QW-Group/ezquake-source), served by the
+engine itself.
 
-The goal is not software-engineering purity. The goal is to help the human and
-AI agents identify the real goal, stay aligned with it, preserve context across
-sessions, prevent scope creep, make progress through small measurable steps, and
-document findings and decisions as first-class deliverables — **without building
-a documentation burden that rots.**
+Run `hud_web 1` in the console and ezQuake prints a URL. Open it and you get a live
+picture of your own game with every HUD element outlined: drag them, resize them from
+the corners, recolour them, group them, switch between ezQuake's several HUD systems,
+and save the result as a config. There is no second process to install and no folder
+of files to keep next to the binary — the editor is compiled into the engine.
 
-This template is especially useful when working with Codex, Claude, ChatGPT,
-GLM, or other coding agents.
+The editor never reimplements HUD placement. Every rectangle it draws a handle on is
+the engine's own `hud->lx/ly/lw/lh`, and every change goes back through the console.
+The engine stays the single source of truth for both geometry and rendering, which is
+the whole reason for this approach over a standalone tool that would have to model
+ezQuake's placement rules and inevitably drift from them.
 
-## The four layers
+**Status:** working, reviewed, not yet merged upstream. Two independent models
+(GPT-5.6-sol, Kimi K3) have reviewed and adversarially tested it; 18 findings between
+them, all addressed or explicitly declined. See [Known gaps](#known-gaps).
 
-Every project created from this template has four layers:
+---
 
-```text
-1. Purpose layer     -> why are we doing this?
-2. Control layer     -> how do we stay on track?
-3. Execution layer   -> what should the agent do next?
-4. Memory layer      -> what did we learn and decide?
+## Architecture
+
+```
+        ezQuake process                              browser
+ ┌──────────────────────────────────┐        ┌────────────────────────┐
+ │  HUD subsystem (hud.c, hud_*.c)  │        │   hud_web_ui/          │
+ │      83 registered elements      │        │                        │
+ │              ▲                   │        │   core/   pure logic,  │
+ │              │ cvars via Cbuf    │        │           no DOM       │
+ │  ┌───────────┴───────────────┐   │        │   view/   the only     │
+ │  │ hud_web.c    transport    │◄──┼─ HTTP ─┼─►         DOM writer   │
+ │  │ hud_web_state.c  payload  │   │  loop- │                        │
+ │  │ hud_web_assets.c  the UI, │   │  back  │  served from the       │
+ │  │              baked in     │   │ +token │  engine's own memory   │
+ │  └───────────────────────────┘   │        └────────────────────────┘
+ │   serviced once per frame,       │
+ │   next to Sys_ReadIPC()          │
+ └──────────────────────────────────┘
 ```
 
-The template should make it hard for the agent to start coding before it
-understands the project — and hard for the owner to drown in docs they won't
-maintain.
+### The three boundaries that matter
 
-### Two principles that resolve every "how much process?" question
+**Engine ↔ browser is a loopback HTTP bridge.** It binds `127.0.0.1` explicitly and
+never `INADDR_ANY`, and every request that touches the engine carries a 128-bit token
+minted at startup. Binding to localhost is *not* an authorization boundary — any page
+the user visits can reach `127.0.0.1` — so the token is the real one. The service is
+non-blocking and runs once per client frame beside `Sys_ReadIPC()`; the engine is
+single-threaded and the bridge must never stall the render loop.
 
-1. **Match ceremony to project size.** A throwaway spike does not need a roadmap.
-   A multi-month effort does. Start at Tier 0 and add documents only when the
-   project genuinely needs them.
-2. **Docs are claims to re-verify, not truth to trust.** After a break, the doc
-   most likely to be lying is `docs/current-stage.md`. Re-entry means *reconcile
-   doc against reality*, then update the doc — never act on a stale claim. If a
-   doc contradicts live state, trust live state and fix the doc.
+`POST /cmd` feeds `Cbuf_AddText`, which can do anything the console can, so it is
+gated by an allowlist. That allowlist is narrower than it looks and the reasons are
+recorded in `HUD_Web_CommandAllowed` — several are non-obvious enough that removing a
+check "because it looks redundant" would reopen a real hole. Two examples: `$` is
+refused because `Cmd_ExpandString` runs *after* the check, and an allowlisted name
+must also exist as a real command, because otherwise the dispatcher falls through to
+whatever alias the user happens to have under that name.
 
-### Progressive rigor
+**`core/` ↔ `view/` is a no-DOM boundary.** Everything in `hud_web_ui/core/` is pure:
+placement maths, resize transfer ratios, colour parsing, the model. It never touches
+`document`, which is what makes it testable without a browser and replaceable without
+a rewrite. `view/app.js` is the only file allowed to write to the DOM.
 
-Each project has a maturity line in `docs/current-stage.md`:
+**The UI is a build artifact that is committed.** `tools/embed_hud_web_ui.py` bakes
+`hud_web_ui/` into a generated C file. That keeps the Windows and Linux builds free of
+any new build-time dependency — nothing but a C compiler is needed, same as before —
+at the cost of having to regenerate after every UI edit. CI checks freshness with
+`--check`.
 
-```text
-maturity: stage-0-idea | stage-1-prototype | stage-2-active | stage-3-multi-agent
+### Coordinate spaces
+
+The single largest source of bugs in this project. ezQuake reports HUD rects in
+**console pixels** (`vid_conwidth` × `vid_conheight`, e.g. 512×288) while the frame it
+renders is **physical** (e.g. 2560×1440), and the browser then draws that image at
+some third **display** width. `core/geometry.js` owns all three and is the only place
+allowed to convert between them.
+
+`vid_conwidth` and `vid_conheight` are independently configurable, so the horizontal
+and vertical ratios are **not** always equal. Anything positional must use
+`scaleFactors()` and apply `kx` and `ky` separately. A single-ratio shortcut is
+invisible at 512×288 on 2560×1440 — both ratios are 5 — and wrong for everyone else.
+It has caused two separate defects already.
+
+### Repository layout
+
+```
+hud_web_ui/          the editor
+  core/              pure logic — no DOM access, ever
+    bridge.js        HTTP client, token handling, save semantics
+    geometry.js      console ↔ physical ↔ display transforms
+    model.js         editor state derived from engine state
+  view/app.js        the only DOM writer
+  fixtures/          a real /state capture and frame, for offline work
+engine/
+  src/hud_web.c            transport: listener, HTTP parse, auth, routing, allowlist
+  src/hud_web_state.c      payload: /state, /frame.png, /fonts, /configs, /palette
+  src/libhud/              placement core extracted from hud.c, with tests
+  tools/                   the embedding script
+  engine-integration.patch changes to files ezQuake already has
+docs/PROTOCOL.md     the bridge contract; read before changing an endpoint
 ```
 
-Start at `stage-0-idea`. Promote only when the current process stops preserving
-context, safety, or evidence. The reusable methodology lives in
-`extras/docs/maturity-model.md`; copy it into `docs/` when a project needs the
-promotion ladder to be explicit.
+The engine-side files live under `engine/` because they are not a standalone program —
+they are files that belong in an ezQuake checkout.
 
-## The tiering system
+---
 
-Unpaid docs rot into lies. So most documents are opt-in. Only four files are
-alive from day one; everything else is created only when a project earns it.
+## Runbook
 
-### Tier 0 — the living core (always present)
+### Building it into ezQuake
 
-These four files are the heartbeat. If only these exist and stay current, the
-project is healthy. They ship in `docs/` ready to use.
+This repository is not buildable on its own. To get a working binary:
 
-```text
-AGENTS.md                    # the shared agent contract (includes the verification workflow)
-coder.md                     # tool-agnostic implementation role
-reviewer.md                  # tool-agnostic review role
-machine-learning-reviewer.md # specialized ML/data review layer, used only when relevant
-docs/current-stage.md        # the re-entry file — where are we, what's next, what NOT to do
-docs/findings-log.md         # what we tried and learned
-docs/decision-log.md         # forks taken and why
+```bash
+git clone https://github.com/QW-Group/ezquake-source
+cd ezquake-source
+
+# 1. Drop the bridge and the UI in.
+cp -r  /path/to/ez-hud/hud_web_ui        .
+cp     /path/to/ez-hud/engine/src/*.c    src/
+cp     /path/to/ez-hud/engine/src/*.h    src/
+cp -r  /path/to/ez-hud/engine/src/libhud src/
+cp     /path/to/ez-hud/engine/tools/*    tools/
+
+# 2. Apply the changes to files ezQuake already has.
+git am < /path/to/ez-hud/engine/engine-integration.patch
+
+# 3. Generate the baked-in UI, then build as normal.
+python3 tools/embed_hud_web_ui.py
+cmake --build build -j"$(nproc)"
 ```
 
-### Tier 1 — add when the project earns it
+The patch touches `hud.c` (adds `hud_reset_layout`), `cl_main.c` (calls
+`HUD_Web_Frame`), `image.c`/`image.h` (adds an in-memory PNG encoder), and several
+`hud_*.c` files that gained correct `HUD_NEEDS_POV` flags.
 
-Create these the moment they'd actually help — not before. Copy them from
-`extras/docs/` into `docs/`.
+### Running it
 
-```text
-docs/vision.md               # why this exists / north-star question (add once goal is non-obvious)
-docs/project-brief.md        # current hypothesis + first milestone
-docs/success-criteria.md     # what counts as success / what doesn't
-docs/scope.md                # in-scope, non-goals, tempting distractions
-docs/roadmap.md              # Mermaid stage map (add when there are >2 stages)
-docs/open-questions.md       # unresolved questions table
-docs/risks-and-assumptions.md
+```
+hud_web 1
 ```
 
-Add `docs/success-criteria.md` as soon as you have any real "done" definition —
-the verification workflow (Hook 1 in `AGENTS.md`) depends on it.
+The engine prints `HUD bridge: editor at http://127.0.0.1:27700/?t=<token>`. Open it.
+The editor can only place elements the engine is actually drawing, so join a server or
+play a demo first — otherwise it correctly tells you there is no HUD to edit.
 
-### Tier 2 — add only for real engineering / data work
+| cvar | default | what it does |
+|---|---|---|
+| `hud_web` | `0` | opt-in; `0` closes the listener and invalidates the token |
+| `hud_web_port` | `27700` | loopback port |
+| `hud_web_frame_interval` | `250` | minimum ms between frame captures, shared across clients |
 
-```text
-docs/technical-context.md       # source maps, architecture, key files
-docs/environment.md             # runbook: OS, paths, deps, commands, ports, secrets policy
-docs/data-and-inputs.md         # datasets, APIs, media, validation rules
-docs/testing-and-validation.md  # test commands, expected outputs, regression tests
-docs/maturity-model.md          # copy from extras when process promotion matters
-docs/test-cases-and-evidence.md # copy when durable test cases are needed
-docs/agent-web-testing.md       # copy for active web apps
+`hud_web*` cvars are deliberately **not** settable through the bridge itself.
+
+### After changing the UI
+
+```bash
+python3 tools/embed_hud_web_ui.py          # regenerate
+python3 tools/embed_hud_web_ui.py --check  # what CI runs; fails if stale
 ```
 
-> **No number prefixes.** Files are named by meaning, not order. Renumbering when
-> you insert a doc is pure friction, and worse — agent instructions that hardcode
-> `docs/02_...` paths silently break the day you renumber. Reference docs by their
-> stable name.
+Forgetting this is the most common way to be confused by a change that appears to do
+nothing: the engine serves the *generated* file, not your edited source.
 
-## How to start a new project
+### Testing
 
-When creating a new project from this template, **do not start coding**, and
-**do not create all the docs.** Start at Tier 0:
-
-1. `AGENTS.md` ships as-is — it includes the verification workflow.
-2. `coder.md` / `reviewer.md` define reusable roles; `CLAUDE.md` / `codex.md`
-   are thin wrappers, already in place. `machine-learning-reviewer.md` is a
-   specialized review layer for ML/data-impacting PRs.
-3. Fill in `docs/current-stage.md` — goal, next step, `status: active`,
-   `maturity: stage-0-idea`, `last-verified: today`.
-4. `docs/findings-log.md` and `docs/decision-log.md` are empty and ready.
-
-Then copy docs from `extras/` into `docs/` **only when the project earns them**
-(see `extras/README.md`). Create the first issue (experiment or research
-template) and give the agent:
-
-```text
-Read AGENTS.md and prompts/INITIAL_AGENT_PROMPT.md.
-Then perform the current mission from docs/current-stage.md.
+```bash
+make -C src/libhud/tests check     # placement core, 30 checks
+node --check hud_web_ui/core/*.js  # syntax
 ```
 
-## Repository structure
+The pure modules in `core/` can be exercised directly against
+`hud_web_ui/fixtures/state.json`, a real capture from a live engine — no browser and
+no running game required. Most logic bugs are catchable this way.
 
-```text
-.
-├── README.md
-├── AGENTS.md
-├── coder.md                   # tool-agnostic implementation role
-├── reviewer.md                # tool-agnostic review role
-├── machine-learning-reviewer.md # specialized ML/data review layer
-├── CLAUDE.md                 # thin wrapper -> AGENTS.md
-├── codex.md                  # thin wrapper -> AGENTS.md
-├── agents/                   # reusable autonomous role cards
-├── docs/                     # Tier 0 docs, present and ready
-│   ├── current-stage.md
-│   ├── findings-log.md
-│   └── decision-log.md
-├── extras/                   # opt-in Tier 1 + Tier 2 doc templates
-│   ├── README.md
-│   └── docs/
-├── prompts/                  # lifecycle prompts, usable as-is
-│   ├── INITIAL_AGENT_PROMPT.md
-│   ├── CONTINUE_PROJECT_PROMPT.md
-│   ├── REVIEW_PROJECT_STATE_PROMPT.md
-│   └── END_SESSION_PROMPT.md
-├── .github/
-│   ├── ISSUE_TEMPLATE/
-│   ├── pull_request_template.md
-│   └── workflows/            # docs-guard + markdown-check (warn-only)
-├── experiments/
-├── scripts/
-└── src/
-```
+### End-to-end testing, and one hard-won warning
 
-## Autonomous agent cards
+Driving the real thing needs a running engine and a browser. **Use Playwright, not
+hand-rolled CDP.** On at least one test host, raw `Input.dispatchMouseEvent` delivers
+nothing to the page while keyboard events work fine and CDP reports no error — a
+hand-rolled harness will confidently tell you the product is broken when it is not.
+That cost three sessions of debugging a bug that did not exist.
 
-The root `coder.md` and `reviewer.md` files are the default role contracts for
-normal projects. They are intentionally tool-agnostic: the owner can assign
-Claude, Codex, GLM, ChatGPT, or another capable agent to either role.
+Whatever harness you use, **run a control interaction first**: click something known
+to work and assert it took effect. If the control fails, every negative result in that
+run is worthless.
 
-For ML/data-heavy projects, `machine-learning-reviewer.md` adds a stricter
-evidence-chain review layer for data provenance, labels, splits, baselines,
-metric meaning, train/serve parity, and claims that need raw artifacts behind
-them. It is applied inside the normal review gate rather than as a separate
-workflow.
+Run headless under Xvfb rather than a real display server where you can — a display
+that vanishes mid-run looks exactly like an engine crash in whatever you just changed.
 
-The `agents/` directory contains heavier reusable role cards for unattended
-AI-assisted development loops:
+### Validating a change
 
-- `agents/phasekeeper.md` — developer role for one roadmap stage per PR.
-- `agents/code-sentinel.md` — reviewer/hardener role for anti-slop and roadmap alignment.
-- `agents/merge-warden.md` — merge-gate role for reviewed, phase-correct PRs.
+Match the evidence to the change, and do not report "done" without it:
 
-Project-specific automations should point to these canonical cards and add only
-the local repository path, active stage, PR/branch context, validation commands,
-and temporary exceptions. Do not copy the full cards into project repos or notes
-unless the project intentionally forks the behavior.
+- **Bridge or engine code** — build it, run it, exercise the endpoint. Security
+  changes need the negative case proven too: assert that what should be refused *is*
+  refused, not merely that the allowed path still works.
+- **`core/` logic** — the pure tests, against the fixture.
+- **Anything visual** — screenshots of the affected states, at a console size whose
+  aspect ratio differs from the screen's. Equal ratios hide an entire class of bug.
 
-## Test cases and web testing
+---
 
-The template includes issue templates for user stories, bugs, experiments,
-research, decisions, and durable test cases. For early spikes, ignore what you do
-not need. For active projects, use:
+## Known gaps
 
-- `extras/docs/test-cases-and-evidence.md` for durable test cases and logged
-  test runs.
-- `extras/docs/agent-web-testing.md` for browser-based agent validation.
+Honest list; none believed to be dangerous.
 
-The reusable rule is not "every repo gets all process immediately." The reusable
-rule is "every repo has the same promotion path when it grows up."
+- The frame rate limiter has never been observed to fire. On a software renderer a
+  capture takes longer than the interval, so it never binds. Confirming it needs a GPU
+  host, and `250` may be too low to be meaningful there.
+- Percentage-sized elements (`radar` ships `width "30%"`) are correctly refused a
+  corner drag, but that path is only unit-tested — the test host's config overrides
+  `radar` to absolute values.
+- `hud_export ..` writes a file literally named `..cfg` inside the configs directory.
+  Contained junk; traversal itself was tested and does not escape.
+- A placement cycle (`group1` → `group2` → `group1`) leaves both elements undrawable.
+  The engine stays stable, the tree still lists them, and it is recoverable — but the
+  place picker will happily let you create one.
+- `drawn` means "the engine laid this element out this frame", not "you can see it".
+  `HUD_PrepareDraw` stamps its sequence before the caller draws any pixels, and some
+  elements call it before their own visibility condition. Making it stronger would
+  need every draw function to signal completion.
 
-## Parking & abandoning projects
+## License
 
-A template for an owner who starts many projects needs an explicit *off-ramp*, or
-dead repos masquerade as alive.
-
-- Every `docs/current-stage.md` carries a `status:` field — `active`, `parked`,
-  or `abandoned`.
-- **Parked:** still intends to return. Set `status: parked`, and write one line:
-  what would revive this and what's the first step when it does.
-- **Abandoned:** not coming back. Set `status: abandoned`, write one line on
-  *why*, and archive the GitHub repo. Don't delete — findings/decisions may
-  inform future work.
-- Use the `status:parked` / `status:abandoned` labels so a glance across repos
-  shows what's actually alive.
-
-## Suggested GitHub setup (not created automatically)
-
-These are recommendations, not created by this template — set them up per project
-as needed. Keep the set small; too many labels create noise.
-
-- **Stage labels:** `stage:discovery`, `stage:lab`, `stage:build`,
-  `stage:validation`, `stage:decision`
-- **Type labels:** `type:research`, `type:experiment`, `type:bug`, `type:docs`,
-  `type:decision`, `type:feature`, `type:story`, `type:test-case`
-- **Status labels:** `status:inbox`, `status:next`, `status:active`,
-  `status:blocked`, `status:needs-human`, `status:parked`, `status:abandoned`,
-  `status:done`
-- **Risk labels:** `risk:scope-creep`, `risk:unclear-goal`,
-  `risk:technical-unknown`, `risk:stale-docs`
-- **Milestones (phases, not dates):** `M0 - Understand`, `M1 - Prove Loop`,
-  `M2 - Baseline`, `M3 - First Useful Version`, `M4 - Validate`,
-  `M5 - Decide Next Track`
-- **Project board (one simple board):** Inbox, Next, Doing, Blocked, Done. Do not
-  create a complex board — complexity becomes a new project.
-
-## The most important file
-
-```text
-docs/current-stage.md
-```
-
-It always answers: where are we (and is `last-verified` recent?), why does this
-matter, what is the next smallest useful step, what should we not do right now,
-what happened last time, is this project active/parked/abandoned, and which docs
-need updates. This is the re-entry point after interruptions — **read it, then
-verify it against the live repo before trusting it.**
-
-## Operating rule
-
-Every session should make the project easier to resume. If an agent writes code
-but leaves the project harder to understand, the session has failed. The final
-output of every meaningful session should include code or artifact changes,
-evidence (the actual output, not a claim that it works), updated documentation,
-and the next smallest useful step.
+GPL-2.0, matching ezQuake. This contains and derives from ezQuake source.

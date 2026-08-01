@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HUD Editor — ezQuake</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="ui.css">
+</head>
+<body>
+<svg class="sprite" aria-hidden="true">
+  <defs>
+    <symbol id="i-shown" viewBox="0 0 16 16">
+      <path d="M1.5 8s2.4-4 6.5-4 6.5 4 6.5 4-2.4 4-6.5 4S1.5 8 1.5 8Z" fill="none" stroke="currentColor" stroke-width="1.3"/>
+      <circle cx="8" cy="8" r="1.9" fill="none" stroke="currentColor" stroke-width="1.3"/>
+    </symbol>
+    <symbol id="i-hidden" viewBox="0 0 16 16">
+      <path d="M2.6 4.6C1.9 5.5 1.5 8 1.5 8s2.4 4 6.5 4c1.2 0 2.2-.3 3.1-.8" fill="none" stroke="currentColor" stroke-width="1.3"/>
+      <path d="M6.3 4.2A6.6 6.6 0 0 1 8 4c4.1 0 6.5 4 6.5 4a11 11 0 0 1-1.9 2.2" fill="none" stroke="currentColor" stroke-width="1.3"/>
+      <path d="M2.5 2.5l11 11" fill="none" stroke="currentColor" stroke-width="1.3"/>
+    </symbol>
+    <symbol id="i-unplaced" viewBox="0 0 16 16">
+      <circle cx="8" cy="8" r="4.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 2"/>
+    </symbol>
+  </defs>
+</svg>
+
+<header class="bar">
+  <h1>HUD Editor</h1>
+  <p class="bar__engine" id="engine" aria-live="off"></p>
+  <div class="bar__spacer"></div>
+  <dl class="readout" id="readout"></dl>
+  <label class="toggle">
+    <input type="checkbox" id="chrome" checked>
+    <span>Overlay</span>
+  </label>
+  <button class="btn" type="button" id="save-open">Save…</button>
+  <p class="status" id="status" role="status">Connecting…</p>
+</header>
+
+<main class="shell">
+  <section class="panel panel--tree" aria-label="HUD elements">
+    <div class="panel__head">
+      <input id="filter" type="search" placeholder="Filter elements" autocomplete="off" spellcheck="false">
+      <label class="toggle toggle--sm">
+        <input type="checkbox" id="show-hidden" checked>
+        <span>Hidden</span>
+      </label>
+      <label class="toggle toggle--sm">
+        <input type="checkbox" id="show-spectator" checked>
+        <span>Spectator</span>
+      </label>
+    </div>
+    <ul class="tree" id="tree" role="listbox" aria-label="HUD elements" tabindex="0"></ul>
+    <p class="panel__foot" id="tree-count"></p>
+  </section>
+
+  <section class="stage" aria-label="Live engine view">
+    <div class="stage__frame" id="stage">
+      <!-- Transparent until the first engine frame arrives, so connecting never
+           shows a broken-image box. -->
+      <img id="frame" alt="Live ezQuake render" draggable="false"
+           src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">
+      <div class="overlay" id="overlay"></div>
+      <div class="stage__empty" id="empty" hidden>
+        <p class="stage__empty-title" id="empty-title">ezQuake isn't drawing a HUD yet</p>
+        <p id="empty-body">The editor can only place elements the engine is actually rendering. Start a demo or join a server, and they'll appear here.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel panel--inspect" aria-label="Properties">
+    <div id="hudmodes"></div>
+    <div id="groups"></div>
+    <div id="fonts"></div>
+    <div id="inspector"></div>
+  </section>
+</main>
+
+<dialog class="save" id="save-dialog" aria-labelledby="save-title"></dialog>
+<dialog class="save" id="reset-dialog" aria-labelledby="reset-title"></dialog>
+
+<script type="module" src="view/app.js"></script>
+</body>
+</html>
