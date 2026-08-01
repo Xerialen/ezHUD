@@ -53,7 +53,7 @@ if [[ -n "${EZHUD_USE_DISPLAY:-}" ]]; then
 	# Falling back keeps the nightly meaningful instead of failing on a missing
 	# X server, and says which mode it actually used.
 	if DISPLAY="$EZHUD_USE_DISPLAY" timeout 20 xdpyinfo >/dev/null 2>&1; then
-		echo "tier 4: display ${EZHUD_USE_DISPLAY}, GALLIUM_DRIVER=${GALLIUM_DRIVER:-default}"
+		echo "tier 4: display ${EZHUD_USE_DISPLAY}, GALLIUM_DRIVER=${GALLIUM_DRIVER:-default}" >&2
 		export DISPLAY="$EZHUD_USE_DISPLAY"
 		exec bash "$repo_dir/tools/tests/tier4_under_xvfb.sh"
 	fi
