@@ -13,14 +13,13 @@ export const Status = {
 	DENIED: 'denied',  // token rejected; not recoverable by retrying
 };
 
-const PLACEMENT_KEYS = new Set(['pos_x', 'pos_y', 'place', 'align_x', 'align_y', 'order', 'frame']);
-
 // The nine screen regions an element can sit in. Anything else in `place` names
 // another element, optionally prefixed with '@' to anchor inside its frame
 // rather than outside it (hud.c HUD_FindPlace).
 // Deliberately ordered by how they are reasoned about, not alphabetically:
 // where it sits, then how it aligns there, then the nudge.
 const PLACEMENT_ORDER = ['place', 'align_x', 'align_y', 'pos_x', 'pos_y', 'order', 'frame'];
+const PLACEMENT_KEYS = new Set(PLACEMENT_ORDER);
 
 // hud.c align_strings_x / align_strings_y
 export const ALIGN_X = ['left', 'center', 'right', 'before', 'after'];
@@ -299,8 +298,10 @@ export class Model {
 		this.version++;
 		this.state = state;
 		this.error = null;
-		const anyDrawn = state.elements.some((e) => e.drawn);
-		this.status = anyDrawn ? Status.LIVE : Status.IDLE;
+		// A rect IS "the engine laid this out this frame"; the bridge sends null when
+		// it did not, and never a guess. There is no separate `drawn` flag to disagree
+		// with.
+		this.status = state.elements.some((e) => e.rect) ? Status.LIVE : Status.IDLE;
 		// A selection can outlive a state refresh; keep it only if it still exists.
 		if (this.selected && !state.elements.some((e) => e.name === this.selected)) {
 			this.selected = null;
@@ -335,8 +336,9 @@ export class Model {
 	}
 
 	// Why does this parameter currently do nothing? Returning the reason beats
-	// presenting an inert control as though it were live.
-	inertReason(element, suffix) {
+	// presenting an inert control as though it were live. Deliberately not
+	// per-element: every reason here is a property of the loaded font.
+	inertReason(suffix) {
 		if (suffix !== 'proportional') {
 			return null;
 		}
@@ -513,10 +515,6 @@ export class Model {
 		return out.sort((a, b) => a.name.localeCompare(b.name));
 	}
 
-	get resetValueCount() {
-		return this.resetChanges.reduce((n, e) => n + e.fields.length, 0);
-	}
-
 	// ---- resizing ----------------------------------------------------------
 
 	#params(element) {
@@ -677,7 +675,7 @@ export class Model {
 			return '';
 		}
 		return JSON.stringify([
-			e.cvars, e.place, e.align_x, e.align_y, e.pos_x, e.pos_y, e.shown, e.drawn, e.parent,
+			e.cvars, e.place, e.align_x, e.align_y, e.pos_x, e.pos_y, e.shown, !!e.rect, e.parent,
 		]);
 	}
 
@@ -685,7 +683,7 @@ export class Model {
 	// not a reason to rebuild it and interrupt a drag.
 	get treeFingerprint() {
 		return this.treeRows
-			.map(({ element: e, depth }) => `${e.name}:${depth}:${e.shown ? 1 : 0}:${e.drawn ? 1 : 0}:${e.parent ?? ''}`)
+			.map(({ element: e, depth }) => `${e.name}:${depth}:${e.shown ? 1 : 0}:${e.rect ? 1 : 0}:${e.parent ?? ''}`)
 			.join('|');
 	}
 
@@ -769,7 +767,6 @@ export class Model {
 			.filter((e) => !needle ||
 				e.name.toLowerCase().includes(needle) ||
 				(e.description ?? '').toLowerCase().includes(needle))
-			.slice()
 			.sort((a, b) => a.name.localeCompare(b.name));
 	}
 
@@ -796,9 +793,9 @@ export class Model {
 			.filter((n) => n !== forElement)
 			.sort();
 		return [
-			...PLACE_REGIONS.map((r) => ({ value: r, label: r, kind: 'region' })),
-			...anchors.map((n) => ({ value: n, label: `${n} — outside frame`, kind: 'anchor' })),
-			...anchors.map((n) => ({ value: `@${n}`, label: `@${n} — inside frame`, kind: 'anchor' })),
+			...PLACE_REGIONS.map((r) => ({ value: r, label: r })),
+			...anchors.map((n) => ({ value: n, label: `${n} — outside frame` })),
+			...anchors.map((n) => ({ value: `@${n}`, label: `@${n} — inside frame` })),
 		];
 	}
 

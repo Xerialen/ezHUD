@@ -6,6 +6,7 @@ check: test_place
 	./test_place
 	@# The editor is compiled in, so a UI edit that skips the generator ships a
 	@# binary serving the previous version -- silently, and only in release.
+	python3 ../../../tools/embed_hud_web_ui.py --check
 clean:
 	rm -f test_place
 .PHONY: check clean

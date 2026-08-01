@@ -6,11 +6,16 @@
 const TOKEN_KEY = 't';
 
 export class BridgeError extends Error {
-	constructor(message, { status = 0, recoverable = true } = {}) {
+	constructor(message, { status = 0 } = {}) {
 		super(message);
 		this.name = 'BridgeError';
 		this.status = status;
-		this.recoverable = recoverable;
+	}
+
+	// Anything thrown at a bridge call site, as a BridgeError. Only 403 is
+	// unrecoverable, and `status` already carries that.
+	static from(err) {
+		return err instanceof BridgeError ? err : new BridgeError(String(err));
 	}
 }
 
@@ -45,10 +50,10 @@ export class Bridge {
 		} catch (cause) {
 			// fetch only rejects on transport failure, which here means the engine
 			// went away rather than that the request was bad.
-			throw new BridgeError('Lost contact with ezQuake', { recoverable: true, cause });
+			throw new BridgeError('Lost contact with ezQuake', { cause });
 		}
 		if (response.status === 403) {
-			throw new BridgeError('This link is no longer valid', { status: 403, recoverable: false });
+			throw new BridgeError('This link is no longer valid', { status: 403 });
 		}
 		if (!response.ok) {
 			throw new BridgeError(`Engine returned ${response.status}`, { status: response.status });
@@ -121,16 +126,6 @@ export class Bridge {
 	// so the `set` form silently fails and leaves the old value in place.
 	loadFace(name) {
 		return this.send(`fontload ${name || 'none'}`);
-	}
-
-	// Bake-time options (capitalize, outline, gradients) are only applied when the
-	// face is created, and none of them have an OnChange. Reloading is the whole
-	// reason the user does not have to know that.
-	async setBakeOption(name, value, facepath) {
-		await this.setCvar(name, value);
-		if (facepath) {
-			await this.loadFace(facepath);
-		}
 	}
 
 	// Cache-busted so the browser cannot hand back a stale render after an edit.

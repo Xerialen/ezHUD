@@ -1,5 +1,19 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4e0e2f5..1b947dd 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -564,6 +564,9 @@ set(common_hud
+         ${SOURCE_DIR}/hud_scores.c
+         ${SOURCE_DIR}/hud_speed.c
+         ${SOURCE_DIR}/hud_teaminfo.c
++        ${SOURCE_DIR}/hud_web.c
++        ${SOURCE_DIR}/hud_web_state.c
++        ${SOURCE_DIR}/hud_web_assets.c
+         ${SOURCE_DIR}/hud_tracking.c
+         ${SOURCE_DIR}/hud_weapon_stats.c
+         ${common_hud_headers}
 diff --git a/src/cl_main.c b/src/cl_main.c
-index b6328b9a..0ee256eb 100644
+index b6328b9..0ee256e 100644
 --- a/src/cl_main.c
 +++ b/src/cl_main.c
 @@ -33,6 +33,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
@@ -35,7 +49,7 @@ index b6328b9a..0ee256eb 100644
  	SList_Shutdown();
  	CDAudio_Shutdown();
 diff --git a/src/fonts.c b/src/fonts.c
-index 3cb7e874..54f907c7 100644
+index 3cb7e87..54f907c 100644
 --- a/src/fonts.c
 +++ b/src/fonts.c
 @@ -396,6 +396,16 @@ static qbool FontCreate(int grouping, const char* userpath)
@@ -56,7 +70,7 @@ index 3cb7e874..54f907c7 100644
  {
  	if (!proportional || !R_TextureReferenceIsValid(proportional_fonts[0].master)) {
 diff --git a/src/fonts.h b/src/fonts.h
-index ed88668a..0ddecd37 100644
+index ed88668..0ddecd3 100644
 --- a/src/fonts.h
 +++ b/src/fonts.h
 @@ -5,8 +5,16 @@
@@ -77,7 +91,7 @@ index ed88668a..0ddecd37 100644
  
  qbool FontAlterCharCoordsWide(float* x, float* y, wchar ch, qbool bigchar, float scale, qbool proportional);
 diff --git a/src/hud.c b/src/hud.c
-index 38e21db9..426d34d5 100644
+index 38e21db..426d34d 100644
 --- a/src/hud.c
 +++ b/src/hud.c
 @@ -796,6 +796,46 @@ void HUD_Recalculate(void)
@@ -136,7 +150,7 @@ index 38e21db9..426d34d5 100644
  	// Variables.
  	Cvar_SetCurrentGroup(CVAR_GROUP_HUD);
 diff --git a/src/hud.h b/src/hud.h
-index 2d74aa3b..9d2ddedc 100644
+index 2d74aa3..9d2dded 100644
 --- a/src/hud.h
 +++ b/src/hud.h
 @@ -36,6 +36,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
@@ -149,7 +163,7 @@ index 2d74aa3b..9d2ddedc 100644
  #define HUD_INVENTORY          (HUD_NO_GROW)   // aply for sbar elements
  
 diff --git a/src/hud_ammo.c b/src/hud_ammo.c
-index 415a8e32..d6cbb057 100644
+index 415a8e3..d6cbb05 100644
 --- a/src/hud_ammo.c
 +++ b/src/hud_ammo.c
 @@ -438,7 +438,7 @@ void Ammo_HudInit(void)
@@ -238,7 +252,7 @@ index 415a8e32..d6cbb057 100644
  				 "style", "2",
  				 "scale", "1",
 diff --git a/src/hud_armor.c b/src/hud_armor.c
-index 53a1f84f..f674f9ec 100644
+index 53a1f84..f674f9e 100644
 --- a/src/hud_armor.c
 +++ b/src/hud_armor.c
 @@ -228,7 +228,7 @@ void Armor_HudInit(void)
@@ -269,7 +283,7 @@ index 53a1f84f..f674f9ec 100644
  		"height", "16",
  		"width", "64",
 diff --git a/src/hud_face.c b/src/hud_face.c
-index b5f81582..ec445777 100644
+index b5f8158..ec44577 100644
 --- a/src/hud_face.c
 +++ b/src/hud_face.c
 @@ -84,7 +84,9 @@ void Face_HudInit(void)
@@ -284,7 +298,7 @@ index b5f81582..ec445777 100644
  		"scale", "1",
  		NULL
 diff --git a/src/hud_guns.c b/src/hud_guns.c
-index 51191a11..350cb6a3 100644
+index 51191a1..350cb6a 100644
 --- a/src/hud_guns.c
 +++ b/src/hud_guns.c
 @@ -356,7 +356,7 @@ void Guns_HudInit(void)
@@ -360,7 +374,7 @@ index 51191a11..350cb6a3 100644
  		"wide", "0",
  		"style", "0",
 diff --git a/src/hud_health.c b/src/hud_health.c
-index 79198e4e..1b92fc08 100644
+index 79198e4..1b92fc0 100644
 --- a/src/hud_health.c
 +++ b/src/hud_health.c
 @@ -118,7 +118,7 @@ void Health_HudInit(void)
@@ -382,7 +396,7 @@ index 79198e4e..1b92fc08 100644
  		"style", "0",
  		"scale", "1",
 diff --git a/src/hud_items.c b/src/hud_items.c
-index abdef265..8bb4fe8d 100644
+index abdef26..8bb4fe8 100644
 --- a/src/hud_items.c
 +++ b/src/hud_items.c
 @@ -243,7 +243,7 @@ void Items_HudInit(void)
@@ -476,7 +490,7 @@ index abdef265..8bb4fe8d 100644
  		"style", "0",
  		"scale", "1",
 diff --git a/src/hud_tracking.c b/src/hud_tracking.c
-index 333a575e..16193aff 100644
+index 333a575..16193af 100644
 --- a/src/hud_tracking.c
 +++ b/src/hud_tracking.c
 @@ -66,7 +66,7 @@ void Tracking_HudInit(void)
@@ -489,7 +503,7 @@ index 333a575e..16193aff 100644
  		"format", "\xD4\xF2\xE1\xE3\xEB\xE9\xEE\xE7\xBA %t %n, \xCA\xD5\xCD\xD0 for next", //"Tracking: team name, JUMP for next", "Tracking:" and "JUMP" are brown. default: "Tracking %t %n, [JUMP] for next"
  		"scale", "1", "proportional", "0",
 diff --git a/src/image.c b/src/image.c
-index 904a0fa4..d3b169a8 100644
+index 904a0fa..d3b169a 100644
 --- a/src/image.c
 +++ b/src/image.c
 @@ -921,6 +921,93 @@ byte *Image_LoadPNG (vfsfile_t *fin, const char *filename, int matchwidth, int m
@@ -587,7 +601,7 @@ index 904a0fa4..d3b169a8 100644
  {
  	char name[MAX_PATH];
 diff --git a/src/image.h b/src/image.h
-index 27bf3219..d68dfbf4 100644
+index 27bf321..d68dfbf 100644
 --- a/src/image.h
 +++ b/src/image.h
 @@ -54,6 +54,9 @@ byte *Image_LoadJPEG(vfsfile_t *v, const char *path, int matchwidth, int matchhe

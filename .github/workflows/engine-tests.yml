@@ -1,0 +1,126 @@
+name: tests (engine, self-hosted)
+
+# These two tiers need a real ezQuake binary, a real Quake tree and a GPU, so they
+# run on the maintainer's own machines. That makes the trigger rules a security
+# boundary, not a preference:
+#
+#   * `same_repo` below refuses anything originating from a fork, so a pull request
+#     from outside can never execute on this hardware even if it somehow gets
+#     opened. Repository interaction limits already restrict opening PRs to
+#     collaborators; this is the second lock, because one setting being changed
+#     should not be enough.
+#   * Nothing here uses pull_request_target, which is the one trigger that would
+#     hand an untrusted branch both secrets and write scope.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Tier 4 is flaky by nature, so it gets a nightly run to surface that before a
+    # release rather than during one.
+    - cron: '17 3 * * *'
+
+concurrency:
+  group: engine-tests-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  same_repo:
+    name: gate
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+    steps:
+      - id: check
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] \
+             && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Fork pull request: engine tiers skipped, they never run on self-hosted hardware."
+          else
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  tier2-engine:
+    name: tier 2 - bridge security contract
+    needs: same_repo
+    if: needs.same_repo.outputs.allowed == 'true'
+    runs-on: [self-hosted, linux, ezhud]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # ez-hud is not buildable on its own: it is the files that belong in an
+      # ezQuake checkout. Assemble one exactly the way the README runbook tells a
+      # user to, so CI proves the runbook as a side effect.
+      - name: Assemble an ezQuake checkout from this repo
+        shell: bash
+        run: |
+          WORK="$RUNNER_TEMP/ezq"
+          rm -rf "$WORK"
+          git clone -q --depth 1 https://github.com/QW-Group/ezquake-source "$WORK"
+          mkdir -p "$WORK/tools"          # upstream has no tools/ directory
+          cp -r hud_web_ui                "$WORK/"
+          cp    engine/src/*.c            "$WORK/src/"
+          cp    engine/src/*.h            "$WORK/src/"
+          cp -r engine/src/libhud         "$WORK/src/"
+          cp    engine/tools/*.py         "$WORK/tools/"
+          cp -r tools/tests               "$WORK/tools/"
+          cp    package.json              "$WORK/"
+          git -C "$WORK" apply "$PWD/engine/engine-integration.diff"
+          python3 "$WORK/tools/embed_hud_web_ui.py"
+          echo "EZQ_WORK=$WORK" >> "$GITHUB_ENV"
+
+      - name: Build
+        shell: bash
+        run: |
+          export PATH="/usr/lib/ccache:$PATH" CCACHE_DIR="$HOME/.ccache"
+          cmake -S "$EZQ_WORK" -B "$EZQ_WORK/build" -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          cmake --build "$EZQ_WORK/build" -j"$(nproc)"
+
+      # An isolated basedir. Never the owner's own Quake install, and never the
+      # bench's shared serverdirs, which other workstreams contend for.
+      - name: Bridge security contract
+        shell: bash
+        run: |
+          export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 22 >/dev/null
+          LAB="$RUNNER_TEMP/lab"
+          mkdir -p "$LAB/id1" "$LAB/ezquake/configs"
+          cp /home/xerial/kbot/serverdir/id1/pak0.pak "$LAB/id1/"
+          cd "$EZQ_WORK"
+          EZQUAKE_BIN="$EZQ_WORK/build/ezquake-linux-x86_64" \
+          EZQUAKE_BASEDIR="$LAB" HUD_WEB_TEST_PORT=27851 \
+            npm run --silent test:tier2:engine
+
+  tier4:
+    name: tier 4 - full end-to-end (GPU)
+    needs: same_repo
+    if: needs.same_repo.outputs.allowed == 'true'
+    runs-on: [self-hosted, ezhud-gpu]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the person-mimicking flow against a real engine
+        shell: bash
+        run: |
+          export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh" 2>/dev/null || true
+          nvm use 22 >/dev/null 2>&1 || true
+          npm install --no-audit --no-fund
+          npx playwright install chromium
+          export EZQUAKE_BIN="${EZHUD_ENGINE:?the GPU runner must set EZHUD_ENGINE}"
+          export EZQUAKE_BASEDIR="${EZHUD_LAB:?the GPU runner must set EZHUD_LAB}"
+          export EZQUAKE_TEST_DEMO="${EZHUD_DEMO:-demos/hudtest_src.mvd}"
+          export HUD_WEB_TEST_PORT=27852
+          export HUD_WEB_ARTIFACT_DIR="$RUNNER_TEMP/tier4-artifacts"
+          npm run --silent test:tier4
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tier4-screenshots
+          path: ${{ runner.temp }}/tier4-artifacts/
+          if-no-files-found: warn

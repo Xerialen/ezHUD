@@ -40,6 +40,12 @@ ezQuake's placement rules and inevitably drift from them.
  └──────────────────────────────────┘
 ```
 
+The bridge must be serviced **after** the frame has rendered. `/state` reports an
+element's rect only when its draw stamp matches the current screen-update count, so
+building the payload before the render makes every one of the 83 elements report
+`rect: null` — the editor answers, captures a frame, and draws no boxes at all. That
+mistake was made and reverted here; tier 4 is what caught it.
+
 ### The three boundaries that matter
 
 **Engine ↔ browser is a loopback HTTP bridge.** It binds `127.0.0.1` explicitly and
@@ -116,22 +122,30 @@ This repository is not buildable on its own. To get a working binary:
 git clone https://github.com/QW-Group/ezquake-source
 cd ezquake-source
 
-# 1. Drop the bridge and the UI in.
+# 1. Drop the bridge and the UI in. ezQuake has no tools/ of its own.
+mkdir -p tools
 cp -r  /path/to/ez-hud/hud_web_ui        .
 cp     /path/to/ez-hud/engine/src/*.c    src/
 cp     /path/to/ez-hud/engine/src/*.h    src/
 cp -r  /path/to/ez-hud/engine/src/libhud src/
-cp     /path/to/ez-hud/engine/tools/*    tools/
+cp     /path/to/ez-hud/engine/tools/*.py tools/
+cp -r  /path/to/ez-hud/tools/tests       tools/    # optional: the test suite
+cp     /path/to/ez-hud/package.json      .         # optional: its entry points
 
 # 2. Apply the changes to files ezQuake already has.
 git apply /path/to/ez-hud/engine/engine-integration.diff
 
 # 3. Generate the baked-in UI, then build as normal.
 python3 tools/embed_hud_web_ui.py
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc)"
 ```
 
-The patch touches `hud.c` (adds `hud_reset_layout`), `cl_main.c` (calls
+CI performs exactly these steps against a fresh upstream clone on every change, so
+the runbook is executable documentation rather than a description that drifts.
+
+The patch touches `CMakeLists.txt` (compiles the three bridge files), `hud.c` (adds
+`hud_reset_layout`), `cl_main.c` (calls
 `HUD_Web_Frame`), `image.c`/`image.h` (adds an in-memory PNG encoder), and several
 `hud_*.c` files that gained correct `HUD_NEEDS_POV` flags.
 
@@ -165,14 +179,32 @@ nothing: the engine serves the *generated* file, not your edited source.
 
 ### Testing
 
+Four tiers, split by determinism and cost. `docs/TESTING.md` is the full spec.
+
 ```bash
-make -C src/libhud/tests check     # placement core, 30 checks
-node --check hud_web_ui/core/*.js  # syntax
+npm run test:tier1        # placement core, editor logic, baked-UI freshness
+npm run test:tier2:js     # bridge client against a local HTTP stub
+npm run test:tier3        # the DOM, headless Chromium, against the fixture
+npm run test:tier2:engine # bridge security contract   (needs a built engine)
+npm run test:tier4        # full end-to-end            (needs an engine + a demo)
 ```
 
-The pure modules in `core/` can be exercised directly against
-`hud_web_ui/fixtures/state.json`, a real capture from a live engine — no browser and
-no running game required. Most logic bugs are catchable this way.
+The first three need nothing but Node and a browser, and run on every push and pull
+request. The last two need `EZQUAKE_BIN` and an isolated Quake tree; they exit `2`
+with a clear message rather than passing when those are absent.
+
+Tiers 1–3 lean on `hud_web_ui/fixtures/state.json`, a real capture from a live
+engine: 83 elements, 25 of them drawn, a 320×200 console on a 1280×720 framebuffer.
+Those dimensions are deliberate — the horizontal and vertical ratios are 4.0 and
+3.6, so any coordinate assertion fails the moment someone reintroduces a
+single-ratio shortcut. A square fixture would hide the largest class of bug in this
+project.
+
+Tier 2's engine half is where the security rules are enforced, and it tests the
+**negatives**: that `$` expansion is refused, that a name existing only as a user
+alias is refused, that a token stale after `hud_web 0` is refused, that `hud_web*`
+cannot be set through the bridge, and that `hud_export` cannot escape the configs
+directory. A change to the allowlist without a change here is incomplete.
 
 ### End-to-end testing, and one hard-won warning
 
@@ -206,21 +238,24 @@ Match the evidence to the change, and do not report "done" without it:
 
 Honest list; none believed to be dangerous.
 
-- The frame rate limiter has never been observed to fire. On a software renderer a
-  capture takes longer than the interval, so it never binds. Confirming it needs a GPU
-  host, and `250` may be too low to be meaningful there.
+- The frame rate limiter now has a test, but it only proves the 503 and its
+  `Retry-After`. On a software renderer a capture takes longer than the interval, so
+  the limiter never actually binds; `250` may be too low to be meaningful on a GPU.
 - Percentage-sized elements (`radar` ships `width "30%"`) are correctly refused a
-  corner drag, but that path is only unit-tested — the test host's config overrides
-  `radar` to absolute values.
+  corner drag. Tier 3 covers it against the fixture, but no live engine has been seen
+  to ship a percentage-sized element — the lab config overrides `radar` to absolute.
 - `hud_export ..` writes a file literally named `..cfg` inside the configs directory.
-  Contained junk; traversal itself was tested and does not escape.
+  Contained junk; traversal itself is tested and does not escape.
 - A placement cycle (`group1` → `group2` → `group1`) leaves both elements undrawable.
   The engine stays stable, the tree still lists them, and it is recoverable — but the
   place picker will happily let you create one.
-- `drawn` means "the engine laid this element out this frame", not "you can see it".
-  `HUD_PrepareDraw` stamps its sequence before the caller draws any pixels, and some
-  elements call it before their own visibility condition. Making it stronger would
-  need every draw function to signal completion.
+- A non-null `rect` means "the engine laid this element out this frame", not "you can
+  see it". `HUD_PrepareDraw` stamps its sequence before the caller draws any pixels,
+  and some elements call it before their own visibility condition. Making it stronger
+  would need every draw function to signal completion.
+- Neither test host has a working GPU: one had its card removed, the other renders
+  through llvmpipe under WSL. Everything is therefore verified on software GL, where
+  a capture costs most of a second instead of a few milliseconds.
 
 ## License
 

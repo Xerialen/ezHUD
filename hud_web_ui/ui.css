@@ -300,7 +300,6 @@ button:focus-visible,
 	overflow: hidden;
 }
 
-.overlay[hidden] { display: none; }
 
 .box {
 	position: absolute;
@@ -483,7 +482,6 @@ button:focus-visible,
 	background: rgba(0, 0, 0, 0.22);
 }
 
-.swatchpop[hidden] { display: none; }
 
 .swatchpop__row {
 	display: grid;
@@ -603,7 +601,6 @@ button:focus-visible,
 .font-state[data-warn="true"] { color: var(--warn); }
 
 /* Anchored elements read as belonging to their container. */
-.tree__row[data-depth="0"] { }
 .tree__row[data-parent="true"] .tree__name { font-weight: 600; }
 .tree__row[data-depth]:not([data-depth="0"]) .tree__name::before {
 	content: "└ ";
@@ -832,7 +829,6 @@ button:focus-visible,
 	position: absolute;
 	width: 9px;
 	height: 9px;
-	box-sizing: border-box;
 	border: 1px solid var(--accent-ink);
 	background: var(--accent);
 	border-radius: 2px;

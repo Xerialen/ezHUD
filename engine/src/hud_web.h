@@ -40,9 +40,8 @@ void HUD_Web_Frame(void);   /* per-frame service; call next to Sys_ReadIPC() */
  * hud->lx/ly/lw/lh from the last frame it drew the element, never recomputed. */
 char *HUD_Web_StateJSON(size_t *out_len);
 
-/* Current framebuffer as PNG. `scale` is reserved for downsampling; v0 captures
- * at native size and lets the UI scale for display, since this is loopback only. */
-byte *HUD_Web_CapturePNG(float scale, size_t *out_len);
+/* Current framebuffer as PNG, at native size; the UI scales for display. */
+byte *HUD_Web_CapturePNG(size_t *out_len);
 
 /* Fonts the user can pick from, plus whether the current one actually loaded. */
 char *HUD_Web_FontsJSON(size_t *out_len);

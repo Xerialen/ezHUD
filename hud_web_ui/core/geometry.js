@@ -18,12 +18,6 @@ export function scaleFactors(screen, physical) {
 	return { kx, ky };
 }
 
-// Kept for callers that genuinely want one number (the readout, and the transfer
-// ratio for a uniform scale cvar). Anything positional must use scaleFactors.
-export function scaleFactor(screen, physical) {
-	return scaleFactors(screen, physical).kx;
-}
-
 // Console rect -> a rect in the frame image's own pixel space.
 export function consoleToFrame(rect, screen, physical) {
 	const { kx, ky } = scaleFactors(screen, physical);

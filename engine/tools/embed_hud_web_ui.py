@@ -29,12 +29,12 @@ SOURCES = [
     "view/app.js",
 ]
 
+# One entry per suffix in SOURCES. A new asset type must add its own here, and
+# will fail loudly on the KeyError below rather than shipping as octet-stream.
 CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
-    ".json": "application/json",
-    ".png": "image/png",
     ".svg": "image/svg+xml",
 }
 
@@ -112,7 +112,29 @@ def generate(ui_dir):
 	return NULL;
 }
 """)
-    return "".join(out)
+    return "".join(out), total
+
+
+def locate():
+    """Find hud_web_ui/ and where the generated file belongs.
+
+    One copy of this script serves two layouts: `tools/` beside `hud_web_ui/` and
+    `src/` in an ezQuake checkout, and `engine/tools/` in the ez-hud repository,
+    where `hud_web_ui/` sits at the root and the engine files live under `engine/`.
+    Search upward for the UI rather than assuming a fixed depth, so neither repo
+    needs its own edited copy to drift from the other.
+    """
+    here = pathlib.Path(__file__).resolve()
+    for base in here.parents:
+        ui = base / "hud_web_ui"
+        if not ui.is_dir():
+            continue
+        for src in (base / "src", base / "engine" / "src"):
+            if src.is_dir():
+                return ui, src / "hud_web_assets.c"
+        raise SystemExit(
+            "found %s but no src/ or engine/src/ beside it" % ui)
+    raise SystemExit("cannot locate hud_web_ui/ above %s" % here)
 
 
 def main():
@@ -121,22 +143,21 @@ def main():
                         help="fail if the committed file is stale instead of rewriting it")
     args = parser.parse_args()
 
-    root = pathlib.Path(__file__).resolve().parent.parent
-    generated = generate(root / "hud_web_ui")
-    target = root / "src" / "hud_web_assets.c"
+    ui_dir, target = locate()
+    generated, total = generate(ui_dir)
 
     if args.check:
         current = target.read_text(encoding="utf-8") if target.exists() else ""
         if current != generated:
             sys.stderr.write(
-                "src/hud_web_assets.c is stale -- run python3 tools/embed_hud_web_ui.py\n")
+                "%s is stale -- regenerate it with:\n  python3 %s\n"
+                % (target, pathlib.Path(__file__).resolve()))
             return 1
-        print("src/hud_web_assets.c is up to date")
+        print("%s is up to date" % target)
         return 0
 
     target.write_text(generated, encoding="utf-8")
-    print("wrote %s (%d bytes of UI)" % (target, sum(len((root / 'hud_web_ui' / s).read_bytes())
-                                                     for s in SOURCES)))
+    print("wrote %s (%d bytes of UI)" % (target, total))
     return 0
 
 
