@@ -180,14 +180,19 @@
 		}
 	}
 
-	var keyboardReleased = false;
-
+	// No "already done" latch on purpose: FTEC.handleevent exists as soon as
+	// ftejslib.js is evaluated, but the listeners are only registered when the
+	// engine reaches emscriptenfte_setupcanvas — later, and not observably so.
+	// A flag set on the first call can latch before the listeners exist and
+	// leave them all in place (seen live: the beforeunload guard back from the
+	// dead, blocking reloads). removeEventListener is idempotent, so watch()
+	// just calls this every tick until the HUD draws, which is comfortably
+	// after setupcanvas.
 	function releaseKeyboard() {
 		var ftec = window.FTEC;
-		if (keyboardReleased || !ftec || !ftec.handleevent) {
+		if (!ftec || !ftec.handleevent) {
 			return;
 		}
-		keyboardReleased = true;
 		// ftejslib.js:603-608 registers these on `document` in the capture
 		// phase, so without this the engine sees every keystroke before the
 		// editor does: Escape opens FTE's menu, ` its console, W walks the
