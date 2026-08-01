@@ -99,10 +99,22 @@ mkdir -p "$EZQ_BASEDIR/ezquake/configs"
 		"$W" "$H" "$W" "$H" "$FS" "$EZQ_CONWIDTH" "$EZQ_CONHEIGHT"
 } > "$EZQ_BASEDIR/ezquake/configs/config.cfg"
 
+# The staged gamedirs may carry the owner's real autoexec.cfg, and its
+# settings are part of how their game looks — so preserve it (once, as
+# autoexec.cfg.orig) and regenerate autoexec.cfg as original + our binds.
+# Regenerating from .orig each run keeps this idempotent: running the harness
+# twice must not stack two bind blocks.
 for d in id1 qw ezquake; do
 	mkdir -p "$EZQ_BASEDIR/$d"
-	printf 'bind F5 "demo_jump %s"\nbind F6 "cl_demospeed 0.01"\nbind F7 "screenshot %s"\nbind F10 "track %s"\nbind F11 "clear"\nbind F12 "toggleconsole"\n' \
-		"$EZQ_JUMP" "$NAME" "$EZQ_TRACK" > "$EZQ_BASEDIR/$d/autoexec.cfg"
+	auto="$EZQ_BASEDIR/$d/autoexec.cfg"
+	if [ -f "$auto" ] && [ ! -f "$auto.orig" ]; then
+		cp "$auto" "$auto.orig"
+	fi
+	{
+		[ -f "$auto.orig" ] && cat "$auto.orig"
+		printf '\nbind F5 "demo_jump %s"\nbind F6 "cl_demospeed 0.01"\nbind F7 "screenshot %s"\nbind F10 "track %s"\nbind F11 "clear"\nbind F12 "toggleconsole"\n' \
+			"$EZQ_JUMP" "$NAME" "$EZQ_TRACK"
+	} > "$auto"
 done
 
 shots="$EZQ_BASEDIR/qw/matchinfo/screenshots"
