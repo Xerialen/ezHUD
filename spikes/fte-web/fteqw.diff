@@ -1,0 +1,222 @@
+diff --git a/engine/Makefile b/engine/Makefile
+index ab4281d..c7092d2 100644
+--- a/engine/Makefile
++++ b/engine/Makefile
+@@ -1896,6 +1896,7 @@ ifeq ($(FTE_TARGET),web)
+ 	EMCC_LDFLAGS+= -s MAX_WEBGL_VERSION=2			#make use of what we can.
+ 	EMCC_LDFLAGS+= -s TOTAL_STACK=5MB			#big!
+    	EMCC_LDFLAGS+=-s ERROR_ON_UNDEFINED_SYMBOLS=1	#fairly obvious. no runtime errors please.
++	EMCC_LDFLAGS+=-s EXPORTED_RUNTIME_METHODS=UTF8ToString	#ez-hud spike: read EZHud_StateJSON()'s return value from the page
+ 	RELEASE_CFLAGS=-DOMIT_QCC -DGL_STATIC $(EMCC_CFLAGS)
+ 	DEBUG_CFLAGS=-gsource-map -DOMIT_QCC -DGL_STATIC $(EMCC_CFLAGS)
+ 	RELEASE_LDFLAGS=-O3	-s TOTAL_MEMORY=$(ASMJS_MEMORY) $(EMCC_LDFLAGS)
+diff --git a/engine/common/config_fteqw.h b/engine/common/config_fteqw.h
+index ae926aa..04888c4 100644
+--- a/engine/common/config_fteqw.h
++++ b/engine/common/config_fteqw.h
+@@ -234,7 +234,7 @@
+ #endif
+ 
+ #if defined(PLUGINS)
+-//-DLINK_EZHUD		//uncomment this line to statically link the ezhud plugin (eg for the web-rel target).
++-DLINK_EZHUD		//uncomment this line to statically link the ezhud plugin (eg for the web-rel target).
+ #endif
+ //-DLINK_OPENSSL	//statically link our openssl plugin into the engine instead of being separate. NOTE: openssl<3 is a license no-go, 3 still requires gpl3 (2 prohits patent).
+ 
+diff --git a/engine/common/pr_bgcmd.c b/engine/common/pr_bgcmd.c
+index 0e8cb21..2979a76 100644
+--- a/engine/common/pr_bgcmd.c
++++ b/engine/common/pr_bgcmd.c
+@@ -6901,6 +6901,11 @@ void QCBUILTIN PF_rotatevectorsbymatrix (pubprogfuncs_t *prinst, struct globalva
+ ////////////////////////////////////////////////////
+ //Progs internals
+ 
++#ifdef CLIENTONLY
++//client-only builds have no ssqc instance; the comparisons below are then always false.
++#define svprogfuncs ((pubprogfuncs_t*)NULL)
++#endif
++
+ qcstate_t *PR_CreateThread(pubprogfuncs_t *prinst, float retval, float resumetime, qboolean wait)
+ {
+ 	world_t *world = prinst->parms->user;
+@@ -7017,7 +7022,7 @@ void QCBUILTIN PF_Fork(pubprogfuncs_t *prinst, struct globalvars_s *pr_globals)
+ 	world_t *world = prinst->parms->user;
+ 	float sleeptime;
+ 
+-	if (svprogfuncs->callargc >= 1)
++	if (prinst->callargc >= 1)	//was svprogfuncs->callargc: wrong instance, and a NULL deref in client-only builds
+ 		sleeptime = G_FLOAT(OFS_PARM0);
+ 	else
+ 		sleeptime = 0;
+diff --git a/engine/web/ftejslib.js b/engine/web/ftejslib.js
+index bc04299..f1d3b58 100644
+--- a/engine/web/ftejslib.js
++++ b/engine/web/ftejslib.js
+@@ -576,6 +576,7 @@ mergeInto(LibraryManager.library,
+ 		FTEC.evcb.key = evkey;
+ 		FTEC.evcb.loadfile = evfile;
+ 		FTEC.evcb.cbufaddtext = evcbufadd;
++		window.FTEC = FTEC;	//ez-hud spike: expose the command channel to the page (hub.quakeworld.nu precedent)
+ 		FTEC.evcb.jbutton = evjbutton;
+ 		FTEC.evcb.jaxis = evjaxis;
+ 		FTEC.evcb.jorientation = evjorientation;
+diff --git a/plugins/ezhud/hud.c b/plugins/ezhud/hud.c
+index 89a8df4..a472b0a 100644
+--- a/plugins/ezhud/hud.c
++++ b/plugins/ezhud/hud.c
+@@ -1579,3 +1579,155 @@ void HUD_Sort(void)
+     // Recalculate elements so vars are parsed.
+     HUD_Recalculate();
+ }
++
++// ============================================================================
++// ez-hud spike (spike/fte-web): JSON state export for the in-browser editor.
++//
++// One EMSCRIPTEN_KEEPALIVE function returning the same shape as ez-hud's
++// GET /state (docs/PROTOCOL.md), so core/model.js needs no changes. `physical`
++// is deliberately absent: the page reads the canvas size itself, the same way
++// the ezQuake bridge reads the framebuffer it captures from.
++// ============================================================================
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++
++#define EZHUD_STATE_BUFSZ (256*1024)
++static char  ezhud_state_buf[EZHUD_STATE_BUFSZ];
++static char *ezhud_state_cur;
++
++static void EZHud_JsonRaw(const char *s)
++{
++	size_t left = EZHUD_STATE_BUFSZ - (ezhud_state_cur - ezhud_state_buf) - 1;
++	size_t len = strlen(s);
++	if (len > left)
++		len = left;
++	memcpy(ezhud_state_cur, s, len);
++	ezhud_state_cur += len;
++	*ezhud_state_cur = 0;
++}
++static void EZHud_JsonStr(const char *s)
++{	//quoted + escaped
++	char tmp[8];
++	EZHud_JsonRaw("\"");
++	for (; s && *s; s++)
++	{
++		unsigned char c = *s;
++		if (c == '"' || c == '\\')
++		{
++			tmp[0]='\\'; tmp[1]=c; tmp[2]=0;
++			EZHud_JsonRaw(tmp);
++		}
++		else if (c < 0x20)
++		{
++			snprintf(tmp, sizeof(tmp), "\\u%04x", c);
++			EZHud_JsonRaw(tmp);
++		}
++		else
++		{
++			tmp[0]=c; tmp[1]=0;
++			EZHud_JsonRaw(tmp);
++		}
++	}
++	EZHud_JsonRaw("\"");
++}
++static void EZHud_JsonNum(double v)
++{
++	char tmp[64];
++	if (v == (double)(long long)v)
++		snprintf(tmp, sizeof(tmp), "%lld", (long long)v);
++	else
++		snprintf(tmp, sizeof(tmp), "%g", v);
++	EZHud_JsonRaw(tmp);
++}
++static void EZHud_JsonCvar(const char *key, cvar_t *var, int *first)
++{	//one "name":"value" pair inside the cvars object
++	if (!var)
++		return;
++	if (!*first)
++		EZHud_JsonRaw(",");
++	*first = 0;
++	EZHud_JsonStr(key ? key : var->name);
++	EZHud_JsonRaw(":");
++	EZHud_JsonStr(var->string ? var->string : "");
++}
++
++EMSCRIPTEN_KEEPALIVE const char *EZHud_StateJSON(void)
++{
++	hud_t *hud;
++	int i;
++	int firstel = 1;
++
++	ezhud_state_cur = ezhud_state_buf;
++	*ezhud_state_cur = 0;
++
++	EZHud_JsonRaw("{\"protocol\":1,\"engine\":\"fteqw ezhud (web)\",\"screen\":{\"vid_width\":");
++	EZHud_JsonNum(vid.width);
++	EZHud_JsonRaw(",\"vid_height\":");
++	EZHud_JsonNum(vid.height);
++	EZHud_JsonRaw(",\"scr_con_current\":");
++	EZHud_JsonNum(scr_con_current);
++	EZHud_JsonRaw("},\"view\":{\"spectator\":");
++	EZHud_JsonRaw(cl.spectator ? "true" : "false");
++	EZHud_JsonRaw(",\"tracking\":");
++	EZHud_JsonRaw((cl.tracknum != -1) ? "true" : "false");
++	EZHud_JsonRaw("},\"elements\":[");
++
++	for (hud = hud_huds; hud; hud = hud->next)
++	{
++		int firstcv = 1;
++		if (!firstel)
++			EZHud_JsonRaw(",");
++		firstel = 0;
++
++		EZHud_JsonRaw("{\"name\":");
++		EZHud_JsonStr(hud->name);
++		EZHud_JsonRaw(",\"description\":");
++		EZHud_JsonStr(hud->description ? hud->description : "");
++		EZHud_JsonRaw(",\"shown\":");
++		EZHud_JsonRaw((hud->show ? (hud->show->value != 0) : 1) ? "true" : "false");
++		EZHud_JsonRaw(",\"place\":");
++		EZHud_JsonStr(hud->place ? hud->place->string : "");
++		EZHud_JsonRaw(",\"parent\":");
++		if (hud->place_hud)
++			EZHud_JsonStr(hud->place_hud->name);
++		else
++			EZHud_JsonRaw("null");
++		EZHud_JsonRaw(",\"align_x\":");
++		EZHud_JsonStr(hud->align_x ? hud->align_x->string : "left");
++		EZHud_JsonRaw(",\"align_y\":");
++		EZHud_JsonStr(hud->align_y ? hud->align_y->string : "top");
++		EZHud_JsonRaw(",\"pos_x\":");
++		EZHud_JsonNum(hud->pos_x ? hud->pos_x->value : 0);
++		EZHud_JsonRaw(",\"pos_y\":");
++		EZHud_JsonNum(hud->pos_y ? hud->pos_y->value : 0);
++		EZHud_JsonRaw(",\"order\":");
++		EZHud_JsonNum(hud->order ? hud->order->value : 0);
++		EZHud_JsonRaw(",\"frame\":");
++		EZHud_JsonNum(hud->frame ? hud->frame->value : 0);
++		EZHud_JsonRaw(",\"spec_required\":false,\"needs_pov\":false,\"rect\":");
++		if (hud->last_draw_sequence && hud->last_draw_sequence >= host_screenupdatecount)
++		{
++			EZHud_JsonRaw("{\"x\":");
++			EZHud_JsonNum(hud->lx);
++			EZHud_JsonRaw(",\"y\":");
++			EZHud_JsonNum(hud->ly);
++			EZHud_JsonRaw(",\"w\":");
++			EZHud_JsonNum(hud->lw);
++			EZHud_JsonRaw(",\"h\":");
++			EZHud_JsonNum(hud->lh);
++			EZHud_JsonRaw("}");
++		}
++		else
++			EZHud_JsonRaw("null");
++		EZHud_JsonRaw(",\"cvars\":{");
++		EZHud_JsonCvar(NULL, hud->frame, &firstcv);
++		EZHud_JsonCvar(NULL, hud->frame_color, &firstcv);
++		EZHud_JsonCvar(NULL, hud->opacity, &firstcv);
++		for (i = 0; i < hud->num_params; i++)
++			EZHud_JsonCvar(NULL, hud->params[i], &firstcv);
++		EZHud_JsonRaw("}}");
++	}
++	EZHud_JsonRaw("]}");
++	return ezhud_state_buf;
++}
++#endif	//__EMSCRIPTEN__
