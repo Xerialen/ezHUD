@@ -105,14 +105,40 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+
+      # Built here rather than pointed at a binary someone left lying around, so a
+      # nightly can never pass against an engine older than the code it is testing.
+      - name: Assemble and build an ezQuake from this repo
+        shell: bash
+        run: |
+          WORK="$RUNNER_TEMP/ezq"
+          rm -rf "$WORK"
+          git clone -q --depth 1 https://github.com/QW-Group/ezquake-source "$WORK"
+          mkdir -p "$WORK/tools"
+          cp -r hud_web_ui "$WORK/"
+          cp engine/src/*.c engine/src/*.h "$WORK/src/"
+          cp -r engine/src/libhud "$WORK/src/"
+          cp engine/tools/*.py "$WORK/tools/"
+          cp -r tools/tests "$WORK/tools/"
+          cp package.json "$WORK/"
+          git -C "$WORK" apply "$PWD/engine/engine-integration.diff"
+          python3 "$WORK/tools/embed_hud_web_ui.py"
+          cmake -S "$WORK" -B "$WORK/build" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$WORK/build" -j"$(nproc)"
+          echo "EZQ_WORK=$WORK" >> "$GITHUB_ENV"
+
+      # The runner's .env supplies EZHUD_USE_DISPLAY, GALLIUM_DRIVER and
+      # MESA_D3D12_DEFAULT_ADAPTER_NAME so this lands on the discrete GPU rather
+      # than llvmpipe. Without them the run still works, just in software.
       - name: Run the person-mimicking flow against a real engine
         shell: bash
         run: |
           export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh" 2>/dev/null || true
           nvm use 22 >/dev/null 2>&1 || true
+          cd "$EZQ_WORK"
           npm install --no-audit --no-fund
           npx playwright install chromium
-          export EZQUAKE_BIN="${EZHUD_ENGINE:?the GPU runner must set EZHUD_ENGINE}"
+          export EZQUAKE_BIN="$EZQ_WORK/build/ezquake-linux-x86_64"
           export EZQUAKE_BASEDIR="${EZHUD_LAB:?the GPU runner must set EZHUD_LAB}"
           export EZQUAKE_TEST_DEMO="${EZHUD_DEMO:-demos/hudtest_src.mvd}"
           export HUD_WEB_TEST_PORT=27852
