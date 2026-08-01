@@ -1,0 +1,602 @@
+diff --git a/src/cl_main.c b/src/cl_main.c
+index b6328b9a..0ee256eb 100644
+--- a/src/cl_main.c
++++ b/src/cl_main.c
+@@ -33,6 +33,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ #include "qtv.h"
+ #include "keys.h"
+ #include "hud.h"
++#include "hud_web.h"
+ #include "hud_common.h"
+ #include "hud_editor.h"
+ #include "input.h"
+@@ -2259,6 +2260,7 @@ void EX_FileList_Init(void);
+ 
+ void CL_Init (void) 
+ {
++	HUD_Web_Init();
+ 	// When ezquake was launched via a webpage (qtv) the working directory wasn't properly
+ 	// set. Changing the directory makes sure it starts out in the directory where ezquake 
+ 	// is located.
+@@ -2934,6 +2936,7 @@ void CL_Frame(double time)
+ 	VFS_TICK(); // VFS hook for updating some systems
+ 
+ 	Sys_ReadIPC();
++	HUD_Web_Frame();
+ 
+ 	CL_QTVPoll();
+ #ifdef WITH_IRC
+@@ -2951,6 +2954,7 @@ void CL_Frame(double time)
+ 
+ void CL_Shutdown (void) 
+ {
++	HUD_Web_Shutdown();
+ 	CL_Disconnect();
+ 	SList_Shutdown();
+ 	CDAudio_Shutdown();
+diff --git a/src/fonts.c b/src/fonts.c
+index 3cb7e874..54f907c7 100644
+--- a/src/fonts.c
++++ b/src/fonts.c
+@@ -396,6 +396,16 @@ static qbool FontCreate(int grouping, const char* userpath)
+ 
+ // Used for allocating space - if we just measure the string then other hud elements
+ //   might move around as content changes, which is probably not what is wanted
++const char *FontFacePath(void)
++{
++	return font_facepath.string;
++}
++
++qbool FontProportionalLoaded(void)
++{
++	return R_TextureReferenceIsValid(proportional_fonts[0].master);
++}
++
+ int FontFixedWidth(int max_length, float scale, qbool digits_only, qbool proportional)
+ {
+ 	if (!proportional || !R_TextureReferenceIsValid(proportional_fonts[0].master)) {
+diff --git a/src/fonts.h b/src/fonts.h
+index ed88668a..0ddecd37 100644
+--- a/src/fonts.h
++++ b/src/fonts.h
+@@ -5,8 +5,16 @@
+ #ifdef EZ_FREETYPE_SUPPORT
+ void FontInitialise(void);
+ int FontFixedWidth(int max_length, float scale, qbool digits_only, qbool proportional);
++// Whether a proportional face is actually usable right now. font_facepath being
++// non-empty does NOT imply this: Draw_InitFont discards FontCreate's result, so a
++// config naming a font that no longer resolves leaves the cvar set with no face
++// loaded, and every `proportional 1` silently renders at 8px instead.
++qbool FontProportionalLoaded(void);
++const char *FontFacePath(void);
+ #else
+ #define FontFixedWidth(max_length, scale, digits_only, proportional) (max_length * 8.0f * scale)
++#define FontProportionalLoaded() (false)
++#define FontFacePath() ("")
+ #endif
+ 
+ qbool FontAlterCharCoordsWide(float* x, float* y, wchar ch, qbool bigchar, float scale, qbool proportional);
+diff --git a/src/hud.c b/src/hud.c
+index 38e21db9..426d34d5 100644
+--- a/src/hud.c
++++ b/src/hud.c
+@@ -796,6 +796,46 @@ void HUD_Recalculate(void)
+ 		hud = hud->next;
+ 	}
+ }
++/* Restore every element's position and visibility to what HUD_Register asked for.
++ *
++ * The engine has had no way to do this. `reset` (HUD_Reset_f) centres a single
++ * element, which is not the same thing and does not restore anything. `cfg_reset`
++ * resets everything the client owns, which is far more than someone who has been
++ * dragging their HUD around wants to lose. Deliberately limited to placement and
++ * visibility: colours, scales and per-element parameters are left alone, because
++ * "I moved things and want them back" is the request this answers.
++ */
++void HUD_ResetLayout_f(void)
++{
++	hud_t *hud;
++	int changed = 0;
++
++	for (hud = hud_huds; hud; hud = hud->next) {
++		cvar_t *vars[6];
++		int i;
++
++		vars[0] = hud->show;
++		vars[1] = hud->place;
++		vars[2] = hud->align_x;
++		vars[3] = hud->align_y;
++		vars[4] = hud->pos_x;
++		vars[5] = hud->pos_y;
++
++		for (i = 0; i < 6; i++) {
++			/* Not every element registers every one of these: HUD_Register is
++			 * given NULL for the ones that do not apply (hud.c:1287, 1300, 1313). */
++			if (vars[i] && strcmp(vars[i]->string, vars[i]->defaultvalue)) {
++				Cvar_Set(vars[i], vars[i]->defaultvalue);
++				changed++;
++			}
++		}
++	}
++
++	HUD_Recalculate();
++	Com_Printf("HUD layout reset: %d value%s restored to default\n",
++		changed, changed == 1 ? "" : "s");
++}
++
+ void HUD_Recalculate_f(void)
+ {
+ 	HUD_Recalculate();
+@@ -819,6 +859,7 @@ void HUD_Init(void)
+ 	Cmd_AddCommand ("togglehud", HUD_Toggle_f);
+ 	Cmd_AddCommand ("align", HUD_Align_f);
+ 	Cmd_AddCommand ("hud_recalculate", HUD_Recalculate_f);
++	Cmd_AddCommand ("hud_reset_layout", HUD_ResetLayout_f);
+ 
+ 	// Variables.
+ 	Cvar_SetCurrentGroup(CVAR_GROUP_HUD);
+diff --git a/src/hud.h b/src/hud.h
+index 2d74aa3b..9d2ddedc 100644
+--- a/src/hud.h
++++ b/src/hud.h
+@@ -36,6 +36,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ #define HUD_NO_GROW            (1 <<  9)  // no frame grow
+ #define HUD_PLUSMINUS          (1 << 10)  // auto add +/- commands
+ #define HUD_OPACITY				(1 << 11)
++#define HUD_SPEC_REQUIRED      (1 << 12)  // only meaningful while spectating (e.g. tracking)
++#define HUD_NEEDS_POV          (1 << 13)  // needs a player POV: hidden when free-flying as spectator
+ 
+ #define HUD_INVENTORY          (HUD_NO_GROW)   // aply for sbar elements
+ 
+diff --git a/src/hud_ammo.c b/src/hud_ammo.c
+index 415a8e32..d6cbb057 100644
+--- a/src/hud_ammo.c
++++ b/src/hud_ammo.c
+@@ -438,7 +438,7 @@ void Ammo_HudInit(void)
+ 	// ammo/s
+ 	HUD_Register(
+ 		"ammo", NULL, "Part of your inventory - ammo for active weapon.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawAmmoCurrent,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawAmmoCurrent,
+ 		"1", "health", "after", "center", "32", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -452,7 +452,7 @@ void Ammo_HudInit(void)
+ 	);
+ 
+ 	HUD_Register("ammo1", NULL, "Part of your inventory - ammo - shells.",
+-				 HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawAmmo1,
++				 HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawAmmo1,
+ 				 "0", "ibar", "left", "top", "0", "0", "0", "0 0 0", NULL,
+ 				 "style", "0",
+ 				 "scale", "1",
+@@ -463,7 +463,7 @@ void Ammo_HudInit(void)
+ 				 "text_color_normal", "",
+ 				 NULL);
+ 	HUD_Register("ammo2", NULL, "Part of your inventory - ammo - nails.",
+-				 HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawAmmo2,
++				 HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawAmmo2,
+ 				 "0", "ammo1", "after", "top", "0", "0", "0", "0 0 0", NULL,
+ 				 "style", "0",
+ 				 "scale", "1",
+@@ -474,7 +474,7 @@ void Ammo_HudInit(void)
+ 				 "text_color_normal", "",
+ 				 NULL);
+ 	HUD_Register("ammo3", NULL, "Part of your inventory - ammo - rockets.",
+-				 HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawAmmo3,
++				 HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawAmmo3,
+ 				 "0", "ammo2", "after", "top", "0", "0", "0", "0 0 0", NULL,
+ 				 "style", "0",
+ 				 "scale", "1",
+@@ -485,7 +485,7 @@ void Ammo_HudInit(void)
+ 				 "text_color_normal", "",
+ 				 NULL);
+ 	HUD_Register("ammo4", NULL, "Part of your inventory - ammo - cells.",
+-				 HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawAmmo4,
++				 HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawAmmo4,
+ 				 "0", "ammo3", "after", "top", "0", "0", "0", "0 0 0", NULL,
+ 				 "style", "0",
+ 				 "scale", "1",
+@@ -499,7 +499,8 @@ void Ammo_HudInit(void)
+ 	// ammo icon/s
+ 	HUD_Register(
+ 		"iammo", NULL, "Part of your inventory - ammo icon.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawAmmoIconCurrent,
++		/* Only drawn while cl.spectator == cl.autocam (hud_ammo.c:332). */
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawAmmoIconCurrent,
+ 		"1", "ammo", "before", "center", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -508,25 +509,25 @@ void Ammo_HudInit(void)
+ 	);
+ 
+ 	HUD_Register("iammo1", NULL, "Part of your inventory - ammo icon.",
+-				 HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawAmmoIcon1,
++				 HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawAmmoIcon1,
+ 				 "0", "ibar", "left", "top", "0", "0", "0", "0 0 0", NULL,
+ 				 "style", "2",
+ 				 "scale", "1",
+ 				 NULL);
+ 	HUD_Register("iammo2", NULL, "Part of your inventory - ammo icon.",
+-				 HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawAmmoIcon2,
++				 HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawAmmoIcon2,
+ 				 "0", "iammo1", "after", "top", "0", "0", "0", "0 0 0", NULL,
+ 				 "style", "2",
+ 				 "scale", "1",
+ 				 NULL);
+ 	HUD_Register("iammo3", NULL, "Part of your inventory - ammo icon.",
+-				 HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawAmmoIcon3,
++				 HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawAmmoIcon3,
+ 				 "0", "iammo2", "after", "top", "0", "0", "0", "0 0 0", NULL,
+ 				 "style", "2",
+ 				 "scale", "1",
+ 				 NULL);
+ 	HUD_Register("iammo4", NULL, "Part of your inventory - ammo icon.",
+-				 HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawAmmoIcon4,
++				 HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawAmmoIcon4,
+ 				 "0", "iammo3", "after", "top", "0", "0", "0", "0 0 0", NULL,
+ 				 "style", "2",
+ 				 "scale", "1",
+diff --git a/src/hud_armor.c b/src/hud_armor.c
+index 53a1f84f..f674f9ec 100644
+--- a/src/hud_armor.c
++++ b/src/hud_armor.c
+@@ -228,7 +228,7 @@ void Armor_HudInit(void)
+ 	// armor count
+ 	HUD_Register(
+ 		"armor", NULL, "Part of your inventory - armor level.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawArmor,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawArmor,
+ 		"1", "face", "before", "center", "-32", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -243,7 +243,7 @@ void Armor_HudInit(void)
+ 	// armor icon
+ 	HUD_Register(
+ 		"iarmor", NULL, "Part of your inventory - armor icon.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawArmorIcon,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawArmorIcon,
+ 		"1", "armor", "before", "center", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -267,7 +267,7 @@ void Armor_HudInit(void)
+ 
+ 	HUD_Register(
+ 		"bar_armor", NULL, "Armor bar.",
+-		HUD_PLUSMINUS, ca_active, 0, SCR_HUD_DrawBarArmor,
++		HUD_PLUSMINUS | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawBarArmor,
+ 		"0", "armor", "left", "center", "0", "0", "0", "0 0 0", NULL,
+ 		"height", "16",
+ 		"width", "64",
+diff --git a/src/hud_face.c b/src/hud_face.c
+index b5f81582..ec445777 100644
+--- a/src/hud_face.c
++++ b/src/hud_face.c
+@@ -84,7 +84,9 @@ void Face_HudInit(void)
+ 	// player face (health indicator)
+ 	HUD_Register(
+ 		"face", NULL, "Your bloody face.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawFace,
++		/* Returns early unless cl.spectator == cl.autocam (hud_face.c:46), so it
++		 * needs a POV exactly as the other gated elements do. */
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawFace,
+ 		"1", "screen", "center", "bottom", "0", "0", "0", "0 0 0", NULL,
+ 		"scale", "1",
+ 		NULL
+diff --git a/src/hud_guns.c b/src/hud_guns.c
+index 51191a11..350cb6a3 100644
+--- a/src/hud_guns.c
++++ b/src/hud_guns.c
+@@ -356,7 +356,7 @@ void Guns_HudInit(void)
+ {
+ 	// init guns
+ 	HUD_Register("gun", NULL, "Part of your inventory - current weapon.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawGunCurrent,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawGunCurrent,
+ 		"0", "ibar", "center", "bottom", "0", "0", "0", "0 0 0", NULL,
+ 		"wide", "0",
+ 		"style", "0",
+@@ -365,7 +365,7 @@ void Guns_HudInit(void)
+ 		"frame_hide", "0",
+ 		NULL);
+ 	HUD_Register("gun2", NULL, "Part of your inventory - shotgun.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawGun2,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawGun2,
+ 		"1", "ibar", "left", "bottom", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -373,7 +373,7 @@ void Guns_HudInit(void)
+ 		"frame_hide", "0",
+ 		NULL);
+ 	HUD_Register("gun3", NULL, "Part of your inventory - super shotgun.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawGun3,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawGun3,
+ 		"1", "gun2", "after", "center", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -381,7 +381,7 @@ void Guns_HudInit(void)
+ 		"frame_hide", "0",
+ 		NULL);
+ 	HUD_Register("gun4", NULL, "Part of your inventory - nailgun.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawGun4,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawGun4,
+ 		"1", "gun3", "after", "center", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -389,7 +389,7 @@ void Guns_HudInit(void)
+ 		"frame_hide", "0",
+ 		NULL);
+ 	HUD_Register("gun5", NULL, "Part of your inventory - super nailgun.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawGun5,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawGun5,
+ 		"1", "gun4", "after", "center", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -397,7 +397,7 @@ void Guns_HudInit(void)
+ 		"frame_hide", "0",
+ 		NULL);
+ 	HUD_Register("gun6", NULL, "Part of your inventory - grenade launcher.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawGun6,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawGun6,
+ 		"1", "gun5", "after", "center", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -405,7 +405,7 @@ void Guns_HudInit(void)
+ 		"frame_hide", "0",
+ 		NULL);
+ 	HUD_Register("gun7", NULL, "Part of your inventory - rocket launcher.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawGun7,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawGun7,
+ 		"1", "gun6", "after", "center", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -413,7 +413,7 @@ void Guns_HudInit(void)
+ 		"frame_hide", "0",
+ 		NULL);
+ 	HUD_Register("gun8", NULL, "Part of your inventory - thunderbolt.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawGun8,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawGun8,
+ 		"1", "gun7", "after", "center", "0", "0", "0", "0 0 0", NULL,
+ 		"wide", "0",
+ 		"style", "0",
+diff --git a/src/hud_health.c b/src/hud_health.c
+index 79198e4e..1b92fc08 100644
+--- a/src/hud_health.c
++++ b/src/hud_health.c
+@@ -118,7 +118,7 @@ void Health_HudInit(void)
+ {
+ 	HUD_Register(
+ 		"bar_health", NULL, "Health bar.",
+-		HUD_PLUSMINUS, ca_active, 0, SCR_HUD_DrawBarHealth,
++		HUD_PLUSMINUS | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawBarHealth,
+ 		"0", "health", "right", "center", "0", "0", "0", "0 0 0", NULL,
+ 		"height", "16",
+ 		"width", "64",
+@@ -134,7 +134,7 @@ void Health_HudInit(void)
+ 	// health
+ 	HUD_Register(
+ 		"health", NULL, "Part of your status - health level.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawHealth,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawHealth,
+ 		"1", "face", "after", "center", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+diff --git a/src/hud_items.c b/src/hud_items.c
+index abdef265..8bb4fe8d 100644
+--- a/src/hud_items.c
++++ b/src/hud_items.c
+@@ -243,7 +243,7 @@ void Items_HudInit(void)
+ 	// init powerzz
+ 	HUD_Register(
+ 		"key1", NULL, "Part of your inventory - silver key.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawKey1,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawKey1,
+ 		"1", "ibar", "top", "left", "0", "64", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -252,7 +252,7 @@ void Items_HudInit(void)
+ 	);
+ 	HUD_Register(
+ 		"key2", NULL, "Part of your inventory - gold key.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawKey2,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawKey2,
+ 		"1", "key1", "left", "after", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -261,7 +261,7 @@ void Items_HudInit(void)
+ 	);
+ 	HUD_Register(
+ 		"ring", NULL, "Part of your inventory - invisibility.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawRing,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawRing,
+ 		"1", "key2", "left", "after", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -270,7 +270,7 @@ void Items_HudInit(void)
+ 	);
+ 	HUD_Register(
+ 		"pent", NULL, "Part of your inventory - invulnerability.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawPent,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawPent,
+ 		"1", "ring", "left", "after", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -279,7 +279,7 @@ void Items_HudInit(void)
+ 	);
+ 	HUD_Register(
+ 		"suit", NULL, "Part of your inventory - biosuit.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawSuit,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawSuit,
+ 		"1", "pent", "left", "after", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -288,7 +288,7 @@ void Items_HudInit(void)
+ 	);
+ 	HUD_Register(
+ 		"quad", NULL, "Part of your inventory - quad damage.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawQuad,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawQuad,
+ 		"1", "suit", "left", "after", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -298,7 +298,7 @@ void Items_HudInit(void)
+ 	// sigilzz
+ 	HUD_Register(
+ 		"sigil1", NULL, "Part of your inventory - sigil 1.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawSigil1,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawSigil1,
+ 		"0", "ibar", "left", "top", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -307,7 +307,7 @@ void Items_HudInit(void)
+ 	);
+ 	HUD_Register(
+ 		"sigil2", NULL, "Part of your inventory - sigil 2.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawSigil2,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawSigil2,
+ 		"0", "sigil1", "after", "top", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -316,7 +316,7 @@ void Items_HudInit(void)
+ 	);
+ 	HUD_Register(
+ 		"sigil3", NULL, "Part of your inventory - sigil 3.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawSigil3,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawSigil3,
+ 		"0", "sigil2", "after", "top", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -325,7 +325,7 @@ void Items_HudInit(void)
+ 	);
+ 	HUD_Register(
+ 		"sigil4", NULL, "Part of your inventory - sigil 4.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawSigil4,
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawSigil4,
+ 		"0", "sigil3", "after", "top", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+diff --git a/src/hud_tracking.c b/src/hud_tracking.c
+index 333a575e..16193aff 100644
+--- a/src/hud_tracking.c
++++ b/src/hud_tracking.c
+@@ -66,7 +66,7 @@ void Tracking_HudInit(void)
+ 	// Tracking JohnNy_cz (Contains name of the player who's player we're watching at the moment)
+ 	HUD_Register(
+ 		"tracking", NULL, "Shows the name of tracked player.",
+-		HUD_PLUSMINUS, ca_active, 9, SCR_HUD_DrawTracking,
++		HUD_PLUSMINUS | HUD_SPEC_REQUIRED, ca_active, 9, SCR_HUD_DrawTracking,
+ 		"1", "face", "center", "before", "0", "0", "0", "0 0 0", NULL,
+ 		"format", "\xD4\xF2\xE1\xE3\xEB\xE9\xEE\xE7\xBA %t %n, \xCA\xD5\xCD\xD0 for next", //"Tracking: team name, JUMP for next", "Tracking:" and "JUMP" are brown. default: "Tracking %t %n, [JUMP] for next"
+ 		"scale", "1", "proportional", "0",
+diff --git a/src/image.c b/src/image.c
+index 904a0fa4..d3b169a8 100644
+--- a/src/image.c
++++ b/src/image.c
+@@ -921,6 +921,93 @@ byte *Image_LoadPNG (vfsfile_t *fin, const char *filename, int matchwidth, int m
+ 	return data;
+ }
+ 
++/* Growable sink for Image_EncodePNG. */
++typedef struct {
++	byte *data;
++	size_t length;
++	size_t capacity;
++	qbool failed;
++} png_membuf_t;
++
++static void PNG_IO_mem_write_data(png_structp png_ptr, png_bytep data, png_size_t length)
++{
++	png_membuf_t *b = (png_membuf_t *) png_get_io_ptr(png_ptr);
++
++	if (b->failed) {
++		return;
++	}
++	if (b->length + length > b->capacity) {
++		size_t want = b->capacity ? b->capacity * 2 : 256 * 1024;
++		byte *grown;
++
++		while (want < b->length + length) {
++			want *= 2;
++		}
++		if (!(grown = (byte *) Q_realloc(b->data, want))) {
++			b->failed = true;
++			return;
++		}
++		b->data = grown;
++		b->capacity = want;
++	}
++	memcpy(b->data + b->length, data, length);
++	b->length += length;
++}
++
++static void PNG_IO_mem_flush_data(png_structp png_ptr)
++{
++	(void) png_ptr;
++}
++
++/* Encode straight to a heap block. The caller owns the result and frees it with
++ * Q_free. Exists because the HUD bridge must not put a screenshot of the player's
++ * game on disk: a fixed path under /tmp is a symlink target another local user can
++ * point at any file the player can write, and the file would otherwise linger
++ * world-readable. Returns NULL on failure. */
++byte *Image_EncodePNG(int compression, byte *pixels, size_t width, size_t height, size_t *out_len)
++{
++	png_membuf_t buf;
++	png_structp png_ptr;
++	png_infop info_ptr;
++	png_byte **rowpointers;
++	size_t i;
++	const int bpp = 3;
++
++	memset(&buf, 0, sizeof(buf));
++
++	if (!(png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL))) {
++		return NULL;
++	}
++	if (!(info_ptr = png_create_info_struct(png_ptr))) {
++		png_destroy_write_struct(&png_ptr, (png_infopp) NULL);
++		return NULL;
++	}
++
++	png_set_write_fn(png_ptr, &buf, PNG_IO_mem_write_data, PNG_IO_mem_flush_data);
++	png_set_compression_level(png_ptr, bound(Z_NO_COMPRESSION, compression, Z_BEST_COMPRESSION));
++	png_set_IHDR(png_ptr, info_ptr, (png_uint_32)width, (png_uint_32)height, 8, PNG_COLOR_TYPE_RGB,
++		PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
++	png_write_info(png_ptr, info_ptr);
++
++	rowpointers = (png_byte **) Q_malloc(height * sizeof(*rowpointers));
++	for (i = 0; i < height; i++) {
++		rowpointers[i] = pixels + (height - i - 1) * width * bpp;
++	}
++	png_write_image(png_ptr, rowpointers);
++	png_write_end(png_ptr, info_ptr);
++	Q_free(rowpointers);
++	png_destroy_write_struct(&png_ptr, &info_ptr);
++
++	if (buf.failed || !buf.length) {
++		Q_free(buf.data);
++		return NULL;
++	}
++	if (out_len) {
++		*out_len = buf.length;
++	}
++	return buf.data;
++}
++
+ int Image_WritePNG(char *filename, int compression, byte *pixels, size_t width, size_t height)
+ {
+ 	char name[MAX_PATH];
+diff --git a/src/image.h b/src/image.h
+index 27bf3219..d68dfbf4 100644
+--- a/src/image.h
++++ b/src/image.h
+@@ -54,6 +54,9 @@ byte *Image_LoadJPEG(vfsfile_t *v, const char *path, int matchwidth, int matchhe
+ byte *Image_LoadPCX_As32Bit (vfsfile_t *v, const char *path, int matchwidth, int matchheight, int *real_width, int *real_height);
+ 
+ int Image_WritePNG(char *filename, int compression, byte *pixels, size_t width, size_t height);
++/* Same encoder, straight to a heap block the caller frees with Q_free. NULL on
++ * failure. Used where writing a screenshot to disk would be wrong. */
++byte *Image_EncodePNG(int compression, byte *pixels, size_t width, size_t height, size_t *out_len);
+ int Image_WriteTGA(char *filename, byte *pixels, size_t width, size_t height);
+ int Image_WriteJPEG(char *filename, int quality, byte *pixels, int width, int height);
+ int Image_WritePCX(char *filename, byte *data, int width, int height, byte *palette);

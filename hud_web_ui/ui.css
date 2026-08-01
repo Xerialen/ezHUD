@@ -1,0 +1,901 @@
+/* ui.css — HUD editor.
+ *
+ * Dark because of the use scene: a player at their machine, usually in the
+ * evening, with a dark game render as the centre of the screen. Not a default.
+ *
+ * Craft bar is the Chrome DevTools element inspector: measurement over someone
+ * else's render, exact numbers, instant highlight, a list usable at 83 entries.
+ */
+
+:root {
+	--bg: #14161a;
+	--bg-panel: #1a1d22;
+	--bg-raise: #22262d;
+	--bg-input: #101215;
+	--line: #2c313a;
+	--line-strong: #3a4150;
+
+	--ink: #e6e9ef;          /* 13.4:1 on --bg-panel */
+	--ink-dim: #a8b0bd;      /*  6.7:1 on --bg-panel */
+	--ink-faint: #79828f;    /*  3.9:1 — decorative and large text only */
+
+	--accent: #4aa3ff;
+	--accent-ink: #0b1017;
+	--warn: #f0b429;
+	--danger: #ff6b5e;
+
+	--radius: 5px;
+	--ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+	--sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+	/* Monospace here is for measurement and cvar values — data, not costume. */
+	--mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+/* An author `display` rule beats the UA sheet's [hidden] { display: none },
+   so every element that both carries `hidden` and sets `display` needs this
+   explicitly or it never hides. */
+[hidden] { display: none !important; }
+
+/* Icon sprite: referenced by <use>, never laid out. */
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+html, body {
+	height: 100%;
+	margin: 0;
+}
+
+body {
+	overflow: hidden;   /* app shell: panels scroll, the page never does */
+	display: flex;
+	flex-direction: column;
+	background: var(--bg);
+	color: var(--ink);
+	font: 400 13px/1.5 var(--sans);
+	-webkit-font-smoothing: antialiased;
+}
+
+/* ---- top bar ------------------------------------------------------------ */
+
+.bar {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	padding: 0 14px;
+	height: 44px;
+	flex: 0 0 auto;
+	background: var(--bg-panel);
+	border-bottom: 1px solid var(--line);
+}
+
+.bar h1 {
+	margin: 0;
+	font-size: 13px;
+	font-weight: 600;
+	letter-spacing: -0.01em;
+}
+
+.bar__engine {
+	margin: 0;
+	font: 400 11px/1 var(--mono);
+	color: var(--ink-faint);
+}
+
+.bar__spacer { flex: 1; }
+
+.readout {
+	display: flex;
+	gap: 14px;
+	margin: 0;
+	font: 400 11px/1 var(--mono);
+	color: var(--ink-dim);
+}
+
+.readout div { display: flex; gap: 5px; }
+.readout dt { color: var(--ink-faint); }
+.readout dd { margin: 0; color: var(--ink); }
+
+.status {
+	margin: 0;
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	font-size: 12px;
+	color: var(--ink-dim);
+	min-width: 132px;
+}
+
+.status::before {
+	content: "";
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--ink-faint);
+	flex: 0 0 auto;
+}
+
+.status[data-status="live"]::before { background: #46d17f; }
+.status[data-status="idle"]::before { background: var(--warn); }
+.status[data-status="lost"]::before,
+.status[data-status="denied"]::before { background: var(--danger); }
+.status[data-status="connecting"]::before { animation: pulse 1.1s var(--ease) infinite; }
+
+@keyframes pulse { 50% { opacity: 0.25; } }
+
+.toggle {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: var(--ink-dim);
+	user-select: none;
+	cursor: pointer;
+}
+
+.toggle input { accent-color: var(--accent); margin: 0; }
+.toggle--sm { font-size: 11px; }
+
+/* ---- shell -------------------------------------------------------------- */
+
+.shell {
+	flex: 1;
+	min-height: 0;
+	display: grid;
+	grid-template-columns: 236px minmax(0, 1fr) 292px;
+}
+
+.panel {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	background: var(--bg-panel);
+}
+
+.panel--tree { border-right: 1px solid var(--line); }
+.panel--inspect { border-left: 1px solid var(--line); overflow-y: auto; }
+
+.panel__head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 10px;
+	border-bottom: 1px solid var(--line);
+}
+
+.panel__foot {
+	margin: 0;
+	padding: 7px 10px;
+	border-top: 1px solid var(--line);
+	font: 400 11px/1 var(--mono);
+	color: var(--ink-faint);
+}
+
+input[type="search"],
+input[type="text"],
+select {
+	flex: 1;
+	min-width: 0;
+	background: var(--bg-input);
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	color: var(--ink);
+	font: 400 12px/1 var(--sans);
+	padding: 6px 8px;
+}
+
+input:focus-visible,
+select:focus-visible,
+button:focus-visible,
+.tree:focus-visible,
+.tree__row:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+
+/* ---- element tree ------------------------------------------------------- */
+
+.tree {
+	list-style: none;
+	margin: 0;
+	padding: 4px 0;
+	overflow-y: auto;
+	flex: 1;
+}
+
+.tree__row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	padding: 4px 10px;
+	border: 0;
+	background: none;
+	color: var(--ink-dim);
+	font: 400 12px/1.4 var(--sans);
+	text-align: left;
+	cursor: default;
+}
+
+.tree__row:hover { background: var(--bg-raise); color: var(--ink); }
+
+.tree__row[aria-selected="true"] {
+	background: var(--accent);
+	color: var(--accent-ink);
+	font-weight: 500;
+}
+
+.tree__row[aria-selected="true"] .tree__meta { color: var(--accent-ink); opacity: 0.75; }
+
+.tree__vis {
+	display: grid;
+	place-items: center;
+	width: 18px;
+	height: 18px;
+	flex: 0 0 auto;
+	border: 0;
+	border-radius: 3px;
+	background: none;
+	color: inherit;
+	cursor: pointer;
+	opacity: 0.55;
+}
+
+.tree__vis:hover { opacity: 1; background: rgba(255, 255, 255, 0.08); }
+.tree__row[data-shown="true"] .tree__vis { opacity: 0.95; }
+.tree__vis svg { width: 14px; height: 14px; }
+
+.tree__name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--mono);
+	font-size: 11.5px;
+}
+
+.tree__meta {
+	font: 400 10.5px/1 var(--mono);
+	color: var(--ink-faint);
+	flex: 0 0 auto;
+}
+
+/* ---- stage -------------------------------------------------------------- */
+
+.stage {
+	display: grid;
+	place-items: center;
+	min-width: 0;
+	padding: 20px;
+	background:
+		linear-gradient(0deg, rgba(0, 0, 0, 0.28), rgba(0, 0, 0, 0.28)),
+		repeating-conic-gradient(#1b1e24 0% 25%, #191c21 0% 50%) 0 0 / 18px 18px;
+}
+
+.stage__frame {
+	position: relative;
+	line-height: 0;
+	max-width: 100%;
+	max-height: 100%;
+	box-shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
+}
+
+#frame {
+	display: block;
+	max-width: 100%;
+	max-height: calc(100vh - 44px - 40px);
+	width: auto;
+	image-rendering: pixelated;
+	user-select: none;
+}
+
+.overlay {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	/* Elements can extend past the canvas (gameclock is x=304 w=112 on a 320
+	   canvas). Clip so the overlay never paints over the panels beside it. */
+	overflow: hidden;
+}
+
+.overlay[hidden] { display: none; }
+
+.box {
+	position: absolute;
+	pointer-events: auto;
+	cursor: grab;
+	/* Matches the DevTools reflex: the whole box is the target, and the outline
+	   sits outside it so it never covers the pixels being judged. */
+	outline: 1px solid transparent;
+	transition: outline-color 90ms var(--ease), background-color 90ms var(--ease);
+}
+
+.box:hover {
+	outline-color: rgba(74, 163, 255, 0.9);
+	background: rgba(74, 163, 255, 0.14);
+}
+
+.box[data-selected="true"] {
+	outline: 1px solid var(--accent);
+	background: rgba(74, 163, 255, 0.1);
+	cursor: grabbing;
+	/* Boxes are siblings with no z-index, so stacking is DOM order: a group's own
+	   children paint over it, and over its handles. The selection has to be the
+	   thing under the pointer, or a corner drag silently selects whatever was
+	   drawn on top instead of resizing what the user is looking at. */
+	z-index: 2;
+}
+
+.box__tag {
+	/* Positioned against the render, not the box, so a box running off the
+	   canvas cannot drag its badge out with it. */
+	position: absolute;
+	padding: 2px 5px;
+	border-radius: 3px;
+	background: var(--accent);
+	color: var(--accent-ink);
+	font: 500 10px/1.35 var(--mono);
+	white-space: nowrap;
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+.stage__empty {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	align-content: center;
+	justify-items: center;
+	gap: 8px;
+	padding: 32px;
+	text-align: center;
+	background: rgba(16, 18, 21, 0.86);
+	line-height: 1.55;
+	color: var(--ink-dim);
+}
+
+.stage__empty p { margin: 0; max-width: 46ch; font-size: 12.5px; }
+.stage__empty-title { color: var(--ink); font-size: 14px; font-weight: 600; }
+
+/* ---- inspector ---------------------------------------------------------- */
+
+.inspect__head {
+	padding: 12px 12px 10px;
+	border-bottom: 1px solid var(--line);
+}
+
+.inspect__name {
+	margin: 0;
+	font: 600 13px/1.3 var(--mono);
+	color: var(--ink);
+}
+
+.inspect__desc {
+	margin: 5px 0 0;
+	font-size: 12px;
+	color: var(--ink-dim);
+	line-height: 1.5;
+}
+
+.metrics {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 1px;
+	margin: 10px 0 0;
+	background: var(--line);
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	overflow: hidden;
+}
+
+.metrics div {
+	background: var(--bg-input);
+	padding: 6px 7px;
+}
+
+.metrics dt {
+	font: 400 9.5px/1 var(--sans);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--ink-faint);
+}
+
+.metrics dd {
+	margin: 4px 0 0;
+	font: 500 12px/1 var(--mono);
+	color: var(--ink);
+}
+
+.group { border-bottom: 1px solid var(--line); padding: 10px 12px 12px; }
+
+.group__title {
+	margin: 0 0 8px;
+	font: 600 10.5px/1 var(--sans);
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: var(--ink-faint);
+}
+
+.field {
+	display: grid;
+	grid-template-columns: 92px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 6px;
+}
+
+.field:last-child { margin-bottom: 0; }
+
+.field label {
+	font: 400 11.5px/1.3 var(--mono);
+	color: var(--ink-dim);
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.field input,
+.field select {
+	font-family: var(--mono);
+	font-size: 11.5px;
+	padding: 5px 7px;
+}
+
+.field input[data-dirty="true"] { border-color: var(--accent); }
+
+/* ---- colour ------------------------------------------------------------- */
+
+/* Swatch, then the raw value. The text stays because a colour cvar holds four
+   different notations and the editor must not quietly rewrite one it cannot read. */
+.field--color { grid-template-columns: 92px 26px minmax(0, 1fr); }
+
+.swatch {
+	width: 26px;
+	height: 22px;
+	padding: 0;
+	border: 1px solid var(--line);
+	border-radius: 3px;
+	cursor: pointer;
+	/* Chequerboard under the colour, so a low alpha reads as transparency rather
+	   than as a darker colour. */
+	background-image:
+		linear-gradient(var(--swatch-fill), var(--swatch-fill)),
+		repeating-conic-gradient(#7a7a7a 0% 25%, #4a4a4a 0% 50%);
+	background-size: 100% 100%, 8px 8px;
+}
+
+.swatch:hover { border-color: var(--accent); }
+.swatch[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+/* An unreadable value draws white in game. Say so here rather than showing a
+   confident swatch of a colour that is not what will be drawn. */
+.swatch[data-unknown="true"] {
+	background-image: repeating-linear-gradient(45deg, #d04a4a 0 3px, #2a2e35 3px 6px);
+}
+
+.field__raw { min-width: 0; }
+
+.swatchpop {
+	margin: 6px 0 10px;
+	padding: 8px;
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	background: rgba(0, 0, 0, 0.22);
+}
+
+.swatchpop[hidden] { display: none; }
+
+.swatchpop__row {
+	display: grid;
+	grid-template-columns: 34px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.swatchpop__row input[type="color"] {
+	width: 34px;
+	height: 24px;
+	padding: 0;
+	border: 1px solid var(--line);
+	border-radius: 3px;
+	background: none;
+	cursor: pointer;
+}
+
+.swatchpop__alpha {
+	font: 400 11px/1 var(--mono);
+	color: var(--ink-dim);
+	min-width: 44px;
+	text-align: right;
+}
+
+.palette {
+	display: grid;
+	grid-template-columns: repeat(16, 1fr);
+	gap: 1px;
+}
+
+.palette__cell {
+	aspect-ratio: 1;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	cursor: pointer;
+}
+
+.palette__cell:hover { outline: 1px solid var(--ink); outline-offset: -1px; z-index: 1; }
+.palette__cell[data-on="true"] { outline: 2px solid var(--accent); outline-offset: -2px; z-index: 2; }
+
+.empty-note {
+	padding: 24px 16px;
+	margin: 0;
+	color: var(--ink-dim);
+	font-size: 12.5px;
+	line-height: 1.55;
+	text-align: center;
+}
+
+.notice {
+	margin: 10px 12px;
+	padding: 9px 10px;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius);
+	background: var(--bg-raise);
+	font-size: 12px;
+	line-height: 1.5;
+	color: var(--ink-dim);
+}
+
+.notice strong { color: var(--ink); display: block; margin-bottom: 3px; font-weight: 600; }
+
+@media (prefers-reduced-motion: reduce) {
+	*, *::before, *::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
+}
+
+.tree__badge {
+	flex: 0 0 auto;
+	padding: 1px 4px;
+	border: 1px solid var(--line-strong);
+	border-radius: 3px;
+	font: 500 9px/1.4 var(--mono);
+	letter-spacing: 0.04em;
+	color: var(--ink-faint);
+	text-transform: uppercase;
+}
+
+.tree__row[aria-selected="true"] .tree__badge {
+	border-color: rgba(11, 16, 23, 0.35);
+	color: var(--accent-ink);
+	opacity: 0.8;
+}
+
+/* A parameter the engine will currently ignore. Shown, not hidden: the value is
+   still real and still saved, it just has no effect until something else changes. */
+.field[data-inert="true"] label { color: var(--ink-faint); }
+.field__inert {
+	padding: 0 3px;
+	border: 1px solid var(--line-strong);
+	border-radius: 2px;
+	font-size: 8.5px;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: var(--ink-faint);
+	cursor: help;
+}
+.field[data-inert="true"] input { opacity: 0.62; }
+
+#fonts { border-bottom: 1px solid var(--line); }
+#fonts .field { grid-template-columns: 92px minmax(0, 1fr); }
+
+.font-state {
+	margin: 8px 0 0;
+	font-size: 11.5px;
+	line-height: 1.5;
+	color: var(--ink-dim);
+}
+
+.font-state[data-ok="true"] { color: #7fd6a0; }
+.font-state[data-warn="true"] { color: var(--warn); }
+
+/* Anchored elements read as belonging to their container. */
+.tree__row[data-depth="0"] { }
+.tree__row[data-parent="true"] .tree__name { font-weight: 600; }
+.tree__row[data-depth]:not([data-depth="0"]) .tree__name::before {
+	content: "└ ";
+	color: var(--ink-faint);
+}
+
+/* Children of the selected container: they move with it, so show them. */
+.box[data-child="true"] {
+	outline: 1px dashed rgba(74, 163, 255, 0.75);
+	background: rgba(74, 163, 255, 0.05);
+}
+
+#groups { border-bottom: 1px solid var(--line); }
+
+.grouplist {
+	display: grid;
+	grid-template-columns: repeat(9, 1fr);
+	gap: 3px;
+}
+
+.grouplist__item {
+	display: grid;
+	justify-items: center;
+	gap: 2px;
+	padding: 5px 0 4px;
+	border: 1px solid var(--line);
+	border-radius: 3px;
+	background: var(--bg-input);
+	color: var(--ink-faint);
+	cursor: pointer;
+	font-family: var(--mono);
+}
+
+.grouplist__item:hover { border-color: var(--line-strong); color: var(--ink-dim); }
+.grouplist__item[data-on="true"] { color: var(--ink); border-color: var(--line-strong); }
+.grouplist__item[data-selected="true"] {
+	border-color: var(--accent);
+	background: rgba(74, 163, 255, 0.12);
+	color: var(--ink);
+}
+
+.grouplist__name { font-size: 10px; font-weight: 600; }
+.grouplist__count { font-size: 9px; opacity: 0.75; }
+
+/* A drop target the user cannot see is a guess. Every target lights up the moment
+   a drag begins, and the one under the pointer commits to it. */
+[data-drop="true"] { transition: border-color 90ms var(--ease), background-color 90ms var(--ease); }
+
+[data-dropping="true"] [data-drop="true"] { border-color: var(--line-strong); }
+
+[data-drop="true"][data-over="true"] {
+	border-color: var(--accent);
+	background: rgba(74, 163, 255, 0.18);
+	color: var(--ink);
+}
+
+.grouplist__detach {
+	display: block;
+	width: 100%;
+	margin-top: 6px;
+	padding: 7px 8px;
+	border: 1px dashed var(--line);
+	border-radius: 3px;
+	background: none;
+	color: var(--ink-faint);
+	font: 400 11px/1.3 var(--sans);
+	cursor: pointer;
+	text-align: center;
+}
+
+.grouplist__detach:hover { border-color: var(--line-strong); color: var(--ink-dim); }
+
+/* ---- buttons ------------------------------------------------------------ */
+
+.btn {
+	appearance: none;
+	border: 1px solid var(--line-strong);
+	background: var(--bg-raise);
+	color: var(--ink);
+	font: 500 12px/1 var(--sans);
+	padding: 7px 12px;
+	border-radius: var(--radius);
+	cursor: pointer;
+	transition: background 120ms var(--ease), border-color 120ms var(--ease);
+}
+
+.btn:hover { background: #2a2f38; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn--primary {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: var(--accent-ink);
+}
+
+.btn--primary:hover:not(:disabled) { background: #66b2ff; }
+
+/* ---- save dialog -------------------------------------------------------- */
+
+.save {
+	width: min(440px, calc(100vw - 32px));
+	padding: 0;
+	border: 1px solid var(--line-strong);
+	border-radius: 8px;
+	background: var(--bg-panel);
+	color: var(--ink);
+}
+
+.save::backdrop { background: rgb(8 10 13 / 0.6); }
+
+.save__form { padding: 18px 20px 16px; }
+
+.save__form h2 {
+	margin: 0 0 14px;
+	font: 600 15px/1.2 var(--sans);
+}
+
+.save__what {
+	margin: 0 0 14px;
+	padding: 0;
+	border: 0;
+}
+
+.save__what legend {
+	padding: 0 0 6px;
+	font: 500 11px/1 var(--mono);
+	color: var(--ink-faint);
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+}
+
+.save__mode {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 9px;
+	align-items: start;
+	padding: 7px 9px;
+	border: 1px solid transparent;
+	border-radius: var(--radius);
+	cursor: pointer;
+}
+
+.save__mode:hover { background: var(--bg-raise); }
+.save__mode:has(:checked) { border-color: var(--line-strong); background: var(--bg-raise); }
+.save__mode input { margin-top: 2px; accent-color: var(--accent); }
+.save__mode strong { display: block; font: 500 13px/1.3 var(--sans); }
+.save__mode small { display: block; margin-top: 2px; color: var(--ink-dim); font-size: 11.5px; }
+
+.save__field {
+	display: grid;
+	grid-template-columns: auto 1fr auto;
+	gap: 9px;
+	align-items: center;
+	margin-bottom: 7px;
+}
+
+.save__field label { font: 500 11px/1 var(--mono); color: var(--ink-faint); }
+
+.save__field input {
+	background: var(--bg-input);
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	color: var(--ink);
+	font: 400 13px/1 var(--mono);
+	padding: 8px 9px;
+	min-width: 0;
+}
+
+.save__ext { font: 400 12px/1 var(--mono); color: var(--ink-faint); }
+
+.save__path {
+	margin: 0 0 12px;
+	font: 400 11.5px/1.45 var(--mono);
+	color: var(--ink-dim);
+	overflow-wrap: anywhere;
+}
+
+.save__path[data-error="true"] { color: var(--danger); }
+
+.save__warn {
+	margin: 0 0 12px;
+	padding: 10px 11px;
+	border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+	border-radius: var(--radius);
+	background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+
+.save__warn p {
+	margin: 0 0 8px;
+	font-size: 12px;
+	line-height: 1.45;
+	color: var(--ink);
+	overflow-wrap: anywhere;
+}
+
+.save__confirm {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	font: 500 12px/1 var(--sans);
+	cursor: pointer;
+}
+
+.save__confirm input { accent-color: var(--warn); }
+
+.save__message {
+	margin: 0 0 12px;
+	font-size: 12px;
+	line-height: 1.45;
+	color: var(--ink-dim);
+	overflow-wrap: anywhere;
+}
+
+.save__message[data-error="true"] { color: var(--danger); }
+
+.save__footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	padding-top: 4px;
+}
+
+/* ---- resize handles ----------------------------------------------------- */
+
+.handle {
+	position: absolute;
+	width: 9px;
+	height: 9px;
+	box-sizing: border-box;
+	border: 1px solid var(--accent-ink);
+	background: var(--accent);
+	border-radius: 2px;
+	pointer-events: auto;
+	/* Above the selected box's own background, and above any sibling box that the
+	   overlay happens to paint later. */
+	z-index: 3;
+}
+
+/* 9px is what the handle should look like, not what it should be worth hitting.
+   The pad is invisible and costs nothing until the pointer is already close. */
+.handle::before {
+	content: '';
+	position: absolute;
+	inset: -4px;
+}
+
+.handle[data-corner="nw"] { left: -5px; top: -5px; cursor: nwse-resize; }
+.handle[data-corner="ne"] { right: -5px; top: -5px; cursor: nesw-resize; }
+.handle[data-corner="sw"] { left: -5px; bottom: -5px; cursor: nesw-resize; }
+.handle[data-corner="se"] { right: -5px; bottom: -5px; cursor: nwse-resize; }
+
+/* A pinned corner is not a control. It reads as one only if it looks like one,
+   so it is hollow, smaller, and does not offer a resize cursor. */
+.handle--anchored {
+	width: 7px;
+	height: 7px;
+	border: 1px solid var(--accent);
+	background: transparent;
+	border-radius: 50%;
+	cursor: help;
+	opacity: 0.75;
+}
+
+.handle--anchored[data-corner="nw"] { left: -4px; top: -4px; }
+.handle--anchored[data-corner="ne"] { right: -4px; top: -4px; }
+.handle--anchored[data-corner="sw"] { left: -4px; bottom: -4px; }
+.handle--anchored[data-corner="se"] { right: -4px; bottom: -4px; }
+
+/* ---- segmented control --------------------------------------------------- */
+
+.seg {
+	display: grid;
+	grid-auto-flow: column;
+	grid-auto-columns: 1fr;
+	gap: 2px;
+	padding: 2px;
+	background: var(--bg-input);
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	margin-bottom: 9px;
+}
+
+.seg__item {
+	appearance: none;
+	border: 0;
+	background: transparent;
+	color: var(--ink-dim);
+	font: 500 12px/1 var(--sans);
+	padding: 7px 4px;
+	border-radius: 3px;
+	cursor: pointer;
+}
+
+.seg__item:hover { color: var(--ink); background: var(--bg-raise); }
+.seg__item[data-on="true"] { background: var(--accent); color: var(--accent-ink); }
