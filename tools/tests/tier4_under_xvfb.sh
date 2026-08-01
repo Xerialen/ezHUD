@@ -15,6 +15,15 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# An engine left over from a killed run still holds the fixed test port, so the new
+# one cannot bind, never prints a URL, and the driver waits for a token that will
+# never come. Clear the port before starting rather than diagnosing that again.
+if pgrep -f "ezquake-linux-x86_64.*hud_web_port $HUD_WEB_TEST_PORT" >/dev/null 2>&1; then
+	echo "tier 4: killing a leftover engine still holding port $HUD_WEB_TEST_PORT" >&2
+	pkill -9 -f "ezquake-linux-x86_64.*hud_web_port $HUD_WEB_TEST_PORT" || true
+	sleep 2
+fi
+
 mkdir -p "$HUD_WEB_ARTIFACT_DIR"
 (
 	cd "$EZQUAKE_BASEDIR"
@@ -36,7 +45,12 @@ mkdir -p "$HUD_WEB_ARTIFACT_DIR"
 ) >"$run_dir/stdout.log" 2>&1 &
 engine_pid=$!
 
-if ! node "$HUD_WEB_REPO_DIR/tools/tests/tier4.mjs" \
+# Hard ceiling on the driver. Every wait inside it has its own timeout, but a
+# browser that never launches is outside all of them, and the job then burns its
+# whole allowance producing no output at all -- which says nothing about what went
+# wrong. Fifteen minutes is far more than a passing run needs (about one).
+if ! timeout --signal=TERM --kill-after=30s 15m \
+		node "$HUD_WEB_REPO_DIR/tools/tests/tier4.mjs" \
 		--log "$engine_log" --port "$HUD_WEB_TEST_PORT" \
 		--basedir "$EZQUAKE_BASEDIR" --artifacts "$HUD_WEB_ARTIFACT_DIR"; then
 	cp "$engine_log" "$HUD_WEB_ARTIFACT_DIR/engine.log" 2>/dev/null || true

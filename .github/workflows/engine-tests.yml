@@ -102,7 +102,9 @@ jobs:
     needs: same_repo
     if: needs.same_repo.outputs.allowed == 'true'
     runs-on: [self-hosted, ezhud-gpu]
-    timeout-minutes: 60
+    # The driver has its own 15-minute ceiling; this only has to cover a cold
+    # engine build on top of it. An hour just meant a hang burned an hour.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
