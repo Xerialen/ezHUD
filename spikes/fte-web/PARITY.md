@@ -17,8 +17,12 @@ Identical on both sides:
   shares a POV.
 - **Video:** 640×480 window, `vid_conwidth/conheight 640×480` on both, so
   console pixels are physical pixels and positions compare 1:1.
-- **Textures:** the owner's `textures.pk3` installed on both sides (Cache API
-  → wasm FS in FTE, `qw/textures.pk3` for ezQuake).
+- **Textures:** first pass ran with only the owner's `textures.pk3` (world
+  textures) on both sides. A second FTE pass (`fte-owner-hud-fullpk3.png`)
+  imported the owner's full art through the editor's own drop zone —
+  `nquake.pk3` plus a pk3 of `textures/wad/`, `textures/charsets/` and
+  `crosshairs/` — while the ezQuake captures got the complete real gamedirs.
+  See "HUD art does not preview" below for what that exposed.
 - ezQuake is the owner's own static build (`~/quake/ezquake-linux`), run
   against a throwaway basedir — nothing in the real Quake install was touched.
 
@@ -60,6 +64,29 @@ was not on the issue's list at all). 29 applied cvars are set but never
 reported back (`scr_*`/`cl_*`/`vid_*` families — the export still cannot lose
 them, because unchanged lines are written back verbatim).
 
+## HUD art does not preview (found by importing the owner's real art)
+
+The owner's HUD look comes from ezQuake's replacement conventions:
+`textures/wad/anum_*.png` for the status-bar digits, `textures/charsets/` for
+the font, `crosshairs/` for the crosshair image. Imported into FTE through the
+drop zone, **both pk3s mount** (they appear in FTE's `path` output and the
+nQuake world textures visibly apply) — but the HUD still renders with stock
+Quake art: FTE's material lookup does not consult ezQuake's `textures/wad/`
+(or charset/crosshair) conventions. So requirement 4 currently holds for
+world textures and fails for HUD art, which for a HUD editor is the half that
+matters. Compare `fte-owner-hud-fullpk3.png` (stock digits, red stock clock)
+with `ezquake-owner-hud.png`'s owner art (orange clock digits, custom charset
+in the 1080p+ captures). Ticket-worthy: either an FTE-side lookup shim in the
+plugin, or converting the wad art into FTE's own override paths at import
+time.
+
+The GUI pipeline itself was exercised end to end in the process: the demo
+picker's change handler, the drop zone with real `drop` events for both pk3s
+and the config, the drift panel rendering (10 missing elements, 29
+unpreviewed cvars, 864 verbatim lines), and the store-then-reload flow —
+which self-reloaded correctly now that boot.js removes FTE's beforeunload
+guard.
+
 ## Round trip: import → edit → export → exec in real ezQuake
 
 1. Owner's config imported into the FTE editor (543 lines applied, 864
@@ -90,6 +117,10 @@ four small build patches (`fteqw.diff`).
 
 The caveats, in order of user-visible weight:
 
+0. **Custom HUD art does not preview.** ezQuake's `textures/wad/`, charset
+   and crosshair replacement conventions are not consulted by FTE even with
+   the packages mounted (see above). The single biggest gap for "preview the
+   look, not just the positions"; needs its own ticket before the real build.
 1. **Font rendering differs** throughout (FTE's own font system) — the layout
    is right, the glyphs are not ezQuake's. Known going in.
 2. **teaminfo and face place differently** than ezQuake with the same cvars —
