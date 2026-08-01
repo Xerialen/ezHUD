@@ -32,6 +32,14 @@ EZQ_CONFIG=${EZQ_CONFIG:-$EZQ_BASEDIR/../config-owner.cfg}
 EZQ_DEMO=${EZQ_DEMO:-demos/tb4gf_book_vs_s.mvd}
 EZQ_JUMP=${EZQ_JUMP:-9:00}
 EZQ_TRACK=${EZQ_TRACK:-bps}
+# The owner's config says `vid_conscale 5`, i.e. a 512×288 console on the
+# native 2560×1440. conscale divides whatever the framebuffer is, so at any
+# other resolution the console shrinks and a layout tuned for 512×288 gets
+# cut at the edges (measured: gameclock and health clipped at 1920×1080).
+# Pinning conwidth/conheight reproduces the owner's layout at every size;
+# conwidth overrides conscale in ezQuake.
+EZQ_CONWIDTH=${EZQ_CONWIDTH:-512}
+EZQ_CONHEIGHT=${EZQ_CONHEIGHT:-288}
 export DISPLAY=${DISPLAY:-:0.0}
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
@@ -87,13 +95,13 @@ fi
 mkdir -p "$EZQ_BASEDIR/ezquake/configs"
 {
 	cat "$EZQ_CONFIG"
-	printf '\nvid_width %s\nvid_height %s\nvid_win_width %s\nvid_win_height %s\nvid_fullscreen %s\nvolume 0\n' \
-		"$W" "$H" "$W" "$H" "$FS"
+	printf '\nvid_width %s\nvid_height %s\nvid_win_width %s\nvid_win_height %s\nvid_fullscreen %s\nvid_conwidth %s\nvid_conheight %s\nvolume 0\n' \
+		"$W" "$H" "$W" "$H" "$FS" "$EZQ_CONWIDTH" "$EZQ_CONHEIGHT"
 } > "$EZQ_BASEDIR/ezquake/configs/config.cfg"
 
 for d in id1 qw ezquake; do
 	mkdir -p "$EZQ_BASEDIR/$d"
-	printf 'bind F5 "demo_jump %s"\nbind F6 "cl_demospeed 0.01"\nbind F7 "screenshot %s"\nbind F10 "track %s"\nbind F11 "clear"\n' \
+	printf 'bind F5 "demo_jump %s"\nbind F6 "cl_demospeed 0.01"\nbind F7 "screenshot %s"\nbind F10 "track %s"\nbind F11 "clear"\nbind F12 "toggleconsole"\n' \
 		"$EZQ_JUMP" "$NAME" "$EZQ_TRACK" > "$EZQ_BASEDIR/$d/autoexec.cfg"
 done
 
@@ -119,10 +127,15 @@ sleep 6	# demo connect + config exec settle; the window exists before the demo r
 key() { python3 "$here/xkey.py" "$WID" "$1"; }
 
 # ---- choreography ----------------------------------------------------------
+# The console starts DOWN when the engine boots into +playdemo and nothing
+# raises it, so exactly one toggle is deterministic — every earlier capture
+# had conback across the top half because this step was missing. `toggle`
+# rather than `set`: there is no command to set the console state directly.
 key F5;  sleep 3      # jump (lands on the nearest keyframe)
 key F10; sleep 0.5    # track the agreed player
 key F6;  sleep 2      # freeze
-key F11; sleep 1.5    # clear console + notify
+key F12; sleep 1      # raise the console (down since boot; see above)
+key F11; sleep 1.5    # clear the notify lines
 key F7                # engine screenshot: full framebuffer, WM-clipping-proof
 
 # The engine writes the PNG asynchronously; the file exists before it is
