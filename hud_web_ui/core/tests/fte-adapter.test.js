@@ -1,0 +1,254 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { Bridge, BridgeError } from '../fte-adapter.js';
+
+// A stand-in for the wasm runtime. The real Module hands back a char* that
+// UTF8ToString decodes; nothing here cares which pointer it was, so the fake
+// returns a fixed one and decodes to whatever the test set.
+function fakeEngine(state, { canvas = { width: 1024, height: 576 } } = {}) {
+	const sent = [];
+	const json = { text: typeof state === 'string' ? state : JSON.stringify(state) };
+	return {
+		sent,
+		json,
+		engine: {
+			module: {
+				canvas,
+				_EZHud_StateJSON: () => 1,
+				UTF8ToString: (ptr) => (ptr ? json.text : ''),
+			},
+			ftec: { cbufadd: (line) => sent.push(line) },
+		},
+	};
+}
+
+const oneElement = {
+	protocol: 1,
+	engine: 'fteqw ezhud (web)',
+	screen: { vid_width: 512, vid_height: 288, scr_con_current: 0 },
+	elements: [
+		{
+			name: 'health', shown: true, place: 'screen', parent: null,
+			align_x: 'left', align_y: 'top', pos_x: 0, pos_y: 0, order: 5, frame: 0,
+			rect: { x: 4, y: 4, w: 45, h: 20 },
+			cvars: { hud_health_scale: '2', hud_health_style: '0' },
+		},
+	],
+};
+
+test('state parses the export and injects physical from the engine canvas', async () => {
+	const fake = fakeEngine(oneElement);
+	const bridge = new Bridge(fake);
+	const state = await bridge.state();
+
+	// The plugin deliberately omits `physical`: the page owns the size of the
+	// picture, the same way the ezQuake bridge reads it from the framebuffer it
+	// is about to capture.
+	assert.deepEqual(state.physical, [1024, 576]);
+	assert.equal(state.screen.vid_width, 512);
+	assert.equal(bridge.lastState, state);
+});
+
+test('state refuses before the runtime is up, as LOST rather than DENIED', async () => {
+	const bridge = new Bridge({ engine: { module: null, ftec: null } });
+	assert.equal(bridge.ready(), false);
+	await assert.rejects(() => bridge.state(), (err) => {
+		assert.ok(err instanceof BridgeError);
+		// 403 is the one status app.js stops polling on. Anything else keeps
+		// the retry loop alive, which is the whole point of throwing here.
+		assert.notEqual(err.status, 403);
+		assert.match(err.message, /still starting/);
+		return true;
+	});
+});
+
+test('a refused state does not poison the next one', async () => {
+	const engine = { module: null, ftec: null };
+	const bridge = new Bridge({ engine });
+	await assert.rejects(() => bridge.state());
+
+	const fake = fakeEngine(oneElement);
+	engine.module = fake.engine.module;
+	engine.ftec = fake.engine.ftec;
+	const state = await bridge.state();
+	assert.equal(state.elements[0].name, 'health');
+});
+
+test('state reports malformed JSON rather than throwing a SyntaxError at app.js', async () => {
+	const bridge = new Bridge(fakeEngine('{"protocol":1,'));
+	await assert.rejects(() => bridge.state(), /malformed JSON/);
+});
+
+test('send passes allowlisted commands through to cbufadd, newline included', async () => {
+	const fake = fakeEngine(oneElement);
+	const bridge = new Bridge(fake);
+	await bridge.send('hud_recalculate');
+	await bridge.send('hud_health_pos_x 12');
+	assert.deepEqual(fake.sent, ['hud_recalculate\n', 'hud_health_pos_x 12\n']);
+});
+
+test('send refuses chaining, expansion, newlines, hud_web and anything unlisted', async () => {
+	const fake = fakeEngine(oneElement);
+	const bridge = new Bridge(fake);
+	const refused = [
+		'hud_health_pos_x 1; quit',           // chaining
+		'hud_tracking_format $rcon_password', // Cmd_ExpandString runs after the check
+		'hud_health_pos_x 1\nquit',           // a second line is a second command
+		'hud_web 0',                          // the bridge's own settings
+		'hud_web_port 1234',
+		'exec autoexec.cfg',                  // not on the list, and never will be
+		'quit',
+		'togglehud health',                   // falls back to *any* cvar (hud.c:498)
+		'',
+	];
+	for (const line of refused) {
+		await assert.rejects(() => bridge.send(line), (err) => {
+			assert.equal(err.status, 403);
+			return true;
+		}, `expected refusal: ${JSON.stringify(line)}`);
+	}
+	assert.deepEqual(fake.sent, []);
+});
+
+test('setCvar quotes values with spaces, and the empty value', async () => {
+	const fake = fakeEngine(oneElement);
+	const bridge = new Bridge(fake);
+	await bridge.setCvar('hud_health_pos_x', 12);
+	await bridge.setCvar('hud_clock_format', '%H:%M %p');
+	await bridge.setCvar('hud_clock_format', '');
+	assert.deepEqual(fake.sent, [
+		'hud_health_pos_x 12\n',
+		'hud_clock_format "%H:%M %p"\n',
+		'hud_clock_format ""\n',
+	]);
+});
+
+test('exportHudCfg writes sorted cvar "value" lines from the last state', async () => {
+	const bridge = new Bridge(fakeEngine(oneElement));
+	await bridge.state();
+	const lines = bridge.exportHudCfg().trimEnd().split('\n');
+
+	assert.match(lines[0], /^\/\//);
+	const body = lines.slice(2);
+	assert.deepEqual(body, [...body].sort((a, b) => a.localeCompare(b)));
+	assert.ok(body.includes('hud_health_scale "2"'));
+	// The placement fields live on hud_t rather than in params, so they are
+	// absent from `cvars` and have to be rebuilt from the element itself.
+	assert.ok(body.includes('hud_health_pos_x "0"'));
+	assert.ok(body.includes('hud_health_show "1"'));
+	assert.ok(body.includes('hud_health_place "screen"'));
+});
+
+test('exportFullCfg rewrites applied lines and reproduces the rest byte-identical', async () => {
+	const bridge = new Bridge(fakeEngine(oneElement));
+	await bridge.state();
+	bridge.retainedLines = [
+		{ raw: '// my hud', cvar: null, applied: false },
+		{ raw: 'bind SPACE +jump', cvar: null, applied: false },
+		{ raw: 'seta hud_health_scale    1', cvar: 'hud_health_scale', applied: true },
+		{ raw: '', cvar: null, applied: false },
+		{ raw: 'alias  rl "impulse 7"', cvar: null, applied: false },
+		// Applied, but the engine no longer reports it: keep the user's line
+		// rather than dropping a setting we cannot speak for.
+		{ raw: 'hud_gone_pos_x 3', cvar: 'hud_gone_pos_x', applied: true },
+	];
+
+	const out = bridge.exportFullCfg().split('\n');
+	assert.deepEqual(out.slice(0, 6), [
+		'// my hud',
+		'bind SPACE +jump',
+		'hud_health_scale "2"',   // rewritten to the engine's current value
+		'',
+		'alias  rl "impulse 7"',  // spacing and quoting untouched
+		'hud_gone_pos_x 3',
+	]);
+	// No defaults captured, so nothing is appended.
+	assert.equal(out.length, 7);
+	assert.equal(out[6], '');
+});
+
+test('captureDefaults plus a changed cvar appends it under // added in ez-hud', async () => {
+	const fake = fakeEngine(oneElement);
+	const bridge = new Bridge(fake);
+	await bridge.state();
+	bridge.captureDefaults();
+
+	// The user drags health across the screen after importing a config that
+	// never mentioned pos_x.
+	const moved = structuredClone(oneElement);
+	moved.elements[0].pos_x = 40;
+	fake.json.text = JSON.stringify(moved);
+	await bridge.state();
+
+	bridge.retainedLines = [{ raw: 'bind SPACE +jump', cvar: null, applied: false }];
+	const out = bridge.exportFullCfg().trimEnd().split('\n');
+	assert.deepEqual(out, [
+		'bind SPACE +jump',
+		'',
+		'// added in ez-hud',
+		'hud_health_pos_x "40"',
+	]);
+});
+
+test('a cvar already written by a retained line is not appended twice', async () => {
+	const fake = fakeEngine(oneElement);
+	const bridge = new Bridge(fake);
+	await bridge.state();
+	bridge.captureDefaults();
+
+	const moved = structuredClone(oneElement);
+	moved.elements[0].pos_x = 40;
+	fake.json.text = JSON.stringify(moved);
+	await bridge.state();
+
+	bridge.retainedLines = [{ raw: 'hud_health_pos_x 0', cvar: 'hud_health_pos_x', applied: true }];
+	const out = bridge.exportFullCfg().trimEnd().split('\n');
+	assert.deepEqual(out, ['hud_health_pos_x "40"']);
+});
+
+test('a cvar the defaults snapshot never saw counts as an addition', async () => {
+	const fake = fakeEngine({ ...oneElement, elements: [] });
+	const bridge = new Bridge(fake);
+	await bridge.state();
+	bridge.captureDefaults();          // empty: no elements registered yet
+
+	fake.json.text = JSON.stringify(oneElement);
+	await bridge.state();
+
+	const out = bridge.exportFullCfg();
+	assert.match(out, /\/\/ added in ez-hud/);
+	assert.match(out, /hud_health_scale "2"/);
+});
+
+test('the editor-facing surface app.js needs is all present', async () => {
+	const bridge = new Bridge(fakeEngine(oneElement));
+	assert.equal(bridge.configured, true);
+	assert.equal(Bridge.fromLocation('?t=x').configured, true);
+
+	// No frame capture on this backend; app.js still wants an image URL whose
+	// load event fires, so it gets a transparent pixel.
+	assert.match(bridge.frameUrl(3), /^data:image\/gif;base64,/);
+	assert.equal(await bridge.backupEnabled(), false);
+
+	const fonts = await bridge.fonts();
+	assert.equal(fonts.proportional_loaded, false);
+	assert.deepEqual(fonts.available, []);
+
+	const palette = await bridge.palette();
+	assert.equal(palette.colors.length, 256);
+	assert.match(palette.colors[0], /^#[0-9a-f]{6}$/);
+
+	const configs = await bridge.configs();
+	assert.equal(configs.backup_enabled, false);
+	assert.deepEqual(configs.available, []);
+});
+
+test('loadFace goes through send, so an unlisted face name is refused the same way', async () => {
+	const fake = fakeEngine(oneElement);
+	const bridge = new Bridge(fake);
+	await bridge.loadFace('qw-font3.otf');
+	await bridge.loadFace('');
+	assert.deepEqual(fake.sent, ['fontload qw-font3.otf\n', 'fontload none\n']);
+	await assert.rejects(() => bridge.loadFace('a; quit'));
+});
