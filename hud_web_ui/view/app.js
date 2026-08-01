@@ -9,8 +9,7 @@ import {
 	needsRecalculate, parseColor, resizeTo, resizedRect,
 } from '../core/model.js';
 import {
-	consoleToFrame, displayDeltaToConsole, elementAt, quantize, scaleFactor,
-	scaleFactors,
+	consoleToFrame, displayDeltaToConsole, elementAt, quantize, scaleFactors,
 } from '../core/geometry.js';
 
 const $ = (id) => document.getElementById(id);
@@ -33,15 +32,12 @@ let pending = new Map();   // cvar -> value the user typed but the engine hasn't
 
 // ---- engine sync ----------------------------------------------------------
 
-async function refresh({ frame = true } = {}) {
+async function refresh() {
 	try {
-		const state = await bridge.state();
-		model.applyState(state);
-		if (frame) {
-			requestFrame();
-		}
+		model.applyState(await bridge.state());
+		requestFrame();
 	} catch (err) {
-		model.applyError(err instanceof BridgeError ? err : new BridgeError(String(err)));
+		model.applyError(BridgeError.from(err));
 		if (model.status === Status.DENIED) {
 			stopPolling();
 		}
@@ -91,23 +87,6 @@ function stopPolling() {
 	if (poll) { clearInterval(poll); poll = null; }
 }
 
-async function apply(cvar, value) {
-	pending.set(cvar, String(value));
-	render();
-	try {
-		await bridge.setCvar(cvar, value);
-	} catch (err) {
-		model.applyError(err instanceof BridgeError ? err : new BridgeError(String(err)));
-		return;
-	} finally {
-		pending.delete(cvar);
-	}
-	if (needsRecalculate(cvar)) {
-		await bridge.send('hud_recalculate');
-	}
-	await refresh();
-}
-
 // One change that means several cvars is still one change: refresh once at the
 // end, or the intermediate states render and a frame capture is paid for each.
 async function applyAll(changes) {
@@ -120,7 +99,7 @@ async function applyAll(changes) {
 			await bridge.setCvar(cvar, value);
 		}
 	} catch (err) {
-		model.applyError(err instanceof BridgeError ? err : new BridgeError(String(err)));
+		model.applyError(BridgeError.from(err));
 		return;
 	} finally {
 		for (const [cvar] of changes) {
@@ -132,6 +111,8 @@ async function applyAll(changes) {
 	}
 	await refresh();
 }
+
+const apply = (cvar, value) => applyAll([[cvar, value]]);
 
 // ---- rendering ------------------------------------------------------------
 
@@ -215,27 +196,36 @@ function renderBar() {
 	const p = model.physical;
 	el.readout.replaceChildren();
 	if (s && p) {
-		addReadout('canvas', `${s.vid_width}×${s.vid_height}`);
-		addReadout('render', `${p[0]}×${p[1]}`);
-		addReadout('scale', `${scaleFactor(s, p).toFixed(2)}×`);
+		const { kx, ky } = scaleFactors(s, p);
+		el.readout.append(termCell('canvas', `${s.vid_width}×${s.vid_height}`));
+		el.readout.append(termCell('render', `${p[0]}×${p[1]}`));
+		// Both ratios, because they are independent and only look like one number
+		// when the console happens to share the screen's aspect. A single figure
+		// here is what made a whole class of bug invisible during QA.
+		el.readout.append(termCell('scale', kx === ky
+			? `${kx.toFixed(2)}×`
+			: `${kx.toFixed(2)}×/${ky.toFixed(2)}×`));
 	}
 	const f = model.fonts;
 	if (f) {
-		addReadout('font', f.proportional_loaded ? (f.facepath || 'proportional') : 'none');
+		el.readout.append(termCell('font',
+			f.proportional_loaded ? (f.facepath || 'proportional') : 'none'));
 	}
 	if (model.frameCost != null) {
-		addReadout('frame', `${model.frameCost}ms`);
+		el.readout.append(termCell('frame', `${model.frameCost}ms`));
 	}
 }
 
-function addReadout(term, value) {
+// <div><dt>term</dt><dd>value</dd></div> — the shape both the top-bar readout and
+// the inspector's metrics are made of.
+function termCell(term, value) {
 	const wrap = document.createElement('div');
 	const dt = document.createElement('dt');
 	const dd = document.createElement('dd');
 	dt.textContent = term;
-	dd.textContent = value;
+	dd.textContent = String(value);
 	wrap.append(dt, dd);
-	el.readout.append(wrap);
+	return wrap;
 }
 
 function icon(id) {
@@ -393,7 +383,11 @@ function renderOverlay() {
 	}
 	el.empty.hidden = true;
 
-	if (!s || !p || !shown) {
+	// A zero in `physical` is not a scale of 1, it is "the engine has not told us
+	// the size of the picture yet". scaleFactors would fall back to kx=ky=1 and lay
+	// every box out in console coordinates over a framebuffer-sized image -- wrong
+	// position, wrong size, and no error anywhere to explain it. Draw nothing.
+	if (!s || !p || !p[0] || !p[1] || !shown) {
 		return;
 	}
 	const displayScale = shown / natural;
@@ -405,10 +399,7 @@ function renderOverlay() {
 		box.dataset.selected = String(item.name === model.selected);
 		// Selecting a container should show what moves with it.
 		box.dataset.child = String(item.parent != null && item.parent === model.selected);
-		box.style.left = `${r.x * displayScale}px`;
-		box.style.top = `${r.y * displayScale}px`;
-		box.style.width = `${Math.max(r.w * displayScale, 3)}px`;
-		box.style.height = `${Math.max(r.h * displayScale, 3)}px`;
+		placeBox(box, item.rect, s, p);
 
 		if (item.name === model.selected || item.name === model.hovered) {
 			const tag = document.createElement('span');
@@ -494,7 +485,6 @@ function beginResize(ev, name, handle) {
 	const screen = model.screen;
 	const physical = model.physical;
 	const displayWidth = el.frame.clientWidth;
-	const displayScale = displayWidth / (el.frame.naturalWidth || 1);
 	const gesture = beginGesture();
 
 	const move = (e) => {
@@ -514,16 +504,7 @@ function beginResize(ev, name, handle) {
 		const height = control.mode === 'box'
 			? Math.max(1, changes[1][1] * (rect.h / (control.height || 1)))
 			: rect.h * factor;
-		const preview = resizedRect(rect, anchor, width, height);
-		const r = consoleToFrame(preview, screen, physical);
-		box.style.left = `${r.x * displayScale}px`;
-		box.style.top = `${r.y * displayScale}px`;
-		box.style.width = `${Math.max(r.w * displayScale, 3)}px`;
-		box.style.height = `${Math.max(r.h * displayScale, 3)}px`;
-		// Reported so a drag that goes wrong says what it computed, instead of
-		// leaving only a box of the wrong size to reason backwards from.
-		box.dataset.drag = `d=${dx.toFixed(2)},${dy.toFixed(2)} w=${width.toFixed(1)} set=${changes.map(([, v]) => v).join('/')}`;
-
+		placeBox(box, resizedRect(rect, anchor, width, height), screen, physical);
 		gesture.commit(changes);
 	};
 	const guarded = (e) => {
@@ -546,11 +527,14 @@ function beginResize(ev, name, handle) {
 	window.addEventListener('pointerup', up);
 }
 
-// Position a box from a console-space rect, the same way renderOverlay does, so
-// the preview and the engine's own answer are drawn by identical arithmetic.
-function previewBox(box, rect) {
+// The one place a console-space rect becomes a positioned box. Steady-state
+// rendering and both drag previews go through it, so a preview can never be drawn
+// by different arithmetic than the engine's own answer that replaces it.
+// displayScale is recomputed per call rather than captured, so a window resize
+// mid-gesture still lands the box correctly.
+function placeBox(box, rect, screen = model.screen, physical = model.physical) {
 	const displayScale = el.frame.clientWidth / (el.frame.naturalWidth || 1);
-	const r = consoleToFrame(rect, model.screen, model.physical);
+	const r = consoleToFrame(rect, screen, physical);
 	box.style.left = `${r.x * displayScale}px`;
 	box.style.top = `${r.y * displayScale}px`;
 	box.style.width = `${Math.max(r.w * displayScale, 3)}px`;
@@ -598,7 +582,7 @@ function beginGesture() {
 			await drain();
 			dragging = false;
 			if (failure) {
-				model.applyError(failure instanceof BridgeError ? failure : new BridgeError(String(failure)));
+				model.applyError(BridgeError.from(failure));
 				return;
 			}
 			await refresh();
@@ -616,7 +600,7 @@ function beginDrag(ev, item) {
 	const originY = Number(item.pos_y) || 0;
 	const rect = { ...item.rect };
 	// Claim the overlay before changing the selection. Selecting re-renders, and a
-	// re-render calls replaceChildren() -- which would leave every previewBox()
+	// re-render calls replaceChildren() -- which would leave every placeBox()
 	// below writing to a node that is no longer in the document, so the drag would
 	// look frozen until release. Style the live node instead; the full render with
 	// handles arrives when the gesture ends.
@@ -638,7 +622,7 @@ function beginDrag(ev, item) {
 		// promises sub-pixel precision the engine discards.
 		const nx = quantize(originX + dx);
 		const ny = quantize(originY + dy);
-		previewBox(box, { ...rect, x: rect.x + (nx - originX), y: rect.y + (ny - originY) });
+		placeBox(box, { ...rect, x: rect.x + (nx - originX), y: rect.y + (ny - originY) });
 
 		const key = `${nx},${ny}`;
 		if (key === last) {
@@ -767,17 +751,9 @@ function directionGroup(control, item) {
 function metrics(item) {
 	const dl = document.createElement('dl');
 	dl.className = 'metrics';
-	const cells = item.rect
-		? [['x', item.rect.x], ['y', item.rect.y], ['w', item.rect.w], ['h', item.rect.h]]
-		: [['x', '—'], ['y', '—'], ['w', '—'], ['h', '—']];
-	for (const [term, value] of cells) {
-		const wrap = document.createElement('div');
-		const dt = document.createElement('dt');
-		const dd = document.createElement('dd');
-		dt.textContent = term;
-		dd.textContent = String(value);
-		wrap.append(dt, dd);
-		dl.append(wrap);
+	const r = item.rect;
+	for (const term of ['x', 'y', 'w', 'h']) {
+		dl.append(termCell(term, r ? r[term] : '—'));
 	}
 	return dl;
 }
@@ -837,7 +813,7 @@ function group(title, entries, item) {
 		if (pending.has(entry.name)) {
 			input.dataset.dirty = 'true';
 		}
-		const inert = model.inertReason(item, entry.suffix);
+		const inert = model.inertReason(entry.suffix);
 		if (inert) {
 			row.dataset.inert = 'true';
 			label.title = `${entry.name} — ${inert}`;
@@ -903,7 +879,7 @@ function colorField(entry, item) {
 	if (pending.has(entry.name)) {
 		text.dataset.dirty = 'true';
 	}
-	const inert = model.inertReason(item, entry.suffix);
+	const inert = model.inertReason(entry.suffix);
 	if (inert) {
 		row.dataset.inert = 'true';
 		label.title = `${entry.name} — ${inert}`;
@@ -1055,9 +1031,17 @@ function picker(options, value, onChange) {
 }
 
 function renderModes() {
+	const m = model.modes;
+	// Same rule as the tree, overlay and inspector: rebuild only when what this
+	// section draws from actually changed. Without this the panel was rebuilt on
+	// every render -- including every frame arrival, since frameCost changes each
+	// time -- which dropped focus out of the viewsize input and the two selects
+	// mid-edit, the same node-churn failure the interaction guards exist to stop.
+	if (!stale('modes', JSON.stringify(m), '|', model.sbarInert, '|', model.modeSummary)) {
+		return;
+	}
 	const box = el.modePanel;
 	box.replaceChildren();
-	const m = model.modes;
 	if (!m) {
 		return;
 	}
@@ -1195,7 +1179,7 @@ function buildReset(changes) {
 		try {
 			await bridge.send('hud_reset_layout');
 		} catch (err) {
-			model.applyError(err instanceof BridgeError ? err : new BridgeError(String(err)));
+			model.applyError(BridgeError.from(err));
 		}
 		await refresh();
 		el.resetDialog.close();
@@ -1240,9 +1224,15 @@ function acceptDrop(node, place, verb) {
 }
 
 function renderGroups() {
+	const groups = model.groups;
+	// Membership is "which elements name this group in place", which treeFingerprint
+	// already captures, plus the selection the hint text is written from.
+	if (!stale('groups', model.treeFingerprint, '|', model.selected,
+		'|', groups.map((g) => `${g.name}:${g.shown ? 1 : 0}`).join(','))) {
+		return;
+	}
 	const box = el.groupPanel;
 	box.replaceChildren();
-	const groups = model.groups;
 	if (!groups.length) {
 		return;
 	}
@@ -1358,6 +1348,11 @@ async function chooseFace(name) {
 }
 
 function renderFonts() {
+	// The face picker is a <select> the user opens; rebuilding it under them closes
+	// it. fontState only changes when a load actually completes.
+	if (!stale('fonts', JSON.stringify(fontState), '|', fontBusy)) {
+		return;
+	}
 	const box = el.fontPanel;
 	box.replaceChildren();
 	if (!fontState) {
@@ -1531,7 +1526,7 @@ function buildSave() {
 	cancel.type = 'button';
 	cancel.className = 'btn';
 	cancel.textContent = 'Cancel';
-	cancel.addEventListener('click', () => closeSave());
+	cancel.addEventListener('click', () => el.saveDialog.close());
 	save.submit = document.createElement('button');
 	save.submit.type = 'button';
 	save.submit.className = 'btn btn--primary';
@@ -1620,10 +1615,6 @@ async function commitSave() {
 			? `Wrote ${file} to ${dir}`
 			: `Sent to ezQuake, but ${file} is not in ${dir} yet.`,
 	});
-}
-
-function closeSave() {
-	el.saveDialog.close();
 }
 
 // ---- input ----------------------------------------------------------------

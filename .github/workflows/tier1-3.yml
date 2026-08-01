@@ -1,0 +1,65 @@
+name: tests (tier 1-3)
+
+# Everything here is pure Node plus a headless Chromium, so it runs on
+# GitHub-hosted runners: free for a public repository, disposable, and nothing of
+# the maintainer's hardware is exposed to it. The tiers that need a built engine
+# live in engine-tests.yml and are pinned to self-hosted machines instead.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tier1:
+    name: tier 1 - pure core
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Placement core, editor logic, and baked-UI freshness
+        run: npm run --silent test:tier1
+
+  tier2-js:
+    name: tier 2 - bridge client
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Bridge client against a local HTTP stub
+        run: npm run --silent test:tier2:js
+
+  tier3:
+    name: tier 3 - view layer
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright chromium
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: DOM against the fixture, kx and ky applied separately
+        run: xvfb-run -a npm run --silent test:tier3
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: tier3-artifacts
+          path: /tmp/ezquake-hud-tier3-artifacts/
+          if-no-files-found: ignore

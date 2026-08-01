@@ -112,11 +112,6 @@ static void HUD_Web_CloseClient(hud_web_client_t *client)
 	client->socket = INVALID_SOCKET;
 }
 
-static void HUD_Web_InvalidateToken(void)
-{
-	memset(hud_web_token, 0, sizeof(hud_web_token));
-}
-
 static void HUD_Web_Stop(qbool announce)
 {
 	int i;
@@ -127,9 +122,18 @@ static void HUD_Web_Stop(qbool announce)
 		hud_web_listener = INVALID_SOCKET;
 	}
 	for (i = 0; i < HUD_WEB_MAX_CLIENTS; ++i) {
-		HUD_Web_CloseClient(&hud_web_clients[i]);
+		/* Only slots actually in use. HUD_Web_CloseClient memsets the whole struct,
+		 * including a 64 KiB request buffer, and HUD_Web_Frame calls Stop on every
+		 * rendered frame while the bridge is disabled (the default) or the port is
+		 * invalid -- roughly 260 KiB of pointless writes per frame. HUD_Web_Init and
+		 * HUD_Web_CloseClient both leave unused slots at INVALID_SOCKET, so this is a
+		 * sound test at any point after init, and it still closes a stray client if
+		 * some future path ever tears the listener down without them. */
+		if (hud_web_clients[i].socket != INVALID_SOCKET) {
+			HUD_Web_CloseClient(&hud_web_clients[i]);
+		}
 	}
-	HUD_Web_InvalidateToken();
+	memset(hud_web_token, 0, sizeof(hud_web_token));
 	hud_web_bound_port = 0;
 
 	if (announce && was_running) {
@@ -559,8 +563,10 @@ static const char *HUD_Web_StatusReason(int status)
 	}
 }
 
-static qbool HUD_Web_QueueOwnedResponse(hud_web_client_t *client, int status,
-		const char *content_type, byte *body, size_t body_length)
+/* `extra_headers` is NULL for everything except the rate-limited 503, which needs a
+ * Retry-After. It used to be a hand-copied duplicate of this whole function. */
+static qbool HUD_Web_QueueOwnedResponseEx(hud_web_client_t *client, int status,
+		const char *content_type, byte *body, size_t body_length, const char *extra_headers)
 {
 	int header_length;
 
@@ -569,13 +575,15 @@ static qbool HUD_Web_QueueOwnedResponse(hud_web_client_t *client, int status,
 		"Connection: close\r\n"
 		"Content-Length: %llu\r\n"
 		"Content-Type: %s\r\n"
+		"%s"
 		"Access-Control-Allow-Origin: *\r\n"
 		"Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
 		"Access-Control-Allow-Headers: X-HUD-Token, Content-Type\r\n"
 		"Cache-Control: no-store\r\n"
 		"\r\n",
 		status, HUD_Web_StatusReason(status), (unsigned long long)body_length,
-		content_type ? content_type : "application/octet-stream");
+		content_type ? content_type : "application/octet-stream",
+		extra_headers ? extra_headers : "");
 	if (header_length < 0 || (size_t)header_length >= sizeof(client->response_header)) {
 		if (body) {
 			Q_free(body);
@@ -592,8 +600,14 @@ static qbool HUD_Web_QueueOwnedResponse(hud_web_client_t *client, int status,
 	return true;
 }
 
-static qbool HUD_Web_QueueResponse(hud_web_client_t *client, int status,
-		const char *content_type, const void *body, size_t body_length)
+static qbool HUD_Web_QueueOwnedResponse(hud_web_client_t *client, int status,
+		const char *content_type, byte *body, size_t body_length)
+{
+	return HUD_Web_QueueOwnedResponseEx(client, status, content_type, body, body_length, NULL);
+}
+
+static qbool HUD_Web_QueueResponseEx(hud_web_client_t *client, int status,
+		const char *content_type, const void *body, size_t body_length, const char *extra_headers)
 {
 	byte *owned_body = NULL;
 
@@ -601,7 +615,14 @@ static qbool HUD_Web_QueueResponse(hud_web_client_t *client, int status,
 		owned_body = (byte *)Q_malloc(body_length);
 		memcpy(owned_body, body, body_length);
 	}
-	return HUD_Web_QueueOwnedResponse(client, status, content_type, owned_body, body_length);
+	return HUD_Web_QueueOwnedResponseEx(client, status, content_type, owned_body, body_length,
+		extra_headers);
+}
+
+static qbool HUD_Web_QueueResponse(hud_web_client_t *client, int status,
+		const char *content_type, const void *body, size_t body_length)
+{
+	return HUD_Web_QueueResponseEx(client, status, content_type, body, body_length, NULL);
 }
 
 static void HUD_Web_QueueError(hud_web_client_t *client, int status, const char *error)
@@ -621,33 +642,16 @@ static void HUD_Web_QueueRetryAfter(hud_web_client_t *client, int interval_ms)
 {
 	static const char body[] = "{\"ok\":false,\"error\":\"frame rate limited\"}";
 	int seconds = (interval_ms + 999) / 1000;
-	int header_length;
+	char retry_after[64];
 
 	if (seconds < 1) {
 		seconds = 1;
 	}
-	header_length = snprintf(client->response_header, sizeof(client->response_header),
-		"HTTP/1.1 503 Service Unavailable\r\n"
-		"Connection: close\r\n"
-		"Content-Length: %llu\r\n"
-		"Content-Type: application/json\r\n"
-		"Retry-After: %d\r\n"
-		"Access-Control-Allow-Origin: *\r\n"
-		"Cache-Control: no-store\r\n"
-		"\r\n",
-		(unsigned long long)(sizeof(body) - 1), seconds);
-	if (header_length < 0 || (size_t)header_length >= sizeof(client->response_header)) {
+	if (snprintf(retry_after, sizeof(retry_after), "Retry-After: %d\r\n", seconds) < 0 ||
+		!HUD_Web_QueueResponseEx(client, 503, "application/json",
+			body, sizeof(body) - 1, retry_after)) {
 		HUD_Web_CloseClient(client);
-		return;
 	}
-	client->response_header_length = (size_t)header_length;
-	client->response_header_sent = 0;
-	client->response_body = (byte *)Q_malloc(sizeof(body) - 1);
-	memcpy(client->response_body, body, sizeof(body) - 1);
-	client->response_body_length = sizeof(body) - 1;
-	client->response_body_sent = 0;
-	client->responding = true;
-	client->io_time = Sys_DoubleTime();
 }
 
 qbool HUD_Web_CommandAllowed(const char *line)
@@ -735,11 +739,8 @@ qbool HUD_Web_CommandAllowed(const char *line)
 	/* The bridge's own settings are not HUD appearance. Letting a client set them
 	 * means it can switch off the capture rate limit, rebind the port (minting a new
 	 * token and stranding the editor that asked), or shut the bridge down. */
-	if (name_length >= 8 && !memcmp(start, "hud_web", 7) &&
+	if (name_length >= 7 && !memcmp(start, "hud_web", 7) &&
 			(name_length == 7 || start[7] == '_')) {
-		return false;
-	}
-	if (name_length == 7 && !memcmp(start, "hud_web", 7)) {
 		return false;
 	}
 	cvar_prefix = (name_length >= 4 && !memcmp(start, "hud_", 4)) ||
@@ -815,31 +816,6 @@ static char *HUD_Web_DecodeCommand(const byte *body, size_t body_length)
 	memcpy(command, body, body_length);
 	command[body_length] = '\0';
 	return command;
-}
-
-static qbool HUD_Web_ParseScale(const char *target, float *scale)
-{
-	const char *value;
-	size_t value_length;
-	char buffer[64];
-	char *end;
-	double parsed;
-
-	*scale = 1.0f;
-	if (!HUD_Web_QueryValue(target, "scale", &value, &value_length)) {
-		return true;
-	}
-	if (!value_length || value_length >= sizeof(buffer)) {
-		return false;
-	}
-	memcpy(buffer, value, value_length);
-	buffer[value_length] = '\0';
-	parsed = strtod(buffer, &end);
-	if (*end || !isfinite(parsed) || parsed <= 0.0 || parsed > 1.0) {
-		return false;
-	}
-	*scale = (float)parsed;
-	return true;
 }
 
 static const unsigned char *HUD_Web_LookupAsset(const char *target,
@@ -947,7 +923,6 @@ static void HUD_Web_Route(hud_web_client_t *client, const hud_web_request_t *req
 		return;
 	}
 	if (!strcmp(request->method, "GET") && HUD_Web_PathEquals(request->target, "/frame.png")) {
-		float scale;
 		size_t length = 0;
 		byte *png;
 
@@ -955,10 +930,6 @@ static void HUD_Web_Route(hud_web_client_t *client, const hud_web_request_t *req
 		int interval = max(0, hud_web_frame_interval.integer);
 		double now = Sys_DoubleTime() * 1000.0;
 
-		if (!HUD_Web_ParseScale(request->target, &scale)) {
-			HUD_Web_QueueError(client, 400, "invalid scale");
-			return;
-		}
 		/* Shared across clients on purpose: the cost is the engine's, not each
 		 * client's, so the budget has to be the engine's too. */
 		if (last_capture != 0 && now - last_capture < interval) {
@@ -966,7 +937,7 @@ static void HUD_Web_Route(hud_web_client_t *client, const hud_web_request_t *req
 			return;
 		}
 		last_capture = now;
-		png = HUD_Web_CapturePNG(scale, &length);
+		png = HUD_Web_CapturePNG(&length);
 		if (!png) {
 			HUD_Web_QueueError(client, 503, "frame unavailable");
 		}

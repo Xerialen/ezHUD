@@ -1,11 +1,14 @@
 /* hud_web_state.c — payload half of the HUD editor bridge.
  *
- * Produces the two things the editor UI needs from the engine:
+ * Every endpoint body the editor reads is built here:
  *
- *   HUD_Web_StateJSON()   every element's placement inputs AND the engine's own
- *                         resolved rect, so the UI never recomputes geometry
- *   HUD_Web_CapturePNG()  the actual rendered frame, so the UI never guesses at
- *                         appearance either
+ *   HUD_Web_StateJSON()    placement inputs AND the engine's own resolved rect, so
+ *                          the UI never recomputes geometry
+ *   HUD_Web_CapturePNG()   the actual rendered frame, so it never guesses at
+ *                          appearance either
+ *   HUD_Web_FontsJSON()    what can be picked, and whether the pick loaded
+ *   HUD_Web_ConfigsJSON()  where saving writes, and what is already there
+ *   HUD_Web_PaletteJSON()  the engine's 256 colours, which a pak can replace
  *
  * Transport, auth and routing live in hud_web.c.
  */
@@ -19,8 +22,6 @@
 #include "config_manager.h"
 
 extern hud_t   *hud_huds;
-extern vrect_t  scr_vrect;
-extern int      sb_lines;
 extern float    scr_con_current;
 extern cvar_t   image_png_compression_level;
 extern cvar_t   gl_consolefont;     /* 8px charset */
@@ -92,7 +93,6 @@ static void sb_printf(sbuf_t *b, const char *fmt, ...)
 	sb_puts(b, scratch);
 }
 
-/* JSON string literal, including the surrounding quotes. */
 /* JSON has no infinity and no NaN, but a cvar can hold both: Q_atof overflows a
  * long enough decimal to inf, and /cmd accepts lines up to 1023 bytes, so a value
  * a client is allowed to set can otherwise emit `"pos_x":inf` and make the whole
@@ -164,7 +164,6 @@ static void HUD_Web_WriteElement(sbuf_t *b, hud_t *hud)
 	sb_json_string(b, hud->description);
 
 	sb_printf(b, ",\"shown\":%s", (hud->show && hud->show->value) ? "true" : "false");
-	sb_printf(b, ",\"drawn\":%s", drawn ? "true" : "false");
 
 	sb_puts(b, ",\"place\":");
 	sb_json_string(b, hud->place ? hud->place->string : "screen");
@@ -175,7 +174,6 @@ static void HUD_Web_WriteElement(sbuf_t *b, hud_t *hud)
 	} else {
 		sb_puts(b, "null");
 	}
-	sb_printf(b, ",\"place_outside\":%s", hud->place_outside ? "true" : "false");
 
 	sb_puts(b, ",\"align_x\":");
 	sb_json_string(b, hud->align_x ? hud->align_x->string : "left");
@@ -186,7 +184,6 @@ static void HUD_Web_WriteElement(sbuf_t *b, hud_t *hud)
 	sb_json_number(b, "pos_y", hud->pos_y ? hud->pos_y->value : 0.0f);
 	sb_json_number(b, "order", hud->order ? hud->order->value : 0.0f);
 	sb_json_number(b, "frame", hud->frame ? hud->frame->value : 0.0f);
-	sb_json_number(b, "opacity", hud->opacity ? hud->opacity->value : 1.0f);
 
 	/* What HUD_Register asked for, so a reset can say what it is about to change
 	 * instead of asking the user to trust it. cvar_t keeps defaultvalue from
@@ -207,19 +204,21 @@ static void HUD_Web_WriteElement(sbuf_t *b, hud_t *hud)
 	sb_json_string(b, hud->pos_y ? hud->pos_y->defaultvalue : "");
 	sb_puts(b, "}");
 
-	sb_printf(b, ",\"flags\":%u",  hud->flags);
 	/* Named rather than leaving the UI to decode a bitfield it would have to keep
-	 * in sync with hud.h by hand. */
+	 * in sync with hud.h by hand. The raw `flags` word is deliberately not emitted:
+	 * these two are the only bits any client has ever read. */
 	sb_printf(b, ",\"spec_required\":%s", (hud->flags & HUD_SPEC_REQUIRED) ? "true" : "false");
 	sb_printf(b, ",\"needs_pov\":%s",     (hud->flags & HUD_NEEDS_POV) ? "true" : "false");
 
+	/* A non-null rect IS "laid out this frame" -- there is no separate `drawn` flag,
+	 * because the two were always the same condition and a client that trusted one
+	 * over the other would eventually be told two different things. The rect is never
+	 * guessed: not drawn means null, not a stale or zeroed box. */
 	if (drawn) {
 		sb_printf(b, ",\"rect\":{\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d}",
 		          hud->lx, hud->ly, hud->lw, hud->lh);
-		sb_printf(b, ",\"frame_extents\":{\"l\":%d,\"r\":%d,\"t\":%d,\"b\":%d}",
-		          hud->al, hud->ar, hud->at, hud->ab);
 	} else {
-		sb_puts(b, ",\"rect\":null,\"frame_extents\":null");
+		sb_puts(b, ",\"rect\":null");
 	}
 
 	/* Registered per-element parameters, by their real cvar names, so the UI can
@@ -256,13 +255,12 @@ char *HUD_Web_StateJSON(size_t *out_len)
 	sb_puts(&b, ",\"engine\":");
 	sb_json_string(&b, VersionString());
 
-	/* Console-pixel canvas: the coordinate system every rect below is in. */
-	sb_printf(&b, ",\"screen\":{\"vid_width\":%d,\"vid_height\":%d",
-	          (int)vid.width, (int)vid.height);
-	sb_printf(&b, ",\"sb_lines\":%d,\"scr_con_current\":%d",
-	          sb_lines, (int)scr_con_current);
-	sb_printf(&b, ",\"vrect\":[%d,%d,%d,%d]}",
-	          scr_vrect.x, scr_vrect.y, scr_vrect.width, scr_vrect.height);
+	/* Console-pixel canvas: the coordinate system every rect below is in.
+	 * scr_con_current is here because `toggleconsole` toggles rather than sets, so a
+	 * client that wants the console out of the way has to know whether it is down
+	 * before sending it. */
+	sb_printf(&b, ",\"screen\":{\"vid_width\":%d,\"vid_height\":%d,\"scr_con_current\":%d}",
+	          (int)vid.width, (int)vid.height, (int)scr_con_current);
 
 	/* Which HUD systems are drawing, as separate axes rather than one setting,
 	 * because that is what the engine actually has:
@@ -293,19 +291,25 @@ char *HUD_Web_StateJSON(size_t *out_len)
 	sb_puts(&b, FontProportionalLoaded() ? "true" : "false");
 	sb_puts(&b, ",\"facepath\":");
 	sb_json_string(&b, FontFacePath());
-	sb_puts(&b, ",\"consolefont\":");
-	sb_json_string(&b, gl_consolefont.string);
 	sb_puts(&b, "}");
 
 	/* Viewing context. Without this the UI can only say an element has no rect;
 	 * with it, it can say why: free-flying spectators get no player POV. */
-	sb_printf(&b, ",\"view\":{\"spectator\":%s,\"tracking\":%s,\"demoplayback\":%s}",
+	sb_printf(&b, ",\"view\":{\"spectator\":%s,\"tracking\":%s}",
 	          cl.spectator ? "true" : "false",
-	          (cl.autocam == CAM_TRACK) ? "true" : "false",
-	          cls.demoplayback ? "true" : "false");
+	          (cl.autocam == CAM_TRACK) ? "true" : "false");
 
 	/* Physical resolution, so the UI can show the real pixel size alongside. */
-	sb_printf(&b, ",\"physical\":[%d,%d]", (int)glwidth, (int)glheight);
+	/* Read from the same source /frame.png captures with, never from glwidth and
+	 * glheight. Those are only assigned inside R_BeginRendering (cl_screen.c:925),
+	 * so they read 0 until the first screen update completes -- and this endpoint
+	 * is serviced from the top of CL_Frame, before rendering. A client that got
+	 * [0,0] here fell back to kx=ky=1 and drew every box at console coordinates
+	 * against a framebuffer-sized image: everything in the wrong place, at the
+	 * wrong size, with no error anywhere. Tying the two to one source makes /state
+	 * and /frame.png unable to disagree about the size of the same picture. */
+	sb_printf(&b, ",\"physical\":[%d,%d]",
+	          (int)renderer.ScreenshotWidth(), (int)renderer.ScreenshotHeight());
 
 	sb_puts(&b, ",\"elements\":[");
 	for (hud = hud_huds; hud; hud = hud->next) {
@@ -399,14 +403,6 @@ static void HUD_Web_ListConfigs(sbuf_t *b, const char *dir_path)
 	}
 }
 
-/* Where saving actually writes, and what is already there.
- *
- * Two directories, not one, and that is an engine quirk rather than a choice
- * here: cfg_save honours cfg_use_home and cfg_use_gamedir via Cfg_GetConfigPath
- * (config_manager.c:1131), while hud_export hardcodes <basedir>/ezquake/configs
- * (config_manager.c:893). They are the same path in the default setup and
- * different the moment cfg_use_home is on, so both are reported and the UI says
- * which one a given save mode uses. */
 /* The engine's actual palette, so a palette-index swatch shows the colour the
  * player will really see. gfx/palette.lmp can be replaced by a pak, so this must
  * be read from the engine rather than assumed. */
@@ -433,6 +429,14 @@ char *HUD_Web_PaletteJSON(size_t *out_len)
 	return b.p;
 }
 
+/* Where saving actually writes, and what is already there.
+ *
+ * Two directories, not one, and that is an engine quirk rather than a choice
+ * here: cfg_save honours cfg_use_home and cfg_use_gamedir via Cfg_GetConfigPath
+ * (config_manager.c:1131), while hud_export hardcodes <basedir>/ezquake/configs
+ * (config_manager.c:893). They are the same path in the default setup and
+ * different the moment cfg_use_home is on, so both are reported and the UI says
+ * which one a given save mode uses. */
 char *HUD_Web_ConfigsJSON(size_t *out_len)
 {
 	extern cvar_t cfg_backup;
@@ -507,16 +511,12 @@ char *HUD_Web_FontsJSON(size_t *out_len)
 /* /frame.png                                                                 */
 /* ------------------------------------------------------------------------- */
 
-byte *HUD_Web_CapturePNG(float scale, size_t *out_len)
+byte *HUD_Web_CapturePNG(size_t *out_len)
 {
 	size_t width  = renderer.ScreenshotWidth();
 	size_t height = renderer.ScreenshotHeight();
 	size_t buffer_size = width * height * 3;
 	byte *pixels = NULL, *png = NULL;
-
-	/* v0 captures at native size; the UI scales for display. Downsampling here
-	 * would only matter over a real network, and this bridge is loopback only. */
-	(void)scale;
 
 	if (!width || !height) {
 		return NULL;

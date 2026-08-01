@@ -67,28 +67,24 @@ Engine-authoritative HUD state.
   "engine": "ezquake 3.7.0-dev",
   "screen": {
     "vid_width": 512, "vid_height": 288,
-    "sb_lines": 48, "scr_con_current": 0,
-    "vrect": [0, 0, 512, 288]
+    "scr_con_current": 0
   },
-  "fonts": { "proportional_loaded": false, "facepath": "", "consolefont": "povo5" },
-  "view": { "spectator": true, "tracking": true, "demoplayback": true },
+  "fonts": { "proportional_loaded": false, "facepath": "" },
+  "view": { "spectator": true, "tracking": true },
   "physical": [2560, 1440],
   "elements": [
     {
       "name": "health",
       "shown": true,
-      "drawn": true,
       "place": "screen",
       "parent": null,
       "align_x": "left", "align_y": "top",
       "pos_x": 0, "pos_y": 0,
       "order": 5,
       "frame": 0,
-      "flags": 0,
       "spec_required": false,
       "needs_pov": true,
       "rect":  { "x": 268, "y": 241, "w": 45, "h": 20 },
-      "frame_extents": { "l": 0, "r": 0, "t": 0, "b": 0 },
       "cvars": { "hud_health_scale": "2", "hud_health_style": "0" }
     }
   ]
@@ -101,9 +97,20 @@ the cvar set with no face loaded. With no face, every `proportional 1` silently 
 8px, so a client that presents `proportional` as live is lying to the user.
 
 - Coordinates are **console pixels**, matching `vid.width`/`vid.height`.
+- `physical` is read from `renderer.ScreenshotWidth()`/`Height()` — the *same* source
+  `/frame.png` captures from, so the two can never disagree about the size of the same
+  picture. Do not switch it to `glwidth`/`glheight`: those are only assigned inside
+  `R_BeginRendering` (`cl_screen.c:925`) and read 0 before the first screen update, and
+  a client that receives 0 falls back to a scale of 1 and lays every box out in the
+  wrong place with no error to explain it.
 - `rect` is `null` when the element was not drawn last frame. Report that honestly;
   never substitute a guess. A `null` rect means "no handle to show", not "0,0".
-- `drawn` reflects `hud->last_draw_sequence == host_screenupdatecount`.
+- A non-null `rect` **is** "drawn this frame"
+  (`hud->last_draw_sequence == host_screenupdatecount`). There is no separate `drawn`
+  field: it was always the same condition, and two ways to ask one question is two
+  things that can disagree. Note this means "the engine laid it out", which is not
+  quite "you can see it" — `HUD_PrepareDraw` stamps the sequence before its caller
+  draws any pixels, and some elements call it before their own visibility test.
 - `parent` is the `place` target's name when anchored, else `null`. `place` carries
   the raw cvar string so the UI can distinguish `group1` from `@group1`.
 
@@ -157,14 +164,18 @@ What the user can pick from, and whether the current pick actually loaded.
 Lists both `.ttf` and `.otf`. The engine's own `fontlist` filters `.ttf` only, so a
 valid `.otf` face is invisible there despite loading fine.
 
-### `GET /frame.png[?scale=0.5]`
+### `GET /frame.png`
 
-Current framebuffer as PNG. Must be called with a current GL context, i.e. from the
-frame service.
+Current framebuffer as PNG, always at native size; the UI scales for display. Must be
+called with a current GL context, i.e. from the frame service.
 
-`scale` is accepted and validated but **not implemented**: the capture is always at
-native size and the UI scales for display. It is parsed only so that adding
-downsampling later does not change the request shape. Do not rely on it.
+Unknown query parameters are ignored, so `?n=<nonce>` cache-busting is free. There was
+a parsed-and-validated `scale=` that the capture then ignored, reserved so that adding
+downsampling later would not change the request shape. It was removed: a knob that
+validates its input and then does nothing is worse than no knob, because a client can
+send `scale=0.5`, get a native-size frame, and reasonably conclude the engine is
+broken. Re-adding the parse when downsampling actually lands is the small part of that
+change.
 
 `glReadPixels` and the PNG encode both run synchronously on the render thread, so a
 capture costs the engine real frame time — measured at 1.5–3.3 s per capture at
@@ -219,3 +230,19 @@ not in the table is `404`.
 
 JSON `{"ok":false,"error":"..."}` with `400` malformed, `403` auth/command refused,
 `404` unknown route, `503` bridge disabled.
+
+## Ownership
+
+| File | Owner | Contents |
+|---|---|---|
+| `src/hud_web.h` | Claude | the contract above |
+| `src/hud_web.c` | **sol** | listener, HTTP parse, token auth, routing, cvars, allowlist, frame service |
+| `src/hud_web_state.c` | Claude | `HUD_Web_StateJSON`, `HUD_Web_CapturePNG`, `HUD_Web_FontsJSON`, `HUD_Web_ConfigsJSON` |
+| `src/hud_web_assets.c` | generated | the editor UI, baked in — do not edit |
+| `CMakeLists.txt`, `cl_main.c` | Claude | build wiring and the `HUD_Web_Frame()` call site |
+
+Separate files so both sides can land independently. Claude owns the shared edits to
+avoid conflicts on the branch.
+
+Branch: `feat/hud-web-bridge`, cut from `feat/libhud-placement-core`.
+Build+test host: pinnacle WSL, `/home/xerial/projects/ezquake-libhud` (`SKIP_DEPS=1 ./build-linux.sh`).
