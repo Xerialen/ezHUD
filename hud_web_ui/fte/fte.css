@@ -1,0 +1,131 @@
+/* fte/fte.css — the FTE host page's own styling.
+ *
+ * Loaded after ui.css and only ever adding to it: ui.css is shared with the
+ * ezQuake build and is not this backend's to edit. Everything here is either a
+ * rule for markup that exists only on this page, or the one override the live
+ * canvas forces -- #frame stops being the picture and becomes a sheet of glass
+ * over it. */
+
+/* ---- stage layering ------------------------------------------------------ */
+
+/* The canvas is now the thing with a size: .stage__frame is position:relative
+ * with no dimensions of its own, so it takes them from here. These are the
+ * rules ui.css gives #frame, moved onto what is actually being displayed.
+ * A canvas is a replaced element, so max-width/max-height shrink it with its
+ * aspect ratio intact, exactly as they did for the <img>. */
+#canvas {
+	display: block;
+	max-width: 100%;
+	max-height: calc(100vh - 44px - 40px);
+	width: auto;
+	image-rendering: pixelated;
+	/* Pointer isolation, and the single rule the whole interaction model rests
+	 * on: FTE registers mousedown/move/wheel/drop on the canvas in the capture
+	 * phase (engine/web/ftejslib.js:600), so anything that reaches it is a
+	 * click the editor has lost -- and a click on the canvas asks for pointer
+	 * lock. With this it is never in the event path at all, and #frame above
+	 * it takes every gesture. Keys are dealt with separately, in boot.js:
+	 * those are registered on `document` and have to be removed rather than
+	 * styled away. */
+	pointer-events: none;
+}
+
+/* Not the render any more: a transparent sheet at exactly the render's size,
+ * which is what makes clientWidth and getBoundingClientRect() -- both read
+ * straight off it by app.js -- correct without any shimming. */
+#frame {
+	position: absolute;
+	inset: 0;
+	max-width: none;
+	max-height: none;
+	width: auto;
+	cursor: default;
+}
+
+/* ---- host chrome --------------------------------------------------------- */
+
+/* .stage is a centring grid in ui.css; the picker and reports are extra rows
+ * under it rather than a floating layer over the render. */
+.stage {
+	align-content: center;
+	gap: 10px;
+}
+
+.stage[data-over="true"] {
+	outline: 2px dashed var(--accent);
+	outline-offset: -6px;
+}
+
+.fte-bar {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	flex-wrap: wrap;
+	max-width: 100%;
+	line-height: 1.5;
+}
+
+.fte-bar__field {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: var(--ink-dim);
+}
+
+.fte-bar__hint,
+.fte-status,
+.fte-note {
+	margin: 0;
+	font-size: 12px;
+	color: var(--ink-dim);
+	max-width: 68ch;
+}
+
+.fte-status {
+	font-family: var(--mono);
+}
+
+.fte-note {
+	color: var(--ink);
+}
+
+/* ---- drift report -------------------------------------------------------- */
+
+/* Collapsed by default: it is a receipt, not an error. It has to be here and
+ * complete, though -- an import that quietly drops a third of someone's config
+ * is worse than one that refuses it outright. */
+.fte-drift {
+	max-width: 100%;
+	width: min(72ch, 100%);
+	padding: 8px 10px;
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	background: rgba(0, 0, 0, 0.28);
+	font-size: 12px;
+	line-height: 1.55;
+	color: var(--ink-dim);
+}
+
+.fte-drift > summary {
+	cursor: pointer;
+	color: var(--ink);
+}
+
+.fte-drift__head {
+	margin: 10px 0 2px;
+	color: var(--ink);
+}
+
+.fte-drift__line {
+	margin: 0;
+	padding-left: 12px;
+	font-family: var(--mono);
+	overflow-wrap: anywhere;
+}
+
+.fte-drift__foot {
+	margin: 10px 0 0;
+	padding-top: 8px;
+	border-top: 1px solid var(--line);
+}

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HUD Editor — FTE preview</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="ui.css">
+<!-- After ui.css, and only ever adding to it: ui.css is shared with the
+     ezQuake build and is not ours to edit. -->
+<link rel="stylesheet" href="fte/fte.css">
+
+<!-- The whole backend swap, in four lines. view/app.js imports
+     '../core/bridge.js', which resolves against /view/app.js to the absolute
+     path /core/bridge.js -- the key below -- so app.js ships byte-identical
+     and loads the FTE adapter instead. Import-map keys are resolved URLs, not
+     the text of the specifier, which is why this says '/core/bridge.js' and
+     not '../core/bridge.js'. It follows that this page only works served from
+     the site root; tools/fte-web/serve.sh is what does that. -->
+<script type="importmap">
+{
+  "imports": {
+    "/core/bridge.js": "/core/fte-adapter.js"
+  }
+}
+</script>
+</head>
+<body>
+<svg class="sprite" aria-hidden="true">
+  <defs>
+    <symbol id="i-shown" viewBox="0 0 16 16">
+      <path d="M1.5 8s2.4-4 6.5-4 6.5 4 6.5 4-2.4 4-6.5 4S1.5 8 1.5 8Z" fill="none" stroke="currentColor" stroke-width="1.3"/>
+      <circle cx="8" cy="8" r="1.9" fill="none" stroke="currentColor" stroke-width="1.3"/>
+    </symbol>
+    <symbol id="i-hidden" viewBox="0 0 16 16">
+      <path d="M2.6 4.6C1.9 5.5 1.5 8 1.5 8s2.4 4 6.5 4c1.2 0 2.2-.3 3.1-.8" fill="none" stroke="currentColor" stroke-width="1.3"/>
+      <path d="M6.3 4.2A6.6 6.6 0 0 1 8 4c4.1 0 6.5 4 6.5 4a11 11 0 0 1-1.9 2.2" fill="none" stroke="currentColor" stroke-width="1.3"/>
+      <path d="M2.5 2.5l11 11" fill="none" stroke="currentColor" stroke-width="1.3"/>
+    </symbol>
+  </defs>
+</svg>
+
+<header class="bar">
+  <h1>HUD Editor</h1>
+  <p class="bar__engine" id="engine"></p>
+  <div class="bar__spacer"></div>
+  <dl class="readout" id="readout"></dl>
+  <label class="toggle">
+    <input type="checkbox" id="chrome" checked>
+    <span>Overlay</span>
+  </label>
+  <button class="btn" type="button" id="save-open">Save…</button>
+  <p class="status" id="status" role="status">Connecting…</p>
+</header>
+
+<main class="shell">
+  <section class="panel panel--tree" aria-label="HUD elements">
+    <div class="panel__head">
+      <input id="filter" type="search" placeholder="Filter elements" autocomplete="off" spellcheck="false">
+      <label class="toggle toggle--sm">
+        <input type="checkbox" id="show-hidden" checked>
+        <span>Hidden</span>
+      </label>
+      <label class="toggle toggle--sm">
+        <input type="checkbox" id="show-spectator" checked>
+        <span>Spectator</span>
+      </label>
+    </div>
+    <ul class="tree" id="tree" role="listbox" aria-label="HUD elements" tabindex="0"></ul>
+    <p class="panel__foot" id="tree-count"></p>
+  </section>
+
+  <!-- The whole stage is the import drop zone. -->
+  <section class="stage" id="fte-drop" aria-label="Live engine view">
+    <div class="stage__frame" id="stage">
+      <!-- FTE draws straight into this. It is the "framebuffer" that /frame.png
+           is on the ezQuake backend, which is why the adapter reads `physical`
+           from canvas.width/height rather than from the engine. -->
+      <canvas id="canvas" width="640" height="480"></canvas>
+      <!-- What app.js believes is an <img>. fte/boot.js gives it
+           naturalWidth/naturalHeight getters over the canvas and a src setter
+           that dispatches 'load'. It is transparent and sits on top so that
+           clicks land on the editor and never reach the game underneath. -->
+      <div id="frame"></div>
+      <div class="overlay" id="overlay"></div>
+      <div class="stage__empty" id="empty" hidden>
+        <p class="stage__empty-title" id="empty-title">FTE isn't drawing a HUD yet</p>
+        <p id="empty-body">The editor can only place elements the engine is actually rendering. Give the demo a moment to start.</p>
+      </div>
+    </div>
+
+    <div class="fte-bar">
+      <label class="fte-bar__field">
+        <span>Demo</span>
+        <select id="fte-demo"></select>
+      </label>
+      <p class="fte-bar__hint">Drop a .cfg, a .pak/.pk3/.zip of textures, or a .mvd anywhere on this panel.</p>
+      <p class="fte-status" id="fte-status" hidden></p>
+    </div>
+    <p class="fte-note" id="fte-note" hidden></p>
+
+    <details class="fte-drift" id="fte-drift" hidden>
+      <summary id="fte-drift-summary">Import report</summary>
+      <div id="fte-drift-body"></div>
+    </details>
+  </section>
+
+  <section class="panel panel--inspect" aria-label="Properties">
+    <div id="hudmodes"></div>
+    <div id="groups"></div>
+    <div id="fonts"></div>
+    <div id="inspector"></div>
+  </section>
+</main>
+
+<dialog class="save" id="save-dialog" aria-labelledby="save-title"></dialog>
+<dialog class="save" id="reset-dialog" aria-labelledby="reset-title"></dialog>
+
+<!-- Classic, and here rather than in <head>, for two reasons: it needs #canvas
+     and #frame to exist, and it must have finished building Module before
+     ftewebglcl.js is evaluated -- which it arranges itself, by injecting that
+     script at the end. A module would be deferred past both. -->
+<script src="fte/boot.js"></script>
+
+<script type="module" src="view/app.js"></script>
+<!-- After app.js, and importing the same mapped specifier, so it gets the same
+     Bridge instance app.js is polling rather than a second one. -->
+<script type="module" src="fte/chrome.js"></script>
+</body>
+</html>
