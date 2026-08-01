@@ -62,10 +62,10 @@ index bc04299..f1d3b58 100644
  		FTEC.evcb.jaxis = evjaxis;
  		FTEC.evcb.jorientation = evjorientation;
 diff --git a/plugins/ezhud/hud.c b/plugins/ezhud/hud.c
-index 89a8df4..a472b0a 100644
+index 89a8df4..b983c8d 100644
 --- a/plugins/ezhud/hud.c
 +++ b/plugins/ezhud/hud.c
-@@ -1579,3 +1579,155 @@ void HUD_Sort(void)
+@@ -1579,3 +1579,160 @@ void HUD_Sort(void)
      // Recalculate elements so vars are parsed.
      HUD_Recalculate();
  }
@@ -186,14 +186,19 @@ index 89a8df4..a472b0a 100644
 +		EZHud_JsonStr(hud->align_x ? hud->align_x->string : "left");
 +		EZHud_JsonRaw(",\"align_y\":");
 +		EZHud_JsonStr(hud->align_y ? hud->align_y->string : "top");
++		/* As JSON strings holding the cvar's own text, not floats: the cvar
++		 * string is what a config sets and what an export must give back.
++		 * Printing pos_x's float through %g turned "200.288666" into
++		 * "200.289" and broke the byte-identical round trip. Every consumer
++		 * in core/ already coerces with Number(). */
 +		EZHud_JsonRaw(",\"pos_x\":");
-+		EZHud_JsonNum(hud->pos_x ? hud->pos_x->value : 0);
++		EZHud_JsonStr(hud->pos_x ? hud->pos_x->string : "0");
 +		EZHud_JsonRaw(",\"pos_y\":");
-+		EZHud_JsonNum(hud->pos_y ? hud->pos_y->value : 0);
++		EZHud_JsonStr(hud->pos_y ? hud->pos_y->string : "0");
 +		EZHud_JsonRaw(",\"order\":");
-+		EZHud_JsonNum(hud->order ? hud->order->value : 0);
++		EZHud_JsonStr(hud->order ? hud->order->string : "0");
 +		EZHud_JsonRaw(",\"frame\":");
-+		EZHud_JsonNum(hud->frame ? hud->frame->value : 0);
++		EZHud_JsonStr(hud->frame ? hud->frame->string : "0");
 +		EZHud_JsonRaw(",\"spec_required\":false,\"needs_pov\":false,\"rect\":");
 +		if (hud->last_draw_sequence && hud->last_draw_sequence >= host_screenupdatecount)
 +		{

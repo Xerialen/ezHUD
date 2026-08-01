@@ -202,6 +202,14 @@
 		['keypress', 'keydown', 'keyup'].forEach(function (type) {
 			document.removeEventListener(type, ftec.handleevent, true);
 		});
+		// Same surgery for beforeunload (registered on window, ftejslib.js:609):
+		// FTE's "Leave site?" guard silently blocks location.reload(), and the
+		// import pipeline's whole design is "write the cache, reload so preRun
+		// picks it up" — with the guard in place a texture or demo import
+		// stores the file and then hangs on a prompt nobody can see. The page
+		// is an editor whose only unsaved state is a config export away; the
+		// engine's own progress is not worth guarding here.
+		window.removeEventListener('beforeunload', ftec.handleevent, true);
 	}
 
 	var started = Date.now();

@@ -206,7 +206,9 @@ export async function importCfg(text, name, bridge) {
 	} catch { /* reported by the state refresh below if it mattered */ }
 	const state = await bridge.state();
 
-	bridge.retainedLines = entries.map(({ raw: line, cvar, applied }) => ({ raw: line, cvar, applied }));
+	// `value` rides along so the exporter can tell "applied and unchanged"
+	// (write the user's own line back) from "applied and edited" (rewrite).
+	bridge.retainedLines = entries.map(({ raw: line, cvar, value, applied }) => ({ raw: line, cvar, value, applied }));
 	bridge.importedName = name;
 
 	const applied = entries.filter((e) => e.applied).length;

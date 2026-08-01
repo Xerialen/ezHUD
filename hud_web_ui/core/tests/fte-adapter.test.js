@@ -168,6 +168,25 @@ test('exportFullCfg rewrites applied lines and reproduces the rest byte-identica
 	assert.equal(out[6], '');
 });
 
+test('an applied line whose value the engine still holds survives byte-identical', async () => {
+	const bridge = new Bridge(fakeEngine(oneElement));
+	await bridge.state();
+	bridge.retainedLines = [
+		// Column-aligned the way real configs are; the engine reports "2".
+		{ raw: 'hud_health_scale                      "2"', cvar: 'hud_health_scale', value: '2', applied: true },
+		// Same number spelled differently: numerically equal, so still theirs.
+		{ raw: 'hud_health_pos_x  0.0', cvar: 'hud_health_pos_x', value: '0.0', applied: true },
+		// Genuinely edited in the editor (engine holds "0", file said 1.5).
+		{ raw: 'hud_health_style  1.5', cvar: 'hud_health_style', value: '1.5', applied: true },
+	];
+	const out = bridge.exportFullCfg().trimEnd().split('\n');
+	assert.deepEqual(out, [
+		'hud_health_scale                      "2"',
+		'hud_health_pos_x  0.0',
+		'hud_health_style "0"',
+	]);
+});
+
 test('captureDefaults plus a changed cvar appends it under // added in ez-hud', async () => {
 	const fake = fakeEngine(oneElement);
 	const bridge = new Bridge(fake);

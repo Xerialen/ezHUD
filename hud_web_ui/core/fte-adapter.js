@@ -268,8 +268,18 @@ export class Bridge {
 		const out = [];
 		for (const entry of this.retainedLines) {
 			if (entry.applied && snapshot.has(entry.cvar)) {
-				out.push(`${entry.cvar} "${snapshot.get(entry.cvar)}"`);
 				written.add(entry.cvar);
+				// Rewrite only what actually changed. An applied line whose value
+				// the engine still holds is the user's own line, column-aligned
+				// however they aligned it — regenerating it as `cvar "value"`
+				// churned 481 lines of a real config for zero information.
+				// String first (the engine stores set values verbatim), numeric
+				// second ("1.0" and "1" are the same cvar to both engines).
+				const now = snapshot.get(entry.cvar);
+				const same = now === entry.value
+					|| (entry.value !== null && Number(now) === Number(entry.value)
+						&& now.trim() !== '' && String(entry.value).trim() !== '');
+				out.push(same ? entry.raw : `${entry.cvar} "${now}"`);
 			} else {
 				out.push(entry.raw);
 			}
