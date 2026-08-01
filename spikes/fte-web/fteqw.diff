@@ -1,12 +1,13 @@
 diff --git a/engine/Makefile b/engine/Makefile
-index ab4281d..c7092d2 100644
+index ab4281d..b30d304 100644
 --- a/engine/Makefile
 +++ b/engine/Makefile
-@@ -1896,6 +1896,7 @@ ifeq ($(FTE_TARGET),web)
+@@ -1896,6 +1896,8 @@ ifeq ($(FTE_TARGET),web)
  	EMCC_LDFLAGS+= -s MAX_WEBGL_VERSION=2			#make use of what we can.
  	EMCC_LDFLAGS+= -s TOTAL_STACK=5MB			#big!
     	EMCC_LDFLAGS+=-s ERROR_ON_UNDEFINED_SYMBOLS=1	#fairly obvious. no runtime errors please.
-+	EMCC_LDFLAGS+=-s EXPORTED_RUNTIME_METHODS=UTF8ToString	#ez-hud spike: read EZHud_StateJSON()'s return value from the page
++	EMCC_LDFLAGS+=-s EXPORTED_RUNTIME_METHODS=UTF8ToString,addRunDependency,removeRunDependency	#ez-hud spike: read EZHud_StateJSON() from the page; keep the run-dependency api prejs.js calls (emscripten no longer keeps it by default)
++	EMCC_LDFLAGS+=-s EXPORTED_FUNCTIONS=_main,_malloc,_free	#ez-hud spike: ftejslib's cbufadd calls _malloc/_free at runtime; newer emscripten dead-strips them without this
  	RELEASE_CFLAGS=-DOMIT_QCC -DGL_STATIC $(EMCC_CFLAGS)
  	DEBUG_CFLAGS=-gsource-map -DOMIT_QCC -DGL_STATIC $(EMCC_CFLAGS)
  	RELEASE_LDFLAGS=-O3	-s TOTAL_MEMORY=$(ASMJS_MEMORY) $(EMCC_LDFLAGS)

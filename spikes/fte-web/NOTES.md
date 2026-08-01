@@ -71,9 +71,24 @@ the time of writing: `f937b9d`.
    `FTEC.cbufadd` to say anything to the engine at all. hub.quakeworld.nu does
    the same thing, so it is not a novel shape.
 
-4. **`engine/Makefile`** — `EMCC_LDFLAGS+=-s EXPORTED_RUNTIME_METHODS=UTF8ToString`.
-   `EZHud_StateJSON()` returns a `char*`; without this the page has a pointer
-   and no way to read the string behind it.
+4. **`engine/Makefile`** — two `EMCC_LDFLAGS` additions, all three names found
+   the hard way in a live browser:
+   - `-s EXPORTED_RUNTIME_METHODS=UTF8ToString,addRunDependency,removeRunDependency`.
+     `UTF8ToString` because `EZHud_StateJSON()` returns a `char*` the page has
+     to read. The other two because **the stock web build is broken at this
+     emscripten (6.0.5) without them**: `prejs.js`'s `loadcachedfiles` calls
+     `addRunDependency` at preRun, current emscripten dead-strips it unless
+     exported, and the resulting `ReferenceError` aborts preRun — the engine
+     comes up with no files mounted and a 0×0 video mode.
+   - `-s EXPORTED_FUNCTIONS=_main,_malloc,_free`. `FTEC.cbufadd` allocates
+     with `_malloc` and frees with `_free` at runtime (`ftejslib.js`); newer
+     emscripten strips `_free` as unreferenced, so every command the page sent
+     executed and *then* threw. `_main` is listed because setting the flag
+     replaces the default list rather than adding to it.
+   Note when relinking: the Makefile does not track itself as a dependency —
+   `rm release/ftewebglcl.{js,wasm}` first or the flag change silently does
+   nothing. A browser that already has the old `ftewebglcl.js` needs a hard
+   reload (Ctrl-Shift-R) on top of that.
 
 5. **`plugins/ezhud/hud.c`** — `EZHud_StateJSON()` appended at the end of the
    file, `EMSCRIPTEN_KEEPALIVE`, returning the `/state` shape from
@@ -155,9 +170,21 @@ console, over the editor.
 Kept as a command-line argument, with a watchdog: if nothing has a rect eight
 seconds after start, `boot.js` sends `playdemo <demo>` once through
 `FTEC.cbufadd`, which cannot race the filesystem because the filesystem is up
-by then. Which of the two actually fires in practice is for the reviewer's
-first run to say — this was verified by reading the engine, not by driving a
-browser.
+by then.
+
+Measured live (review run, 2026-08-01): **the command-line one fires** — the
+demo is playing well before the watchdog's 8-second mark. What the first runs
+actually tripped on was the *path*: a demo has two names. In `Module.files`
+and the Cache API it is the FS path `qw/demos/foo.mvd`; to `playdemo` it is
+relative to the active gamedir, so `demos/foo.mvd`. `playdemo
+qw/demos/foo.mvd` finds nothing and the engine sits in its menu over the
+map-less void; `playdemo demos/foo.mvd` plays. `boot.js`'s `demoCmdPath()`
+strips the gamedir prefix in the three places a path becomes a command.
+
+Until the demo starts, FTE's main menu is up over the stage. It closes itself
+when playback begins; if it ever needs closing by hand, Escape will not reach
+the engine (boot.js removed those listeners — see above), but
+`FTEC.cbufadd('togglemenu\n')` from the console does it.
 
 ### Demo URLs / hub playback — stretch scope, untested
 

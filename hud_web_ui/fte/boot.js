@@ -48,6 +48,16 @@
 		return saved && known().indexOf(saved) >= 0 ? saved : BUNDLED_DEMOS[0].path;
 	})();
 
+	// A demo has two names. In Module.files and the Cache API it is an absolute
+	// FS path ('qw/demos/foo.mvd' — that is where the bytes land); to `playdemo`
+	// it is relative to the active gamedir, which the manifest's `basegame qw`
+	// makes 'demos/foo.mvd'. Handing playdemo the FS path finds nothing.
+	// (Verified live: 'playdemo qw/demos/x.mvd' fails, 'playdemo demos/x.mvd'
+	// plays.)
+	function demoCmdPath(path) {
+		return String(path).replace(/^qw\//, '');
+	}
+
 	var canvas = document.getElementById('canvas');
 	var statusEl = document.getElementById('fte-status');
 
@@ -110,13 +120,13 @@
 
 		// Explicit, so prejs.js does not build a command line out of the query
 		// string instead. plug_sbar 3 is "always let the hud plugin draw"
-		// (plugins/ezhud/plugin.c:31); without it the plugin defers to the
+		// (engine/common/plugin.c:31); without it the plugin defers to the
 		// engine's own sbar and the editor has nothing to place.
 		arguments: [
 			'-manifest', 'default.fmf',
 			'+plug_sbar', '3',
 			'+scr_newhud', '1',
-			'+playdemo', initialDemo
+			'+playdemo', demoCmdPath(initialDemo)
 		],
 
 		// The stock shell's flag. Nothing in the engine reads it -- begin() is
@@ -216,7 +226,7 @@
 		if (!demoRetried && Date.now() - started > 8000 && window.FTEC) {
 			demoRetried = true;
 			say('No HUD drawn yet — asking the engine to play ' + initialDemo + ' again.');
-			window.FTEC.cbufadd('playdemo ' + initialDemo + '\n');
+			window.FTEC.cbufadd('playdemo ' + demoCmdPath(initialDemo) + '\n');
 		}
 	}
 
@@ -240,7 +250,7 @@
 				return false;
 			}
 			try { window.localStorage.setItem(DEMO_KEY, path); } catch (e) { /* private mode */ }
-			window.FTEC.cbufadd('playdemo ' + path + '\n');
+			window.FTEC.cbufadd('playdemo ' + demoCmdPath(path) + '\n');
 			return true;
 		}
 	};
