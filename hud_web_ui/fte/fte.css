@@ -16,12 +16,13 @@
  * (engine/web/ftejslib.js, window.onresize) reads the canvas's on-screen rect,
  * sets the backing store to rect × devicePixelRatio, and tells the engine —
  * so the bigger this displays, the higher the resolution FTE actually renders
- * at. Fill the stage, then: as wide as the panel allows, 16:9 (what people
- * actually play at), capped so the fte-bar row below stays on screen
- * (44px header + 40px stage padding + ~46px bar row and gap). */
+ * at. Target 1080p, then: 1920 wide at 16:9, shrinking only when the panel
+ * or the viewport cannot fit it — the height term keeps the fte-bar row
+ * below on screen (44px header + 40px stage padding + ~46px bar row and
+ * gap). */
 #canvas {
 	display: block;
-	width: min(100%, calc((100vh - 130px) * 16 / 9));
+	width: min(1920px, 100%, calc((100vh - 130px) * 16 / 9));
 	height: auto;
 	aspect-ratio: 16 / 9;
 	/* Pointer isolation, and the single rule the whole interaction model rests
