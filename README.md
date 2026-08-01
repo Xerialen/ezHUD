@@ -98,7 +98,7 @@ engine/
   src/hud_web_state.c      payload: /state, /frame.png, /fonts, /configs, /palette
   src/libhud/              placement core extracted from hud.c, with tests
   tools/                   the embedding script
-  engine-integration.patch changes to files ezQuake already has
+  engine-integration.diff  changes to files ezQuake already has
 docs/PROTOCOL.md     the bridge contract; read before changing an endpoint
 ```
 
@@ -125,7 +125,7 @@ cp -r  /path/to/ez-hud/engine/src/libhud src/
 cp     /path/to/ez-hud/engine/tools/*    tools/
 
 # 2. Apply the changes to files ezQuake already has.
-git am < /path/to/ez-hud/engine/engine-integration.patch
+git apply /path/to/ez-hud/engine/engine-integration.diff
 
 # 3. Generate the baked-in UI, then build as normal.
 python3 tools/embed_hud_web_ui.py

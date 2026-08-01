@@ -130,7 +130,7 @@ disagree, trust the live state and correct the doc before doing anything else.
 <!-- codex-review-gate:start -->
 ## Review Gate Contract
 
-This repository uses the same gate flow as `Xerialen/komodobots`:
+This repository uses the following review gate flow:
 
 - New or updated PRs are reset to `gate: reviewing`.
 - A reviewer reviews only the current head SHA.

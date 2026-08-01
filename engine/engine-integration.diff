@@ -1,29 +1,3 @@
-From 51c18e14821b29ebfcbee3910fb21bcda9be8549 Mon Sep 17 00:00:00 2001
-From: root <root@srv1843077.hstgr.cloud>
-Date: Fri, 31 Jul 2026 14:19:59 +0000
-Subject: [PATCH 1/6] hud_web: integrate the bridge and fix two payload defects
-
-Wires the transport into the build and the bridge lifecycle into the client:
-HUD_Web_Init from CL_Init, HUD_Web_Shutdown from CL_Shutdown, and
-HUD_Web_Frame serviced immediately after Sys_ReadIPC, which is already the
-engine's cross-platform non-blocking per-frame IPC hook.
-
-Two defects in hud_web_state.c, both found by exercising the real transport:
-
-- VersionString() was used without including version.h. The implicit
-  declaration made it return int, truncating the pointer on x86-64 and
-  crashing /state. The build only warned, which is why the earlier standalone
-  compile looked clean.
-- The cvar separator keyed off the loop index rather than whether anything had
-  been emitted, so a skipped parameter would have produced a leading comma and
-  invalid JSON.
-
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01FqUfMu4JRqFSaazvAD6kyH
----
- src/cl_main.c | 4 ++++
- 1 file changed, 4 insertions(+)
-
 diff --git a/src/cl_main.c b/src/cl_main.c
 index b6328b9a..0ee256eb 100644
 --- a/src/cl_main.c
@@ -60,54 +34,107 @@ index b6328b9a..0ee256eb 100644
  	CL_Disconnect();
  	SList_Shutdown();
  	CDAudio_Shutdown();
--- 
-2.43.0
-
-
-From 74d1875c2995706fb6cef2fa26ab55ee0b0a04d8 Mon Sep 17 00:00:00 2001
-From: root <root@srv1843077.hstgr.cloud>
-Date: Fri, 31 Jul 2026 16:11:22 +0000
-Subject: [PATCH 2/6] hud: declare spectator and POV requirements, and surface
- them in the editor
-
-An element that will not draw was previously indistinguishable from one placed
-badly, because nothing in the engine declared why. hud.h had no spectator flag
-at all: the behaviour lived as `cl.spectator == cl.autocam` inside 15 draw
-functions, so it could not be queried by the built-in editor either.
-
-Two flags, because the engine has two distinct behaviours and conflating them
-would mislabel 32 elements:
-
-- HUD_SPEC_REQUIRED: only meaningful while spectating. Just `tracking`.
-- HUD_NEEDS_POV: needs a player POV. Draws fine while playing and while
-  spectating a tracked player; hidden only when free-flying. Covers the
-  inventory and status set (health, armor, ammo, guns, items, powerups, keys,
-  sigils).
-
-CAM_NONE is 0 and CAM_TRACK is 1, which is why `cl.spectator == cl.autocam`
-holds in both the playing and the tracking case; reading it as "spectator only"
-would have been wrong for every element except tracking.
-
-/state now reports both as named booleans rather than making clients decode a
-bitfield they would have to keep in sync with hud.h by hand, plus the engine's
-viewing context (spectator, tracking, demoplayback).
-
-The editor gains a Spectator filter toggle, per-row badges, and replaces the
-generic "no position" notice with the actual reason: hidden, spectator-only, or
-free-flying without a POV.
-
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01FqUfMu4JRqFSaazvAD6kyH
----
- src/hud.h          |  2 ++
- src/hud_ammo.c     | 18 +++++++++---------
- src/hud_armor.c    |  6 +++---
- src/hud_guns.c     | 16 ++++++++--------
- src/hud_health.c   |  4 ++--
- src/hud_items.c    | 20 ++++++++++----------
- src/hud_tracking.c |  2 +-
- 7 files changed, 35 insertions(+), 33 deletions(-)
-
+diff --git a/src/fonts.c b/src/fonts.c
+index 3cb7e874..54f907c7 100644
+--- a/src/fonts.c
++++ b/src/fonts.c
+@@ -396,6 +396,16 @@ static qbool FontCreate(int grouping, const char* userpath)
+ 
+ // Used for allocating space - if we just measure the string then other hud elements
+ //   might move around as content changes, which is probably not what is wanted
++const char *FontFacePath(void)
++{
++	return font_facepath.string;
++}
++
++qbool FontProportionalLoaded(void)
++{
++	return R_TextureReferenceIsValid(proportional_fonts[0].master);
++}
++
+ int FontFixedWidth(int max_length, float scale, qbool digits_only, qbool proportional)
+ {
+ 	if (!proportional || !R_TextureReferenceIsValid(proportional_fonts[0].master)) {
+diff --git a/src/fonts.h b/src/fonts.h
+index ed88668a..0ddecd37 100644
+--- a/src/fonts.h
++++ b/src/fonts.h
+@@ -5,8 +5,16 @@
+ #ifdef EZ_FREETYPE_SUPPORT
+ void FontInitialise(void);
+ int FontFixedWidth(int max_length, float scale, qbool digits_only, qbool proportional);
++// Whether a proportional face is actually usable right now. font_facepath being
++// non-empty does NOT imply this: Draw_InitFont discards FontCreate's result, so a
++// config naming a font that no longer resolves leaves the cvar set with no face
++// loaded, and every `proportional 1` silently renders at 8px instead.
++qbool FontProportionalLoaded(void);
++const char *FontFacePath(void);
+ #else
+ #define FontFixedWidth(max_length, scale, digits_only, proportional) (max_length * 8.0f * scale)
++#define FontProportionalLoaded() (false)
++#define FontFacePath() ("")
+ #endif
+ 
+ qbool FontAlterCharCoordsWide(float* x, float* y, wchar ch, qbool bigchar, float scale, qbool proportional);
+diff --git a/src/hud.c b/src/hud.c
+index 38e21db9..426d34d5 100644
+--- a/src/hud.c
++++ b/src/hud.c
+@@ -796,6 +796,46 @@ void HUD_Recalculate(void)
+ 		hud = hud->next;
+ 	}
+ }
++/* Restore every element's position and visibility to what HUD_Register asked for.
++ *
++ * The engine has had no way to do this. `reset` (HUD_Reset_f) centres a single
++ * element, which is not the same thing and does not restore anything. `cfg_reset`
++ * resets everything the client owns, which is far more than someone who has been
++ * dragging their HUD around wants to lose. Deliberately limited to placement and
++ * visibility: colours, scales and per-element parameters are left alone, because
++ * "I moved things and want them back" is the request this answers.
++ */
++void HUD_ResetLayout_f(void)
++{
++	hud_t *hud;
++	int changed = 0;
++
++	for (hud = hud_huds; hud; hud = hud->next) {
++		cvar_t *vars[6];
++		int i;
++
++		vars[0] = hud->show;
++		vars[1] = hud->place;
++		vars[2] = hud->align_x;
++		vars[3] = hud->align_y;
++		vars[4] = hud->pos_x;
++		vars[5] = hud->pos_y;
++
++		for (i = 0; i < 6; i++) {
++			/* Not every element registers every one of these: HUD_Register is
++			 * given NULL for the ones that do not apply (hud.c:1287, 1300, 1313). */
++			if (vars[i] && strcmp(vars[i]->string, vars[i]->defaultvalue)) {
++				Cvar_Set(vars[i], vars[i]->defaultvalue);
++				changed++;
++			}
++		}
++	}
++
++	HUD_Recalculate();
++	Com_Printf("HUD layout reset: %d value%s restored to default\n",
++		changed, changed == 1 ? "" : "s");
++}
++
+ void HUD_Recalculate_f(void)
+ {
+ 	HUD_Recalculate();
+@@ -819,6 +859,7 @@ void HUD_Init(void)
+ 	Cmd_AddCommand ("togglehud", HUD_Toggle_f);
+ 	Cmd_AddCommand ("align", HUD_Align_f);
+ 	Cmd_AddCommand ("hud_recalculate", HUD_Recalculate_f);
++	Cmd_AddCommand ("hud_reset_layout", HUD_ResetLayout_f);
+ 
+ 	// Variables.
+ 	Cvar_SetCurrentGroup(CVAR_GROUP_HUD);
 diff --git a/src/hud.h b/src/hud.h
 index 2d74aa3b..9d2ddedc 100644
 --- a/src/hud.h
@@ -122,7 +149,7 @@ index 2d74aa3b..9d2ddedc 100644
  #define HUD_INVENTORY          (HUD_NO_GROW)   // aply for sbar elements
  
 diff --git a/src/hud_ammo.c b/src/hud_ammo.c
-index 415a8e32..1bb1762f 100644
+index 415a8e32..d6cbb057 100644
 --- a/src/hud_ammo.c
 +++ b/src/hud_ammo.c
 @@ -438,7 +438,7 @@ void Ammo_HudInit(void)
@@ -170,7 +197,17 @@ index 415a8e32..1bb1762f 100644
  				 "0", "ammo3", "after", "top", "0", "0", "0", "0 0 0", NULL,
  				 "style", "0",
  				 "scale", "1",
-@@ -508,25 +508,25 @@ void Ammo_HudInit(void)
+@@ -499,7 +499,8 @@ void Ammo_HudInit(void)
+ 	// ammo icon/s
+ 	HUD_Register(
+ 		"iammo", NULL, "Part of your inventory - ammo icon.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawAmmoIconCurrent,
++		/* Only drawn while cl.spectator == cl.autocam (hud_ammo.c:332). */
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawAmmoIconCurrent,
+ 		"1", "ammo", "before", "center", "0", "0", "0", "0 0 0", NULL,
+ 		"style", "0",
+ 		"scale", "1",
+@@ -508,25 +509,25 @@ void Ammo_HudInit(void)
  	);
  
  	HUD_Register("iammo1", NULL, "Part of your inventory - ammo icon.",
@@ -231,6 +268,21 @@ index 53a1f84f..f674f9ec 100644
  		"0", "armor", "left", "center", "0", "0", "0", "0 0 0", NULL,
  		"height", "16",
  		"width", "64",
+diff --git a/src/hud_face.c b/src/hud_face.c
+index b5f81582..ec445777 100644
+--- a/src/hud_face.c
++++ b/src/hud_face.c
+@@ -84,7 +84,9 @@ void Face_HudInit(void)
+ 	// player face (health indicator)
+ 	HUD_Register(
+ 		"face", NULL, "Your bloody face.",
+-		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawFace,
++		/* Returns early unless cl.spectator == cl.autocam (hud_face.c:46), so it
++		 * needs a POV exactly as the other gated elements do. */
++		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawFace,
+ 		"1", "screen", "center", "bottom", "0", "0", "0", "0 0 0", NULL,
+ 		"scale", "1",
+ 		NULL
 diff --git a/src/hud_guns.c b/src/hud_guns.c
 index 51191a11..350cb6a3 100644
 --- a/src/hud_guns.c
@@ -436,360 +488,6 @@ index 333a575e..16193aff 100644
  		"1", "face", "center", "before", "0", "0", "0", "0 0 0", NULL,
  		"format", "\xD4\xF2\xE1\xE3\xEB\xE9\xEE\xE7\xBA %t %n, \xCA\xD5\xCD\xD0 for next", //"Tracking: team name, JUMP for next", "Tracking:" and "JUMP" are brown. default: "Tracking %t %n, [JUMP] for next"
  		"scale", "1", "proportional", "0",
--- 
-2.43.0
-
-
-From 39046d3584ec95d4a1f1f05f2f3657f9413320a6 Mon Sep 17 00:00:00 2001
-From: root <root@srv1843077.hstgr.cloud>
-Date: Fri, 31 Jul 2026 16:39:30 +0000
-Subject: [PATCH 3/6] hud_web: report whether a proportional font is actually
- loaded
-
-A HUD editor that shows every element's `proportional` cvar as an editable
-field implies those fields do something. Usually they do not.
-
-font_facepath defaults to empty, which makes FontClear zero the face, so
-FontFixedWidth takes its `max_length * 8 * scale` branch and `proportional 1`
-is inert on every element. That is the default state of a stock install.
-
-Worse, a client cannot detect this: Draw_InitFont discards FontCreate's return
-value, so a saved config naming a font that no longer resolves leaves
-font_facepath set, no face loaded, and nothing reported anywhere. Non-empty
-facepath does not imply a usable face.
-
-Adds FontProportionalLoaded() (false by definition without FreeType, where
-FontFixedWidth is already a macro) and reports it in /state alongside the
-active facepath and console charset. The editor marks affected parameters
-inert and says why, rather than presenting a dead control as live. Values stay
-editable and still save, because they become meaningful the moment a face
-loads.
-
-Found by studying hud_common.c's SCR_HUD_DrawNum2 against fonts.c rather than
-assuming the rendering path; the same study shows `proportional` is also
-ignored by the picture-drawing styles, which the field's tooltip now notes.
-
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01FqUfMu4JRqFSaazvAD6kyH
----
- src/fonts.c | 5 +++++
- src/fonts.h | 6 ++++++
- 2 files changed, 11 insertions(+)
-
-diff --git a/src/fonts.c b/src/fonts.c
-index 3cb7e874..aaea9ea1 100644
---- a/src/fonts.c
-+++ b/src/fonts.c
-@@ -396,6 +396,11 @@ static qbool FontCreate(int grouping, const char* userpath)
- 
- // Used for allocating space - if we just measure the string then other hud elements
- //   might move around as content changes, which is probably not what is wanted
-+qbool FontProportionalLoaded(void)
-+{
-+	return R_TextureReferenceIsValid(proportional_fonts[0].master);
-+}
-+
- int FontFixedWidth(int max_length, float scale, qbool digits_only, qbool proportional)
- {
- 	if (!proportional || !R_TextureReferenceIsValid(proportional_fonts[0].master)) {
-diff --git a/src/fonts.h b/src/fonts.h
-index ed88668a..83dbe3c8 100644
---- a/src/fonts.h
-+++ b/src/fonts.h
-@@ -5,8 +5,14 @@
- #ifdef EZ_FREETYPE_SUPPORT
- void FontInitialise(void);
- int FontFixedWidth(int max_length, float scale, qbool digits_only, qbool proportional);
-+// Whether a proportional face is actually usable right now. font_facepath being
-+// non-empty does NOT imply this: Draw_InitFont discards FontCreate's result, so a
-+// config naming a font that no longer resolves leaves the cvar set with no face
-+// loaded, and every `proportional 1` silently renders at 8px instead.
-+qbool FontProportionalLoaded(void);
- #else
- #define FontFixedWidth(max_length, scale, digits_only, proportional) (max_length * 8.0f * scale)
-+#define FontProportionalLoaded() (false)
- #endif
- 
- qbool FontAlterCharCoordsWide(float* x, float* y, wchar ch, qbool bigchar, float scale, qbool proportional);
--- 
-2.43.0
-
-
-From 4bd81265f99117275ffc43a96c0c9e19c8073d14 Mon Sep 17 00:00:00 2001
-From: root <root@srv1843077.hstgr.cloud>
-Date: Fri, 31 Jul 2026 16:41:06 +0000
-Subject: [PATCH 4/6] hud_web: reach font_facepath through an accessor
-
-font_facepath is static in fonts.c, so the extern declaration failed to
-link. Widening its linkage to satisfy one caller would be the wrong trade;
-FontFacePath() keeps the cvar private and matches FontProportionalLoaded.
-
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01FqUfMu4JRqFSaazvAD6kyH
----
- src/fonts.c | 5 +++++
- src/fonts.h | 2 ++
- 2 files changed, 7 insertions(+)
-
-diff --git a/src/fonts.c b/src/fonts.c
-index aaea9ea1..54f907c7 100644
---- a/src/fonts.c
-+++ b/src/fonts.c
-@@ -396,6 +396,11 @@ static qbool FontCreate(int grouping, const char* userpath)
- 
- // Used for allocating space - if we just measure the string then other hud elements
- //   might move around as content changes, which is probably not what is wanted
-+const char *FontFacePath(void)
-+{
-+	return font_facepath.string;
-+}
-+
- qbool FontProportionalLoaded(void)
- {
- 	return R_TextureReferenceIsValid(proportional_fonts[0].master);
-diff --git a/src/fonts.h b/src/fonts.h
-index 83dbe3c8..0ddecd37 100644
---- a/src/fonts.h
-+++ b/src/fonts.h
-@@ -10,9 +10,11 @@ int FontFixedWidth(int max_length, float scale, qbool digits_only, qbool proport
- // config naming a font that no longer resolves leaves the cvar set with no face
- // loaded, and every `proportional 1` silently renders at 8px instead.
- qbool FontProportionalLoaded(void);
-+const char *FontFacePath(void);
- #else
- #define FontFixedWidth(max_length, scale, digits_only, proportional) (max_length * 8.0f * scale)
- #define FontProportionalLoaded() (false)
-+#define FontFacePath() ("")
- #endif
- 
- qbool FontAlterCharCoordsWide(float* x, float* y, wchar ch, qbool bigchar, float scale, qbool proportional);
--- 
-2.43.0
-
-
-From 0bbfe56da2b75f9456c311c514e2e784f353f334 Mon Sep 17 00:00:00 2001
-From: root <root@srv1843077.hstgr.cloud>
-Date: Fri, 31 Jul 2026 19:05:24 +0000
-Subject: [PATCH 5/6] hud: add hud_reset_layout, and report each element's
- registered defaults
-
-The engine had no way to restore a HUD's placement. `reset` centres one element
-and does not restore anything; `cfg_reset` resets everything the client owns,
-which is far more than someone who has been dragging their HUD around wants to
-lose. hud_reset_layout restores show/place/pos/align for every registered
-element from cvar_t.defaultvalue, and reports how many values changed.
-
-/state now carries those defaults per element so the editor can say exactly what
-a reset would change before asking to do it, rather than offering a bare 'are
-you sure'.
-
-Also widens the command gate for HUD-type switching. Which HUD is drawn turns
-out not to be one cvar: scr_newhud selects classic/new/both (cl_screen.c:107,
-hud.c:1539, sbar.c:2412), cl_hud stacks the QW262 HUD on top of either
-(cl_screen.c:113), and the classic bar's shape depends on cl_sbar and viewsize,
-which are coupled -- viewsize below 100 forces standard mode, and 120 removes
-the bar entirely via sb_lines (cl_screen.c:324).
-
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01FqUfMu4JRqFSaazvAD6kyH
----
- src/hud.c | 41 +++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 41 insertions(+)
-
-diff --git a/src/hud.c b/src/hud.c
-index 38e21db9..426d34d5 100644
---- a/src/hud.c
-+++ b/src/hud.c
-@@ -796,6 +796,46 @@ void HUD_Recalculate(void)
- 		hud = hud->next;
- 	}
- }
-+/* Restore every element's position and visibility to what HUD_Register asked for.
-+ *
-+ * The engine has had no way to do this. `reset` (HUD_Reset_f) centres a single
-+ * element, which is not the same thing and does not restore anything. `cfg_reset`
-+ * resets everything the client owns, which is far more than someone who has been
-+ * dragging their HUD around wants to lose. Deliberately limited to placement and
-+ * visibility: colours, scales and per-element parameters are left alone, because
-+ * "I moved things and want them back" is the request this answers.
-+ */
-+void HUD_ResetLayout_f(void)
-+{
-+	hud_t *hud;
-+	int changed = 0;
-+
-+	for (hud = hud_huds; hud; hud = hud->next) {
-+		cvar_t *vars[6];
-+		int i;
-+
-+		vars[0] = hud->show;
-+		vars[1] = hud->place;
-+		vars[2] = hud->align_x;
-+		vars[3] = hud->align_y;
-+		vars[4] = hud->pos_x;
-+		vars[5] = hud->pos_y;
-+
-+		for (i = 0; i < 6; i++) {
-+			/* Not every element registers every one of these: HUD_Register is
-+			 * given NULL for the ones that do not apply (hud.c:1287, 1300, 1313). */
-+			if (vars[i] && strcmp(vars[i]->string, vars[i]->defaultvalue)) {
-+				Cvar_Set(vars[i], vars[i]->defaultvalue);
-+				changed++;
-+			}
-+		}
-+	}
-+
-+	HUD_Recalculate();
-+	Com_Printf("HUD layout reset: %d value%s restored to default\n",
-+		changed, changed == 1 ? "" : "s");
-+}
-+
- void HUD_Recalculate_f(void)
- {
- 	HUD_Recalculate();
-@@ -819,6 +859,7 @@ void HUD_Init(void)
- 	Cmd_AddCommand ("togglehud", HUD_Toggle_f);
- 	Cmd_AddCommand ("align", HUD_Align_f);
- 	Cmd_AddCommand ("hud_recalculate", HUD_Recalculate_f);
-+	Cmd_AddCommand ("hud_reset_layout", HUD_ResetLayout_f);
- 
- 	// Variables.
- 	Cvar_SetCurrentGroup(CVAR_GROUP_HUD);
--- 
-2.43.0
-
-
-From b6d8bf3cea424c56289a07dfa02af93996ed440e Mon Sep 17 00:00:00 2001
-From: root <root@srv1843077.hstgr.cloud>
-Date: Fri, 31 Jul 2026 23:39:40 +0000
-Subject: [PATCH 6/6] =?UTF-8?q?hud=5Fweb:=20address=20sol's=20review=20?=
- =?UTF-8?q?=E2=80=94=20all=20twelve=20findings?=
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
-
-Independent cross-model review (gpt-5.6-sol) returned "request changes"
-with twelve findings. I confirmed the top four against the source myself
-before touching anything; all twelve are addressed here.
-
-High:
-
-/frame.png staged through a fixed path under the OS temp directory, which
-on Unix was always /tmp/ezquake-hudweb.png. fopen follows symlinks, so
-another local user could pre-create that path pointing at any file the
-player can write and have opening the editor clobber it with PNG data;
-the file also lingered afterwards, world-readable under a normal umask,
-holding a picture of the player's screen. Added Image_EncodePNG, which
-runs the same libpng settings straight into a heap block, and removed the
-file entirely.
-
-Medium:
-
-`togglehud` is gone from the allowlist. Despite the name it falls back
-from HUD elements to any cvar and toggles it (hud.c:498), so it let
-`togglehud rcon_password` walk straight past the cvar-prefix policy. The
-editor sets hud_<name>_show and never needed it.
-
-/cmd now refuses `$`. Cbuf_ExecuteEx runs Cmd_ExpandString before
-dispatch (cmd.c:1865) — after this code has approved the line — so
-`hud_tracking_format $rcon_password` passed the hud_ prefix, expanded
-into the secret, and /state handed it back. That turned a HUD-scoped
-token into arbitrary cvar disclosure.
-
-An allowlisted command must now also exist as a command. `fontload` is
-only registered with EZ_FREETYPE_SUPPORT (fonts.c:526); without it the
-dispatcher falls through to aliases (cmd.c:1948), so an allowlisted name
-the build does not provide would have run whatever alias sat under it.
-
-Frame capture is rate limited to one per hud_web_frame_interval (250ms
-default), shared across clients, since the cost is the engine's and not
-each client's. PROTOCOL.md claimed capture wrote "to memory instead of
-disk", which was false until this commit; it now states the real cost.
-
-geometry.js used physical_width/vid_width for BOTH axes. ezQuake lets
-vid_conwidth and vid_conheight be set independently (vid_sdl2.c:1928), so
-every handle was misplaced vertically whenever the console shape differed
-from the screen's. My own QA could not have caught it: at 512x288 on
-2560x1440 both ratios are 5.
-
-radar ships width "30%" / height "25%" and resolves them against the
-console (hud_radar.c:1307). Number("30%") is NaN, so `|| 0` made it zero
-and the first corner drag rewrote a working radar as a small absolute
-number. Percentage-sized elements are now a distinct mode with no
-handles and a note saying why.
-
-Colour parsing did not match the engine. It rounded and clamped where
-Q_atoi truncates and the byte cast wraps, so "1.9" read as palette 2
-instead of 1 and "256 0 0" as red instead of black; it rejected values
-with more than four tokens, which StringToRGB_W simply ignores; and it
-accepted colour names everywhere, when ColorNameToRGBString is installed
-only by specific callbacks and frame_color is the only HUD one
-(hud.c:924) — so a bar colour of "red" is palette 0, not red. The commit
-that added the picker claimed swatches show what the engine draws; now
-they do.
-
-`face` and `iammo` are POV-gated in their draw functions but carried no
-HUD_NEEDS_POV, so the editor did not know. Added. `drawn` genuinely
-cannot mean "pixels appeared" — HUD_PrepareDraw stamps the sequence
-before the caller draws, and several elements call it before their own
-condition — so the comment now says what it actually means rather than
-overclaiming.
-
-A long enough numeric cvar overflows Q_atof to infinity, and `%g` emitted
-`"pos_x":inf`, which is not JSON and wedged the editor's polling. Numeric
-fields go through sb_json_number, which clamps to finite.
-
-Low:
-
-LIBHUD_NO_GROW was 1<<3; HUD_NO_GROW is 1<<9. The tests passed only
-because they used the same wrong constant on both sides.
-
-A placement cycle made every element in it vanish from the tree: each had
-a present parent, so none became a root and the depth guard never ran.
-Cycles are now detected and shown at the root.
-
-The font list matched its extension as an unanchored regex, offering
-"foo.ttf.bak", and offered names with spaces that `fontload` cannot
-accept (fonts.c:441). Both are filtered.
-
-Verified: libhud tests 30/30, generated assets fresh, colour semantics
-covered by eight new cases against the engine's rules.
----
- src/hud_ammo.c |  3 +-
- src/hud_face.c |  4 ++-
- src/image.c    | 87 ++++++++++++++++++++++++++++++++++++++++++++++++++
- src/image.h    |  3 ++
- 4 files changed, 95 insertions(+), 2 deletions(-)
-
-diff --git a/src/hud_ammo.c b/src/hud_ammo.c
-index 1bb1762f..d6cbb057 100644
---- a/src/hud_ammo.c
-+++ b/src/hud_ammo.c
-@@ -499,7 +499,8 @@ void Ammo_HudInit(void)
- 	// ammo icon/s
- 	HUD_Register(
- 		"iammo", NULL, "Part of your inventory - ammo icon.",
--		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawAmmoIconCurrent,
-+		/* Only drawn while cl.spectator == cl.autocam (hud_ammo.c:332). */
-+		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawAmmoIconCurrent,
- 		"1", "ammo", "before", "center", "0", "0", "0", "0 0 0", NULL,
- 		"style", "0",
- 		"scale", "1",
-diff --git a/src/hud_face.c b/src/hud_face.c
-index b5f81582..ec445777 100644
---- a/src/hud_face.c
-+++ b/src/hud_face.c
-@@ -84,7 +84,9 @@ void Face_HudInit(void)
- 	// player face (health indicator)
- 	HUD_Register(
- 		"face", NULL, "Your bloody face.",
--		HUD_INVENTORY, ca_active, 0, SCR_HUD_DrawFace,
-+		/* Returns early unless cl.spectator == cl.autocam (hud_face.c:46), so it
-+		 * needs a POV exactly as the other gated elements do. */
-+		HUD_INVENTORY | HUD_NEEDS_POV, ca_active, 0, SCR_HUD_DrawFace,
- 		"1", "screen", "center", "bottom", "0", "0", "0", "0 0 0", NULL,
- 		"scale", "1",
- 		NULL
 diff --git a/src/image.c b/src/image.c
 index 904a0fa4..d3b169a8 100644
 --- a/src/image.c
@@ -902,6 +600,3 @@ index 27bf3219..d68dfbf4 100644
  int Image_WriteTGA(char *filename, byte *pixels, size_t width, size_t height);
  int Image_WriteJPEG(char *filename, int quality, byte *pixels, int width, int height);
  int Image_WritePCX(char *filename, byte *data, int width, int height, byte *palette);
--- 
-2.43.0
-
