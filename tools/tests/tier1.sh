@@ -14,5 +14,8 @@ embed=tools/embed_hud_web_ui.py
 
 make -C "$libhud_tests" check
 node --check hud_web_ui/core/*.js
+# The FTE host page (spike/fte-web). Guarded because tier1 also runs from an
+# ezQuake checkout, where hud_web_ui/ arrives without this backend's files.
+if [ -d hud_web_ui/fte ]; then node --check hud_web_ui/fte/*.js; fi
 node --test hud_web_ui/core/tests/*.test.js
 python3 "$embed" --check
