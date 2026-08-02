@@ -123,6 +123,65 @@ of the specifier. Served from a subdirectory the key stops matching what
 loads instead, and the page reports a lost ezQuake connection rather than a
 broken setup.
 
+## Publishing
+
+`.github/workflows/pages.yml` builds the public site on every push to `main`
+(plus `workflow_dispatch`) and deploys it to GitHub Pages under `/ez-hud/`. It
+shares nothing with the dev site described above: the engine is compiled in CI
+from `fte-team/fteqw` `f937b9d88f71fc4429db5fe56c6a98d922711b2e` plus
+`fteqw.diff` under emsdk 6.0.5, the game data is downloaded, and
+`tools/fte-web/assemble-public.sh` copies an explicit allowlist into `dist/` —
+`../site/` is never a source. `PUBLISH.md` argues why; this is the operational
+half.
+
+- **The pins live in `tools/fte-web/game-data.sha256`**, in `sha256sum -c`
+  format, with the source URL for each file in its header comment. Every
+  download is checked against them before it is used, so a mirror that quietly
+  changes a file fails the build instead of deploying through us. The URLs
+  themselves are `env:` at the top of the workflow.
+- **pak0.pak is extracted, not downloaded.** No mirror was found serving a bare
+  shareware pak0.pak byte-identical to the known-good local copy, so CI takes
+  id's own `quake106.zip` and pulls `ID1/PAK0.PAK` out of its `resource.1` (an
+  lh5-encoded LZH archive) with 7-Zip. Archive and extracted pak are both
+  pinned; the second pin is the one that decides what ships.
+- **The engine build is cached** on (emsdk version, fteqw sha, hash of
+  `fteqw.diff`), with no restore-keys, and the link outputs are deleted before
+  `make`. Anything looser relinks stale objects with the old `EMCC_LDFLAGS` and
+  ships an engine missing exports, because the Makefile does not track itself —
+  see [The five engine patches](#the-five-engine-patches). For the same reason
+  CI greps the linked `.js` for `_EZHud_StateJSON`, `Module["UTF8ToString"]`
+  and `addRunDependency`: all three failures are invisible until a browser runs
+  the thing.
+- **`unset CFLAGS CXXFLAGS LDFLAGS`** is in the build step although a runner
+  has no `~/.profile` to leak them. It stays so the workflow is a recipe you
+  can paste locally, where it is the difference between a build and a baffling
+  emcc error.
+- **The guard runs twice**: `tools/tests/tier1_public_dist.sh` on a fixture
+  dist (what the script does to placeholders) and the same allowlist inline in
+  the workflow against the real `dist/` (what is in the bytes about to be
+  published), including the import-map rewrite.
+
+### Rolling the demos
+
+The two `.mvd`s come from this repo's release `web-assets-v1`
+(`releases/download/web-assets-v1/<name>`), because nothing else publishes
+them. A release asset cannot be replaced quietly, so a changed demo means a new
+tag rather than a re-upload:
+
+1. Put the new demo in `../site/qw/demos/`.
+2. `sha256sum` it and update its line in `tools/fte-web/game-data.sha256`.
+3. Point the workflow's `WEB_ASSETS_BASE` at the new tag, e.g. `web-assets-v2`.
+4. `GITHUB_TOKEN=… TAG=web-assets-v2 bash tools/fte-web/upload-web-assets.sh`.
+   It verifies the local files against the pins before uploading, so step 2 has
+   to happen first — a released asset that no pin matches is a release nobody
+   can use.
+5. Commit the pin and tag change; the push to `main` deploys it.
+
+`upload-web-assets.sh` is a by-hand script, run once with the owner's approval,
+because it creates a public release. It uses `curl` against the REST API (`gh`
+is not installed) and hands the token to curl on stdin rather than in argv,
+which is world-readable on a shared machine.
+
 ## Findings
 
 ### The Cache API is read exactly once, at preRun
