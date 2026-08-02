@@ -19,3 +19,8 @@ node --check hud_web_ui/core/*.js
 if [ -d hud_web_ui/fte ]; then node --check hud_web_ui/fte/*.js; fi
 node --test hud_web_ui/core/tests/*.test.js
 python3 "$embed" --check
+# What the public build ships, asserted against an allowlist. Guarded for the
+# same reason as the check above -- an ezQuake checkout has no tools/fte-web/ --
+# and cheap to run here rather than only in CI, because the thing it guards
+# against is a personal or non-distributable file reaching a deploy.
+if [ -f tools/fte-web/assemble-public.sh ]; then bash tools/tests/tier1_public_dist.sh; fi
