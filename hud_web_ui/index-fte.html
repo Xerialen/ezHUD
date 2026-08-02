@@ -41,20 +41,23 @@
 </svg>
 
 <header class="bar">
-  <h1>HUD Editor</h1>
-  <p class="bar__engine" id="engine"></p>
+  <div class="mark">
+    <span class="mark__glyph" aria-hidden="true">⚡</span>
+    <h1><em>EZ</em>HUD</h1>
+  </div>
   <div class="bar__spacer"></div>
-  <dl class="readout" id="readout"></dl>
+  <div class="scalechip" id="readout" hidden></div>
   <label class="toggle">
     <input type="checkbox" id="chrome" checked>
     <span>Overlay</span>
   </label>
-  <button class="btn" type="button" id="save-open">Save…</button>
+  <button class="btn btn--primary" type="button" id="save-open">Save…</button>
   <p class="status" id="status" role="status">Connecting…</p>
 </header>
 
 <main class="shell">
   <section class="panel panel--tree" aria-label="HUD elements">
+    <div class="panel__title">Elements</div>
     <div class="panel__head">
       <input id="filter" type="search" placeholder="Filter elements" autocomplete="off" spellcheck="false">
       <label class="toggle toggle--sm">
@@ -109,12 +112,22 @@
   </section>
 
   <section class="panel panel--inspect" aria-label="Properties">
+    <div class="panel__title">Properties</div>
     <div id="hudmodes"></div>
     <div id="groups"></div>
     <div id="fonts"></div>
     <div id="inspector"></div>
   </section>
 </main>
+
+<footer class="statusbar">
+  <span id="sb-cursor">x — y —</span>
+  <span id="sb-drawn"></span>
+  <span id="engine"></span>
+  <div class="statusbar__spacer"></div>
+  <span id="sb-font"></span>
+  <span id="sb-frame"></span>
+</footer>
 
 <dialog class="save" id="save-dialog" aria-labelledby="save-title"></dialog>
 <dialog class="save" id="reset-dialog" aria-labelledby="reset-title"></dialog>

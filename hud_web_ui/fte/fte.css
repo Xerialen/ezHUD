@@ -22,7 +22,7 @@
  * gap). */
 #canvas {
 	display: block;
-	width: min(1920px, 100%, calc((100vh - 130px) * 16 / 9));
+	width: min(1920px, 100%, calc((100vh - var(--bar-h) - var(--statusbar-h) - 110px) * 16 / 9));
 	height: auto;
 	aspect-ratio: 16 / 9;
 	/* Pointer isolation, and the single rule the whole interaction model rests
@@ -76,7 +76,7 @@
 	align-items: center;
 	gap: 6px;
 	font-size: 12px;
-	color: var(--ink-dim);
+	color: var(--text-dim);
 }
 
 .fte-bar__hint,
@@ -84,16 +84,16 @@
 .fte-note {
 	margin: 0;
 	font-size: 12px;
-	color: var(--ink-dim);
+	color: var(--text-dim);
 	max-width: 68ch;
 }
 
 .fte-status {
-	font-family: var(--mono);
+	font-family: var(--font-mono);
 }
 
 .fte-note {
-	color: var(--ink);
+	color: var(--text-body);
 }
 
 /* ---- drift report -------------------------------------------------------- */
@@ -110,23 +110,23 @@
 	background: rgba(0, 0, 0, 0.28);
 	font-size: 12px;
 	line-height: 1.55;
-	color: var(--ink-dim);
+	color: var(--text-dim);
 }
 
 .fte-drift > summary {
 	cursor: pointer;
-	color: var(--ink);
+	color: var(--text-body);
 }
 
 .fte-drift__head {
 	margin: 10px 0 2px;
-	color: var(--ink);
+	color: var(--text-body);
 }
 
 .fte-drift__line {
 	margin: 0;
 	padding-left: 12px;
-	font-family: var(--mono);
+	font-family: var(--font-mono);
 	overflow-wrap: anywhere;
 }
 
