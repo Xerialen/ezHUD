@@ -1,0 +1,263 @@
+# Build the FTE-web editor and publish the sanitized public site to GitHub Pages.
+#
+# Nothing is copied from the owner's dev site: the engine is built here from
+# pinned upstream source plus spikes/fte-web/fteqw.diff, every game-data file is
+# a download whose sha256 is pinned in tools/fte-web/game-data.sha256, and
+# tools/fte-web/assemble-public.sh copies an explicit allowlist into dist/. The
+# reasoning, and what must never ship, is spikes/fte-web/PUBLISH.md.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time, and never cancel one in flight: a cancelled deploy can
+# leave Pages serving whatever half of the artifact it had already taken.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  # fte-team/fteqw f937b9d, the base commit spikes/fte-web/fteqw.diff was cut
+  # against (NOTES.md, "The five engine patches"). Spelled out in full: the
+  # patch is context-sensitive, so a branch name would let upstream move the
+  # ground under it and turn a deploy into a merge conflict.
+  FTEQW_SHA: f937b9d88f71fc4429db5fe56c6a98d922711b2e
+  # The emscripten the spike built and debugged against. Two of our Makefile
+  # flags exist purely because of how *this* emscripten dead-strips (NOTES.md);
+  # an older one needs a different flag set, and a newer one is untested.
+  EMSDK_VERSION: 6.0.5
+  # id's own shareware 1.06 archive, from a mirror of ftp.idsoftware.com. It is
+  # the canonical source of pak0.pak: no mirror serves the bare pak, so we take
+  # the archive and extract it (see the game-data step).
+  QUAKE106_URL: https://ftp.gwdg.de/pub/misc/ftp.idsoftware.com/idstuff/quake/quake106.zip
+  # nQuake's own distfiles, pinned to a commit rather than master.
+  NQUAKE_PK3_URL: https://raw.githubusercontent.com/nQuake/distfiles/d93997920e028343eee24377f75b2addff066990/non-gpl/qw/nquake.pk3
+  # Our own release, holding the two demos nothing else publishes. Rolling the
+  # demos means a new tag here plus new pins -- see NOTES.md, "Publishing".
+  WEB_ASSETS_BASE: https://github.com/Xerialen/ez-hud/releases/download/web-assets-v1
+  # A project site lives under /<repo>/, and that is not cosmetic: the editor's
+  # import map keys on a resolved URL, so assemble-public.sh has to rewrite it
+  # to match where the page is actually served from (NOTES.md, "Running it").
+  BASE_PATH: /ez-hud/
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out ez-hud
+        uses: actions/checkout@v4
+
+      - name: Check out fteqw at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: fte-team/fteqw
+          ref: ${{ env.FTEQW_SHA }}
+          path: fteqw
+
+      - name: Apply the ez-hud engine patches
+        working-directory: fteqw
+        run: git apply --verbose "$GITHUB_WORKSPACE/spikes/fte-web/fteqw.diff"
+
+      - name: Cache emsdk
+        id: emsdk-cache
+        uses: actions/cache@v4
+        with:
+          path: emsdk
+          # emscripten's own sysroot cache (the compiled libc and ports) lives
+          # under emsdk/, so this one key covers the toolchain *and* the several
+          # minutes of library building the first compile would otherwise redo.
+          key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}
+
+      - name: Install emsdk ${{ env.EMSDK_VERSION }}
+        if: steps.emsdk-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git emsdk
+          ./emsdk/emsdk install "$EMSDK_VERSION"
+          ./emsdk/emsdk activate "$EMSDK_VERSION"
+
+      - name: Restore the engine build tree
+        uses: actions/cache@v4
+        with:
+          path: fteqw/engine/release
+          # No restore-keys, deliberately. These objects were compiled against
+          # one (emsdk, source, patch) triple, and the Makefile does not list
+          # itself as a dependency of the link -- so a near-miss restore would
+          # happily relink stale objects with the old EMCC_LDFLAGS and produce
+          # an engine that looks built and is missing exports (NOTES.md).
+          key: fteqw-release-${{ runner.os }}-${{ env.EMSDK_VERSION }}-${{ env.FTEQW_SHA }}-${{ hashFiles('spikes/fte-web/fteqw.diff') }}
+
+      - name: Build ftewebglcl
+        working-directory: fteqw/engine
+        run: |
+          set -eo pipefail
+          # The dev machine's ~/.profile exports CFLAGS/CXXFLAGS/LDFLAGS with
+          # -march=native, which is meaningless to a wasm target; emcc fails on
+          # it with an error that never mentions your profile (NOTES.md). A
+          # runner has no such profile, so this line does nothing here -- it
+          # stays so that this recipe is the same one a human can paste locally.
+          unset CFLAGS CXXFLAGS LDFLAGS
+          # emsdk_env.sh reads variables it has not set, so no `set -u` here.
+          source "$GITHUB_WORKSPACE/emsdk/emsdk_env.sh"
+          # Same Makefile-does-not-track-itself trap as above, from the other
+          # side: drop the link outputs so a restored tree always relinks with
+          # the flags this checkout's diff asks for.
+          rm -f release/ftewebglcl.js release/ftewebglcl.wasm release/ftewebglcl.html
+          make webcl-rel -j"$(nproc)"
+
+      - name: Verify the patched exports survived the link
+        run: |
+          js=fteqw/engine/release/ftewebglcl.js
+          # Both of these have actually been shipped missing, and both fail only
+          # in a browser: without EZHud_StateJSON the page has an engine it
+          # cannot read state from, and without the run-dependency API prejs.js
+          # aborts preRun and the engine comes up with no files and no video
+          # mode (NOTES.md, "The five engine patches"). Two greps, no browser.
+          grep -q _EZHud_StateJSON "$js"
+          grep -qF 'Module["UTF8ToString"]' "$js"
+          grep -qF 'addRunDependency' "$js"
+
+      - name: Download the game data
+        run: |
+          set -eo pipefail
+          pins="$GITHUB_WORKSPACE/tools/fte-web/game-data.sha256"
+          mkdir -p downloads
+          cd downloads
+
+          # grep-then-check rather than `sha256sum -c --ignore-missing`: a pin
+          # we forgot to write must be an error, and --ignore-missing would turn
+          # both a missing pin and a failed download into a silent pass.
+          verify() {
+            grep -E "  $1\$" "$pins" | sha256sum -c -
+          }
+
+          curl -fsSL --retry 3 --retry-delay 5 -o quake106.zip "$QUAKE106_URL"
+          verify quake106.zip
+
+          # pak0.pak is not served on its own by any mirror whose bytes match
+          # ours, so it comes out of id's archive: quake106.zip holds resource.1,
+          # an lh5-encoded LZH archive, which 7-Zip reads. The runner image calls
+          # it 7z or 7zz depending on whether it still has p7zip or the 7zip
+          # package that replaced it, so ask rather than assume.
+          unzip -q quake106.zip resource.1
+          sevenzip=$(command -v 7z || command -v 7zz || command -v 7za)
+          "$sevenzip" e -y -o. resource.1 ID1/PAK0.PAK > /dev/null
+          mv PAK0.PAK pak0.pak
+          verify pak0.pak
+
+          curl -fsSL --retry 3 --retry-delay 5 -o nquake.pk3 "$NQUAKE_PK3_URL"
+          verify nquake.pk3
+
+          for demo in hudtest_src.mvd tb4gf_book_vs_s.mvd; do
+            curl -fsSL --retry 3 --retry-delay 5 -o "$demo" "$WEB_ASSETS_BASE/$demo"
+            verify "$demo"
+          done
+
+          # Laid out exactly like the game-data half of the dist, which is what
+          # assemble-public.sh's GAME_DATA_DIR means.
+          gd="$GITHUB_WORKSPACE/game-data"
+          mkdir -p "$gd/id1" "$gd/qw/demos"
+          cp pak0.pak nquake.pk3 "$gd/id1/"
+          cp hudtest_src.mvd tb4gf_book_vs_s.mvd "$gd/qw/demos/"
+
+      - name: Guard test (fixture dist)
+        # Before the real assemble, not after: this builds a throwaway dist of
+        # its own and there is no reason to let it near the one we ship.
+        run: bash tools/tests/tier1_public_dist.sh
+
+      - name: Assemble the public dist
+        run: |
+          DIST_DIR="$GITHUB_WORKSPACE/dist" \
+          ENGINE_DIR="$GITHUB_WORKSPACE/fteqw/engine/release" \
+          GAME_DATA_DIR="$GITHUB_WORKSPACE/game-data" \
+          BASE_PATH="$BASE_PATH" \
+          bash tools/fte-web/assemble-public.sh
+
+      - name: Guard the real dist
+        # The fixture guard proves what assemble-public.sh does to placeholders;
+        # this proves what is in the bytes we are about to publish. Same
+        # allowlist, applied to the artifact rather than to a rehearsal of it.
+        run: |
+          set -eo pipefail
+          cd dist
+
+          # Present and non-empty -- a 0-byte pak is a download that "worked".
+          for f in index.html ui.css favicon.svg default.fmf \
+                   ftewebglcl.js ftewebglcl.wasm \
+                   id1/pak0.pak id1/nquake.pk3 \
+                   qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd; do
+            if [ ! -s "$f" ]; then
+              echo "dist: missing or empty $f" >&2
+              exit 1
+            fi
+          done
+
+          # ...and nothing else. Matched by shape, not by a copied file list:
+          # core/, view/ and fte/ are the editor's own sources and their
+          # inventory is whatever this checkout holds, while anything outside
+          # these shapes is by definition something nobody meant to publish.
+          bad=
+          while IFS= read -r f; do
+            case $f in
+              ./index.html|./ui.css|./favicon.svg|./default.fmf) ;;
+              ./ftewebglcl.js|./ftewebglcl.wasm) ;;
+              ./id1/pak0.pak|./id1/nquake.pk3) ;;
+              ./qw/demos/hudtest_src.mvd|./qw/demos/tb4gf_book_vs_s.mvd) ;;
+              # core/ is flat; a nested path means core/tests/ came along.
+              ./core/*/*) bad="$bad $f" ;;
+              ./core/*.js) ;;
+              ./view/*|./fte/*) ;;
+              *) bad="$bad $f" ;;
+            esac
+          done < <(find . -type f | sort)
+          if [ -n "$bad" ]; then
+            echo "dist: files outside the allowlist:$bad" >&2
+            exit 1
+          fi
+
+          # Belt and braces, by name, for the two categories PUBLISH.md says
+          # must be structurally unable to reach a deploy: registered game data
+          # and the owner's personal files.
+          poison=$(find . \( -name 'pak1.pak' -o -name 'owner-*' -o -name 'xerial-*' \) -print)
+          if [ -n "$poison" ]; then
+            echo "dist: non-distributable or personal files present: $poison" >&2
+            exit 1
+          fi
+
+          # An import-map key is a resolved URL, so an unrewritten one is not a
+          # cosmetic miss: the page would load the ezQuake HTTP bridge instead
+          # of the FTE adapter and report a lost connection (NOTES.md).
+          if ! grep -qF "\"${BASE_PATH}core/bridge.js\"" index.html; then
+            echo "dist: index.html has no ${BASE_PATH}core/bridge.js import-map key" >&2
+            exit 1
+          fi
+          if grep -qF '"/core/bridge.js"' index.html; then
+            echo "dist: index.html still has the site-root import-map key" >&2
+            exit 1
+          fi
+
+      - name: Upload the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    # A manual run from another ref still builds and guards; only main is ever
+    # published. The build job is the test, this job is the publication.
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
