@@ -37,6 +37,21 @@ export EZQUAKE_BASEDIR=${EZQUAKE_BASEDIR:-$(cd "$(dirname "$engine_bin")" && pwd
 export HUD_WEB_TEST_PORT=${HUD_WEB_TEST_PORT:-27792}
 export HUD_WEB_ARTIFACT_DIR=${HUD_WEB_ARTIFACT_DIR:-/tmp/ezquake-hud-tier4-artifacts}
 
+# The engine's cl_onload defaults to "menu", and Startup_Place reads it BEFORE
+# the command line's +set commands have executed (host.c: Cmd_StuffCmds_f only
+# queues them; Startup_Place runs and queues `togglemenu` first). So on a fresh
+# basedir the main menu opens over the demo, the HUD is never drawn, and the
+# driver times out waiting for overlay boxes -- which is exactly what happened
+# when pinnacle's lab was recreated empty after the 2026 reinstall. The only
+# thing that runs early enough to win is config.cfg (cfg_load executes it
+# immediately in Host_Init), so make sure the test basedir's config says
+# console. Appended, not overwritten: a lab config may hold other settings.
+config_cfg="$EZQUAKE_BASEDIR/ezquake/configs/config.cfg"
+if ! grep -qs '^cl_onload' "$config_cfg"; then
+	mkdir -p "$(dirname "$config_cfg")"
+	echo 'cl_onload console' >> "$config_cfg"
+fi
+
 # Xvfb forces software rendering, which is the honest default: it is reproducible
 # and needs no display. A host with a real GPU can offer one instead by setting
 # EZHUD_USE_DISPLAY -- on native Ubuntu Desktop (pinnacle since its 2026
