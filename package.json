@@ -9,7 +9,8 @@
     "test:tier2:engine": "bash tools/tests/tier2_engine.sh",
     "test:tier3": "node tools/tests/tier3.mjs",
     "test:tier3:fte": "node tools/tests/tier3_fte.mjs",
-    "test:tier4": "bash tools/tests/tier4.sh"
+    "test:tier4": "bash tools/tests/tier4.sh",
+    "test:tier4:fte": "bash tools/tests/tier4_fte.sh"
   },
   "devDependencies": {
     "playwright": ">=1.45.0"
