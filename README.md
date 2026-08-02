@@ -10,7 +10,7 @@ interchangeable engine backends behind one UI:
   result as a config. No second process, no folder of files next to the binary —
   the editor is compiled into the engine.
 - **FTE-web, running entirely in the browser.** Try it now:
-  **<https://xerialen.github.io/ez-hud/>**. FTEQW compiled to WebAssembly plays a
+  **<https://xerialen.github.io/ezHUD/>**. FTEQW compiled to WebAssembly plays a
   demo behind the same editor UI; drop your own `config.cfg`, texture pk3s and
   `.mvd` demos onto the page and edit your real HUD with nothing installed. The
   export is an ezQuake config — import → edit → export is lossless down to the
@@ -194,7 +194,7 @@ play a demo first — otherwise it correctly tells you there is no HUD to edit.
 
 ### The FTE-web editor
 
-The deployed instance is <https://xerialen.github.io/ez-hud/> — open it, wait a
+The deployed instance is <https://xerialen.github.io/ezHUD/> — open it, wait a
 few seconds for the wasm engine to boot into the bundled demo, then drop your
 own `config.cfg`, a pk3/zip of textures, or an `.mvd` anywhere on the stage.
 Imports persist in the browser's cache; the drift report under the stage names

@@ -31,7 +31,7 @@
 #     dm3-6 no) and sends no CORS headers. This pk3's maps/dm3.bsp is the
 #     freely-distributable answer nQuake itself ships.
 #
-#   *.mvd, qrp-dm3.pk3   https://github.com/Xerialen/ez-hud/releases/download/web-assets-v1/<name>
+#   *.mvd, qrp-dm3.pk3   https://github.com/Xerialen/ezHUD/releases/download/web-assets-v1/<name>
 #     Our own release. The two demos are not published anywhere else
 #     (hudtest_src.mvd is a synthetic recording made for this editor,
 #     tb4gf_book_vs_s.mvd an openly shared match demo), and qrp-dm3.pk3 is a

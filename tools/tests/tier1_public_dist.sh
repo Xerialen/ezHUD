@@ -76,7 +76,7 @@ echo "placeholder owner config" > "$game_data_dir/owner-config.cfg"
 DIST_DIR=$dist_dir \
 ENGINE_DIR=$engine_dir \
 GAME_DATA_DIR=$game_data_dir \
-BASE_PATH=/ez-hud/ \
+BASE_PATH=/ezHUD/ \
 	bash "$repo_dir/tools/fte-web/assemble-public.sh" > "$run_dir/assemble.log" 2>&1 ||
 	{ cat "$run_dir/assemble.log" >&2; fail "assemble-public.sh failed"; }
 
@@ -98,9 +98,9 @@ done
 
 # 3. the import map is resolved URLs, so an unrewritten key is a page that
 # loads the ezQuake bridge under a Pages prefix and reports a lost connection.
-grep -qF '"/ez-hud/core/bridge.js"' "$dist_dir/index.html" ||
-	fail "index.html has no '/ez-hud/core/bridge.js' import-map key"
-grep -qF '"/ez-hud/core/fte-adapter.js"' "$dist_dir/index.html" ||
+grep -qF '"/ezHUD/core/bridge.js"' "$dist_dir/index.html" ||
+	fail "index.html has no '/ezHUD/core/bridge.js' import-map key"
+grep -qF '"/ezHUD/core/fte-adapter.js"' "$dist_dir/index.html" ||
 	fail "index.html import-map value still points outside the base path"
 ! grep -qF '"/core/bridge.js"' "$dist_dir/index.html" ||
 	fail "index.html still carries the root-served '/core/bridge.js' key"

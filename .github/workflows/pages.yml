@@ -45,11 +45,11 @@ env:
   GPL_MAPS_URL: https://raw.githubusercontent.com/nQuake/distfiles/d93997920e028343eee24377f75b2addff066990/gpl/id1/gpl_maps.pk3
   # Our own release, holding the two demos nothing else publishes. Rolling the
   # demos means a new tag here plus new pins -- see NOTES.md, "Publishing".
-  WEB_ASSETS_BASE: https://github.com/Xerialen/ez-hud/releases/download/web-assets-v1
+  WEB_ASSETS_BASE: https://github.com/Xerialen/ezHUD/releases/download/web-assets-v1
   # A project site lives under /<repo>/, and that is not cosmetic: the editor's
   # import map keys on a resolved URL, so assemble-public.sh has to rewrite it
   # to match where the page is actually served from (NOTES.md, "Running it").
-  BASE_PATH: /ez-hud/
+  BASE_PATH: /ezHUD/
 
 jobs:
   build:
@@ -264,7 +264,7 @@ jobs:
 
       - name: Tier 4F (the dist itself, end to end in a browser)
         # The deploy gate that matters most: the exact artifact below is
-        # served under the /ez-hud/ prefix and booted in Chrome -- engine,
+        # served under the /ezHUD/ prefix and booted in Chrome -- engine,
         # pak0, gpl_maps' dm3, demo playback, drag, import, export. If this
         # is red, there is nothing worth publishing.
         run: DIST_DIR="$GITHUB_WORKSPACE/dist" npm run test:tier4:fte

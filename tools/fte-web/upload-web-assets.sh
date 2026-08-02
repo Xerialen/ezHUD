@@ -22,7 +22,7 @@ set +x
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 workspace=$(cd "$repo_dir/.." && pwd)
 
-repo=${REPO:-Xerialen/ez-hud}
+repo=${REPO:-Xerialen/ezHUD}
 tag=${TAG:-web-assets-v1}
 # The assets live in the dev site, which is outside this repository. Demos
 # under qw/demos/, the QRP texture subset under id1/ -- resolved per asset

@@ -45,7 +45,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
 const workspace = path.resolve(repo, '..');
 const distDir = path.resolve(process.env.DIST_DIR || path.join(workspace, 'dist'));
-const basePath = process.env.BASE_PATH || '/ez-hud/';
+const basePath = process.env.BASE_PATH || '/ezHUD/';
 const artifactDir = process.env.HUD_WEB_ARTIFACT_DIR || '/tmp/ezhud-tier4-fte-artifacts';
 
 // The whole cold start plus the 8s playdemo retry, with room for a software

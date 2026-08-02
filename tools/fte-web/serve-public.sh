@@ -20,7 +20,7 @@ repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 workspace=$(cd "$repo_dir/.." && pwd)
 
 dist_dir=${DIST_DIR:-$workspace/dist}
-base_path=${BASE_PATH:-/ez-hud/}
+base_path=${BASE_PATH:-/ezHUD/}
 port=${1:-${PORT:-8619}}
 
 if [ ! -f "$dist_dir/index.html" ]; then
