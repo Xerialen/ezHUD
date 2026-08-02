@@ -1,22 +1,31 @@
 # ez-hud
 
-A HUD editor for [ezQuake](https://github.com/QW-Group/ezquake-source), served by the
-engine itself.
+A HUD editor for [ezQuake](https://github.com/QW-Group/ezquake-source), with two
+interchangeable engine backends behind one UI:
 
-Run `hud_web 1` in the console and ezQuake prints a URL. Open it and you get a live
-picture of your own game with every HUD element outlined: drag them, resize them from
-the corners, recolour them, group them, switch between ezQuake's several HUD systems,
-and save the result as a config. There is no second process to install and no folder
-of files to keep next to the binary — the editor is compiled into the engine.
+- **ezQuake, served by the engine itself.** Run `hud_web 1` in the console and
+  ezQuake prints a URL. Open it and you get a live picture of your own game with
+  every HUD element outlined: drag them, resize them from the corners, recolour
+  them, group them, switch between ezQuake's several HUD systems, and save the
+  result as a config. No second process, no folder of files next to the binary —
+  the editor is compiled into the engine.
+- **FTE-web, running entirely in the browser.** Try it now:
+  **<https://xerialen.github.io/ez-hud/>**. FTEQW compiled to WebAssembly plays a
+  demo behind the same editor UI; drop your own `config.cfg`, texture pk3s and
+  `.mvd` demos onto the page and edit your real HUD with nothing installed. The
+  export is an ezQuake config — import → edit → export is lossless down to the
+  byte for untouched lines.
 
-The editor never reimplements HUD placement. Every rectangle it draws a handle on is
-the engine's own `hud->lx/ly/lw/lh`, and every change goes back through the console.
-The engine stays the single source of truth for both geometry and rendering, which is
+The editor never reimplements HUD placement. Every rectangle it draws a handle on
+is the engine's own layout, and every change goes back through the console. The
+engine stays the single source of truth for both geometry and rendering, which is
 the whole reason for this approach over a standalone tool that would have to model
 ezQuake's placement rules and inevitably drift from them.
 
-**Status:** working and independently reviewed, not yet merged upstream. See
-[Known gaps](#known-gaps) for what is known to be unproven.
+**Status:** the ezQuake backend is working and independently reviewed, not yet
+merged upstream. The FTE-web backend shipped from a spike
+([`spikes/fte-web/`](spikes/fte-web/) — spec, findings, parity evidence) and is
+deployed. See [Known gaps](#known-gaps) for what is known to be unproven.
 
 ---
 
@@ -68,6 +77,17 @@ placement maths, resize transfer ratios, colour parsing, the model. It never tou
 `document`, which is what makes it testable without a browser and replaceable without
 a rewrite. `view/app.js` is the only file allowed to write to the DOM.
 
+**The FTE-web backend swaps the transport, not the editor.** `index-fte.html`
+uses an import map to resolve `core/bridge.js` to `core/fte-adapter.js`, so
+`view/app.js` ships byte-identical between backends. The adapter speaks to an
+in-page wasm FTEQW (built with the ezhud plugin plus ~150 lines of C exports,
+patches in `spikes/fte-web/fteqw.diff`): state comes from an
+`EZHud_StateJSON()` export, commands go through the same allowlist shape as the
+HTTP bridge, and "save" is a download of the reconstructed ezQuake config. The
+host page's own chrome (demo picker, drop-zone imports, the drift report that
+names everything the preview cannot show) lives in `hud_web_ui/fte/` and never
+touches `view/`.
+
 **The UI is a build artifact that is committed.** `tools/embed_hud_web_ui.py` bakes
 `hud_web_ui/` into a generated C file. That keeps the Windows and Linux builds free of
 any new build-time dependency — nothing but a C compiler is needed, same as before —
@@ -93,10 +113,13 @@ It has caused two separate defects already.
 ```
 hud_web_ui/          the editor
   core/              pure logic — no DOM access, ever
-    bridge.js        HTTP client, token handling, save semantics
+    bridge.js        HTTP client, token handling, save semantics (ezQuake backend)
+    fte-adapter.js   same interface, wasm transport (FTE-web backend)
     geometry.js      console ↔ physical ↔ display transforms
     model.js         editor state derived from engine state
-  view/app.js        the only DOM writer
+  view/app.js        the only DOM writer, byte-identical on both backends
+  fte/               FTE host page: boot, imports, demo picker, drift report
+  index-fte.html     the FTE page; its import map is the whole backend swap
   fixtures/          a real /state capture and frame, for offline work
 engine/
   src/hud_web.c            transport: listener, HTTP parse, auth, routing, allowlist
@@ -104,6 +127,8 @@ engine/
   src/libhud/              placement core extracted from hud.c, with tests
   tools/                   the embedding script
   engine-integration.diff  changes to files ezQuake already has
+tools/fte-web/       dev-site assembly, the sanitized public build, its pins
+spikes/fte-web/      the FTE spike: SPEC, NOTES, PARITY evidence, fteqw.diff
 docs/PROTOCOL.md     the bridge contract; read before changing an endpoint
 ```
 
@@ -167,6 +192,39 @@ play a demo first — otherwise it correctly tells you there is no HUD to edit.
 
 `hud_web*` cvars are deliberately **not** settable through the bridge itself.
 
+### The FTE-web editor
+
+The deployed instance is <https://xerialen.github.io/ez-hud/> — open it, wait a
+few seconds for the wasm engine to boot into the bundled demo, then drop your
+own `config.cfg`, a pk3/zip of textures, or an `.mvd` anywhere on the stage.
+Imports persist in the browser's cache; the drift report under the stage names
+every line the preview could not apply, and export writes them all back.
+
+Locally there are two builds:
+
+```bash
+tools/fte-web/assemble.sh        # dev site: symlinks into hud_web_ui/, uses ../site
+tools/fte-web/serve.sh           # serve it from the site root (the import map needs that)
+
+tools/fte-web/stage-game-data.sh    # seed ../game-data from the dev site (allowlisted names only)
+tools/fte-web/assemble-public.sh    # the deployable dist/ — built from an explicit allowlist
+tools/fte-web/serve-public.sh       # serve dist/ under the /ez-hud/ prefix Pages uses
+```
+
+The engine itself is built from a pinned FTEQW commit plus
+`spikes/fte-web/fteqw.diff` (`make webcl-rel` under emsdk;
+`spikes/fte-web/NOTES.md` records every trap, starting with why you must
+`unset CFLAGS CXXFLAGS LDFLAGS` first).
+
+**Publishing is CI's job, not a hand-run.** `.github/workflows/pages.yml`
+builds the engine from source, downloads every game-data file against sha256
+pins (`tools/fte-web/game-data.sha256`), assembles the dist from the allowlist,
+runs the test tiers against the exact artifact, and deploys on `main`. Nothing
+is ever copied out of the dev site: the sanitization is structural
+(`spikes/fte-web/PUBLISH.md` argues why), and a guard test fails the build on
+any extra *or* missing file — registered Quake data and personal configs cannot
+reach a deploy by construction.
+
 ### After changing the UI
 
 ```bash
@@ -182,16 +240,21 @@ nothing: the engine serves the *generated* file, not your edited source.
 Four tiers, split by determinism and cost. `docs/TESTING.md` is the full spec.
 
 ```bash
-npm run test:tier1        # placement core, editor logic, baked-UI freshness
+npm run test:tier1        # placement core, editor logic, baked-UI freshness, public-dist guard
 npm run test:tier2:js     # bridge client against a local HTTP stub
 npm run test:tier3        # the DOM, headless Chromium, against the fixture
+npm run test:tier3:fte    # the FTE page against a scripted fake engine (no wasm)
+npm run test:tier4:fte    # the assembled public dist, end to end in a real browser
 npm run test:tier2:engine # bridge security contract   (needs a built engine)
-npm run test:tier4        # full end-to-end            (needs an engine + a demo)
+npm run test:tier4        # full end-to-end, ezQuake   (needs an engine + a demo)
 ```
 
-The first three need nothing but Node and a browser, and run on every push and pull
-request. The last two need `EZQUAKE_BIN` and an isolated Quake tree; they exit `2`
-with a clear message rather than passing when those are absent.
+The first five need nothing but Node and a system Chrome (both FTE lanes launch
+it via Playwright's `channel: 'chrome'` — no browser downloads), and run on
+every push and pull request; tier 4F additionally wants an assembled `dist/`
+and is the deploy gate in `pages.yml`. The last two need `EZQUAKE_BIN` and an
+isolated Quake tree; they exit `2` with a clear message rather than passing
+when those are absent.
 
 Tiers 1–3 lean on `hud_web_ui/fixtures/state.json`, a real capture from a live
 engine: 83 elements, 25 of them drawn, a 320×200 console on a 1280×720 framebuffer.
@@ -253,10 +316,23 @@ Honest list; none believed to be dangerous.
   see it". `HUD_PrepareDraw` stamps its sequence before the caller draws any pixels,
   and some elements call it before their own visibility condition. Making it stronger
   would need every draw function to signal completion.
-- Neither test host has a working GPU: one had its card removed, the other renders
-  through llvmpipe under WSL. Everything is therefore verified on software GL, where
-  a capture costs most of a second instead of a few milliseconds.
+- The self-hosted engine tiers (2-engine and 4) are parked as manual-only:
+  their runners lived on a host that has since been reinstalled and are not
+  yet re-registered. The hosted tiers, including both FTE lanes, run on every
+  push.
+- The FTE-web preview has known parity gaps against real ezQuake, all named in
+  [`spikes/fte-web/PARITY.md`](spikes/fte-web/PARITY.md): FTE renders its own
+  fonts, ten elements have no preview (the drift report lists them per config
+  and the export cannot lose them), `teaminfo`/`face` place differently, and
+  per-element colour tints drift in places. The verdict there is "go, with
+  caveats", and the caveats are the ticket backlog.
 
 ## License
 
-GPL-2.0, matching ezQuake. This contains and derives from ezQuake source.
+GPL-2.0, matching ezQuake. This contains and derives from ezQuake source; the
+FTE-web backend builds on FTEQW (GPL-2.0, patches in
+`spikes/fte-web/fteqw.diff`). The deployed site additionally ships shareware
+Quake 1.06 game data, nQuake community content including GPL map remakes, and
+a subset of the Quake Retexturing Project's textures (redistribution with
+attribution — their readme rides inside the pk3); every one of those files is
+hash-pinned in `tools/fte-web/game-data.sha256` with its source recorded.
