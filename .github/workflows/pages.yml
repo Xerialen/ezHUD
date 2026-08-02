@@ -161,16 +161,18 @@ jobs:
           curl -fsSL --retry 3 --retry-delay 5 -o gpl_maps.pk3 "$GPL_MAPS_URL"
           verify gpl_maps.pk3
 
-          for demo in hudtest_src.mvd tb4gf_book_vs_s.mvd; do
-            curl -fsSL --retry 3 --retry-delay 5 -o "$demo" "$WEB_ASSETS_BASE/$demo"
-            verify "$demo"
+          # qrp-dm3.pk3 comes off our release like the demos: it is a subset
+          # nobody else publishes (build-qrp-subset.py documents the bytes).
+          for asset in hudtest_src.mvd tb4gf_book_vs_s.mvd qrp-dm3.pk3; do
+            curl -fsSL --retry 3 --retry-delay 5 -o "$asset" "$WEB_ASSETS_BASE/$asset"
+            verify "$asset"
           done
 
           # Laid out exactly like the game-data half of the dist, which is what
           # assemble-public.sh's GAME_DATA_DIR means.
           gd="$GITHUB_WORKSPACE/game-data"
           mkdir -p "$gd/id1" "$gd/qw/demos"
-          cp pak0.pak nquake.pk3 gpl_maps.pk3 "$gd/id1/"
+          cp pak0.pak nquake.pk3 gpl_maps.pk3 qrp-dm3.pk3 "$gd/id1/"
           cp hudtest_src.mvd tb4gf_book_vs_s.mvd "$gd/qw/demos/"
 
       - name: Install test dependencies
@@ -208,7 +210,7 @@ jobs:
           # Present and non-empty -- a 0-byte pak is a download that "worked".
           for f in index.html ui.css favicon.svg default.fmf \
                    ftewebglcl.js ftewebglcl.wasm \
-                   id1/pak0.pak id1/nquake.pk3 id1/gpl_maps.pk3 \
+                   id1/pak0.pak id1/nquake.pk3 id1/gpl_maps.pk3 id1/qrp-dm3.pk3 \
                    qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd; do
             if [ ! -s "$f" ]; then
               echo "dist: missing or empty $f" >&2
@@ -225,7 +227,7 @@ jobs:
             case $f in
               ./index.html|./ui.css|./favicon.svg|./default.fmf) ;;
               ./ftewebglcl.js|./ftewebglcl.wasm) ;;
-              ./id1/pak0.pak|./id1/nquake.pk3|./id1/gpl_maps.pk3) ;;
+              ./id1/pak0.pak|./id1/nquake.pk3|./id1/gpl_maps.pk3|./id1/qrp-dm3.pk3) ;;
               ./qw/demos/hudtest_src.mvd|./qw/demos/tb4gf_book_vs_s.mvd) ;;
               # core/ is flat; a nested path means core/tests/ came along.
               ./core/*/*) bad="$bad $f" ;;

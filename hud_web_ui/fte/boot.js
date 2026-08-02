@@ -127,6 +127,12 @@
 			// it; runtime download is no rescue (the community map repo hosts
 			// no id maps and sends no CORS headers).
 			'id1/gpl_maps.pk3': 'id1/gpl_maps.pk3',
+			// QRP's faithful high-res remakes of exactly the textures dm3
+			// references (32MB instead of the full 390MB QRP set). The GPL
+			// remake bsp keeps id's texture *names* but must embed its own
+			// minimal art; these replace by name, so the map reads as real
+			// dm3 instead of untextured walls.
+			'id1/qrp-dm3.pk3': 'id1/qrp-dm3.pk3',
 			'qw/demos/hudtest_src.mvd': 'qw/demos/hudtest_src.mvd',
 			'qw/demos/tb4gf_book_vs_s.mvd': 'qw/demos/tb4gf_book_vs_s.mvd'
 		},

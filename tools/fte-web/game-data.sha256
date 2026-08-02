@@ -31,10 +31,16 @@
 #     dm3-6 no) and sends no CORS headers. This pk3's maps/dm3.bsp is the
 #     freely-distributable answer nQuake itself ships.
 #
-#   *.mvd         https://github.com/Xerialen/ez-hud/releases/download/web-assets-v1/<name>
-#     Our own release, because these two demos are not published anywhere else:
-#     hudtest_src.mvd is a synthetic recording made for this editor and
-#     tb4gf_book_vs_s.mvd is an openly shared match demo. Created (once) by
+#   *.mvd, qrp-dm3.pk3   https://github.com/Xerialen/ez-hud/releases/download/web-assets-v1/<name>
+#     Our own release. The two demos are not published anywhere else
+#     (hudtest_src.mvd is a synthetic recording made for this editor,
+#     tb4gf_book_vs_s.mvd an openly shared match demo), and qrp-dm3.pk3 is a
+#     32MB subset of the ~390MB QRP map-texture packs holding exactly the
+#     textures dm3 names -- built reproducibly by
+#     tools/fte-web/build-qrp-subset.py (QRP terms: redistribution with
+#     attribution; their readme rides inside the pk3). Without it the GPL
+#     dm3 remake renders near-bare walls, which read as "someone's stripped
+#     texture config" rather than default Quake. Uploaded (once) by
 #     tools/fte-web/upload-web-assets.sh.
 #
 # Format is `sha256sum -c`: run it from the directory the workflow downloads
@@ -44,5 +50,6 @@ ec6c9d34b1ae0252ac0066045b6611a7919c2a0d78a3a66d9387a8f597553239  quake106.zip
 35a9c55e5e5a284a159ad2a62e0e8def23d829561fe2f54eb402dbc0a9a946af  pak0.pak
 7295a0ee15370a47fdaf492ebf7479241b5b36554c32eb9be9330a234083e8b4  nquake.pk3
 6e409cab705ea6046872383149a222fe76a351f03ac48055b3e5f1faaec9d6c6  gpl_maps.pk3
+581437b8a38e60d452eb8c0fc3080961acb8f0d686bed64123c150675b62ae98  qrp-dm3.pk3
 d9d2121e997e7980df3326dc1a91228c58aa523f56a843a152137f6c57871aa3  hudtest_src.mvd
 45f653c08fbb5488e2619a24ee0dd71347316e60265b8e4caaff0f3607ce0f30  tb4gf_book_vs_s.mvd

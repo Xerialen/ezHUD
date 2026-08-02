@@ -44,6 +44,7 @@ ftewebglcl.wasm
 id1/gpl_maps.pk3
 id1/nquake.pk3
 id1/pak0.pak
+id1/qrp-dm3.pk3
 index.html
 qw/demos/hudtest_src.mvd
 qw/demos/tb4gf_book_vs_s.mvd
@@ -62,7 +63,7 @@ mkdir -p "$engine_dir" "$game_data_dir/id1" "$game_data_dir/qw/demos"
 for name in ftewebglcl.html ftewebglcl.js ftewebglcl.wasm; do
 	echo "placeholder $name" > "$engine_dir/$name"
 done
-for rel in id1/pak0.pak id1/nquake.pk3 id1/gpl_maps.pk3 qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd; do
+for rel in id1/pak0.pak id1/nquake.pk3 id1/gpl_maps.pk3 id1/qrp-dm3.pk3 qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd; do
 	echo "placeholder $rel" > "$game_data_dir/$rel"
 done
 # The poison. Both sit in the real dev site, so a build that scooped up its
@@ -108,7 +109,7 @@ grep -qF '"/ez-hud/core/fte-adapter.js"' "$dist_dir/index.html" ||
 site_dir=$run_dir/site
 staged=$run_dir/staged
 mkdir -p "$site_dir/id1" "$site_dir/qw/demos"
-for rel in id1/pak0.pak id1/gpl_maps.pk3 qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd; do
+for rel in id1/pak0.pak id1/gpl_maps.pk3 id1/qrp-dm3.pk3 qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd; do
 	echo "placeholder $rel" > "$site_dir/$rel"
 done
 # At the site root, which is where the dev site actually keeps it.
@@ -126,6 +127,7 @@ staged_actual=$(cd "$staged" && find . -type f -printf '%P\n' | sort)
 staged_expected="id1/gpl_maps.pk3
 id1/nquake.pk3
 id1/pak0.pak
+id1/qrp-dm3.pk3
 qw/demos/hudtest_src.mvd
 qw/demos/tb4gf_book_vs_s.mvd"
 if [ "$staged_actual" != "$staged_expected" ]; then

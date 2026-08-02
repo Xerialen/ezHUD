@@ -113,7 +113,10 @@ copy "$repo_dir/tools/fte-web/default.fmf" default.fmf
 # shareware pak0 does not contain and FTE cannot download at runtime from a
 # Pages origin (no id maps and no CORS on the community map repo). The GPL
 # remake nQuake ships is what makes the demos playable at all.
-for rel in id1/pak0.pak id1/nquake.pk3 id1/gpl_maps.pk3 qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd; do
+# qrp-dm3.pk3: QRP's replacements for exactly the textures dm3 names, so the
+# GPL remake reads as real dm3 rather than bare walls. Built by
+# tools/fte-web/build-qrp-subset.py; shipped from our web-assets release.
+for rel in id1/pak0.pak id1/nquake.pk3 id1/gpl_maps.pk3 id1/qrp-dm3.pk3 qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd; do
 	copy "$game_data_dir/$rel" "$rel"
 done
 

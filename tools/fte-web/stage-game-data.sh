@@ -45,7 +45,7 @@ find_source() { # find_source <dist-relative-path>
 
 staged=0
 missing=0
-for rel in id1/pak0.pak id1/nquake.pk3 id1/gpl_maps.pk3 qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd; do
+for rel in id1/pak0.pak id1/nquake.pk3 id1/gpl_maps.pk3 id1/qrp-dm3.pk3 qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd; do
 	if ! src=$(find_source "$rel"); then
 		echo "stage-game-data.sh: $site_dir has no $rel" >&2
 		missing=$((missing + 1))

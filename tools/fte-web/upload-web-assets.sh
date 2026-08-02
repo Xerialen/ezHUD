@@ -24,10 +24,24 @@ workspace=$(cd "$repo_dir/.." && pwd)
 
 repo=${REPO:-Xerialen/ez-hud}
 tag=${TAG:-web-assets-v1}
-# The demos live in the dev site, which is outside this repository.
-src_dir=${SRC_DIR:-$workspace/site/qw/demos}
+# The assets live in the dev site, which is outside this repository. Demos
+# under qw/demos/, the QRP texture subset under id1/ -- resolved per asset
+# below rather than from one directory.
+site_dir=${SITE_DIR:-$workspace/site}
 pins=$repo_dir/tools/fte-web/game-data.sha256
-assets=(hudtest_src.mvd tb4gf_book_vs_s.mvd)
+assets=(hudtest_src.mvd tb4gf_book_vs_s.mvd qrp-dm3.pk3)
+
+asset_path() { # asset_path <name> -> absolute path or failure
+	local name=$1
+	local cand
+	for cand in "$site_dir/qw/demos/$name" "$site_dir/id1/$name"; do
+		if [ -f "$cand" ]; then
+			printf '%s\n' "$cand"
+			return 0
+		fi
+	done
+	return 1
+}
 
 if [ -z "${GITHUB_TOKEN:-}" ]; then
 	echo "upload-web-assets.sh: set GITHUB_TOKEN to a token with contents:write on $repo" >&2
@@ -39,11 +53,11 @@ fi
 # that every build rejects, and releases assets cannot be quietly replaced.
 echo "Checking the local files against $pins"
 for name in "${assets[@]}"; do
-	if [ ! -f "$src_dir/$name" ]; then
-		echo "upload-web-assets.sh: no $name in $src_dir (override with SRC_DIR)" >&2
+	if ! src=$(asset_path "$name"); then
+		echo "upload-web-assets.sh: no $name under $site_dir (override with SITE_DIR)" >&2
 		exit 1
 	fi
-	(cd "$src_dir" && grep -E "  $name\$" "$pins" | sha256sum -c -)
+	(cd "$(dirname "$src")" && grep -E "  $name\$" "$pins" | sha256sum -c -)
 done
 
 # The token goes in on stdin, never in argv: anyone else on this machine can
@@ -92,11 +106,12 @@ for name in "${assets[@]}"; do
 			;;
 	esac
 	echo "Uploading $name"
+	src=$(asset_path "$name")
 	# Asset uploads go to uploads.github.com, not api.github.com, and the name
 	# is a query parameter rather than anything taken from the file.
 	asset=$(api POST "https://uploads.github.com/repos/$repo/releases/$release_id/assets?name=$name" \
 		-H "Content-Type: application/octet-stream" \
-		--data-binary "@$src_dir/$name")
+		--data-binary "@$src")
 	printf '%s' "$asset" | json_field browser_download_url
 done
 
