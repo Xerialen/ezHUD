@@ -1,20 +1,45 @@
-# ez-hud
+# ezHUD
 
-A HUD editor for [ezQuake](https://github.com/QW-Group/ezquake-source), with two
-interchangeable engine backends behind one UI:
+**Edit your Quake HUD by dragging it — on a live game, in your browser.**
 
-- **ezQuake, served by the engine itself.** Run `hud_web 1` in the console and
-  ezQuake prints a URL. Open it and you get a live picture of your own game with
-  every HUD element outlined: drag them, resize them from the corners, recolour
-  them, group them, switch between ezQuake's several HUD systems, and save the
-  result as a config. No second process, no folder of files next to the binary —
-  the editor is compiled into the engine.
-- **FTE-web, running entirely in the browser.** Try it now:
-  **<https://xerialen.github.io/ezHUD/>**. FTEQW compiled to WebAssembly plays a
-  demo behind the same editor UI; drop your own `config.cfg`, texture pk3s and
-  `.mvd` demos onto the page and edit your real HUD with nothing installed. The
-  export is an ezQuake config — import → edit → export is lossless down to the
-  byte for untouched lines.
+Every QuakeWorld player has been through it: tuning a HUD means memorizing
+dozens of `hud_*` cvars, typing coordinates into the console, squinting at the
+result, and repeating until it stops being wrong. ezHUD replaces that loop.
+You get a live picture of the actual game with every HUD element outlined —
+health, armor, ammo, clocks, trackers, all ~74 of them. Drag them where you
+want them. Resize from the corners. Click a colour and pick from the real
+Quake palette. Group elements so they move together. When it looks right, hit
+Save and you have a normal ezQuake config, byte-compatible with the one you
+already run.
+
+**Try it right now, nothing to install:** <https://xerialen.github.io/ezHUD/>
+— a full Quake engine boots in the tab and plays a demo behind the editor.
+Drop your own `config.cfg` on the page and it applies instantly, with a report
+of exactly what applied; drop your texture pk3s and `.mvd` demos too, and edit
+*your* HUD over *your* frag movie. Export writes back a config where every
+line you didn't touch survives byte-for-byte.
+
+What you never have to think about, because the tool does:
+
+- **What a pixel is worth.** The HUD lives in console pixels; your screen
+  doesn't. The editor shows "editing at 853×480 · 1 px = 2.25× on screen" and
+  warns you when your setup is stretching the layout.
+- **Which cvar means what.** Every drag and toggle *is* a cvar change,
+  written through the engine's own console — the inspector shows the values,
+  and parameters the engine would currently ignore are marked as such instead
+  of silently doing nothing.
+- **Losing your config.** Overwrites warn first, backups are handled, and
+  nothing is written until you say so.
+
+## Two ways to run it
+
+- **In the browser (FTE-web).** The deployed instance above. FTEQW compiled
+  to WebAssembly plays a demo behind the editor UI; everything stays in your
+  browser, and the export is an ezQuake config.
+- **Inside ezQuake itself.** Run `hud_web 1` in the console and the engine
+  prints a URL; open it and edit your real, running game. No second process,
+  no folder of files next to the binary — the editor is compiled into the
+  engine.
 
 The editor never reimplements HUD placement. Every rectangle it draws a handle on
 is the engine's own layout, and every change goes back through the console. The
@@ -88,6 +113,17 @@ host page's own chrome (demo picker, drop-zone imports, the drift report that
 names everything the preview cannot show) lives in `hud_web_ui/fte/` and never
 touches `view/`.
 
+**The UI is one design system, shared by both backends.** The visual language
+(the EZHUD overhaul, issue #5) is a token system in `ui.css`: colours sampled
+from the id1 palette (warm soot neutrals, one ember accent reserved for the
+committing action), Space Grotesk for the interface and JetBrains Mono for
+every value the engine owns, near-zero radii, a scanlined top bar and a
+checker stage. The shell is a three-pane editor — family-tinted element tree,
+the game render as the hero, an inspector — under a top bar with the scale
+readout and over a status bar with the live console-space cursor. The design
+source is the mockup in `docs/mockups/gui-overhaul.html`; `fte/fte.css` only
+ever *adds* page-specific chrome on top of the shared tokens.
+
 **The UI is a build artifact that is committed.** `tools/embed_hud_web_ui.py` bakes
 `hud_web_ui/` into a generated C file. That keeps the Windows and Linux builds free of
 any new build-time dependency — nothing but a C compiler is needed, same as before —
@@ -130,6 +166,9 @@ engine/
 tools/fte-web/       dev-site assembly, the sanitized public build, its pins
 spikes/fte-web/      the FTE spike: SPEC, NOTES, PARITY evidence, fteqw.diff
 docs/PROTOCOL.md     the bridge contract; read before changing an endpoint
+docs/DESIGN-BRIEF.md the GUI overhaul brief (issues #5–#7)
+docs/FONTS.md        how fonts, proportional and the charset interact (issue #8)
+docs/mockups/        the design source the UI is built from
 ```
 
 The engine-side files live under `engine/` because they are not a standalone program —
@@ -316,10 +355,13 @@ Honest list; none believed to be dangerous.
   see it". `HUD_PrepareDraw` stamps its sequence before the caller draws any pixels,
   and some elements call it before their own visibility condition. Making it stronger
   would need every draw function to signal completion.
-- The self-hosted engine tiers (2-engine and 4) are parked as manual-only:
-  their runners lived on a host that has since been reinstalled and are not
-  yet re-registered. The hosted tiers, including both FTE lanes, run on every
-  push.
+- The self-hosted engine tiers (2-engine and 4) are re-enabled and green.
+  Tier 4 runs on the host's real GPU when the runner sets
+  `EZHUD_USE_DISPLAY` (falling back to Xvfb software rendering otherwise),
+  and `tier4.sh` seeds `cl_onload console` into the test basedir — the
+  engine reads that cvar before the command line's `+set` queue executes,
+  so a fresh basedir would otherwise open the menu over the demo and no
+  HUD element would ever get a rect.
 - The FTE-web preview has known parity gaps against real ezQuake, all named in
   [`spikes/fte-web/PARITY.md`](spikes/fte-web/PARITY.md): FTE renders its own
   fonts, ten elements have no preview (the drift report lists them per config
