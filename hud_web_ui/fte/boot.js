@@ -110,10 +110,17 @@
 		// the 'user' Cache under /_/<fs-path>, and prejs.js's loadcachedfiles()
 		// reads that cache into the engine's own FS layer at preRun. Adding
 		// them here as well would download the same bytes twice.
+		// A listed file the server 404s is fine: prejs.js drops the run
+		// dependency and moves on without registering it. That is what lets
+		// this one list serve both sites -- the public dist ships
+		// id1/nquake.pk3 (community art) but not pak1.pak (registered Quake,
+		// not distributable), the dev site the other way around, and each
+		// boots with what its server actually has.
 		files: {
 			'default.fmf': 'default.fmf',
 			'id1/pak0.pak': 'id1/pak0.pak',
 			'id1/pak1.pak': 'id1/pak1.pak',
+			'id1/nquake.pk3': 'id1/nquake.pk3',
 			'qw/demos/hudtest_src.mvd': 'qw/demos/hudtest_src.mvd',
 			'qw/demos/tb4gf_book_vs_s.mvd': 'qw/demos/tb4gf_book_vs_s.mvd'
 		},
