@@ -10,13 +10,32 @@ tier is, the more often it runs and the more freely an LLM agent may extend it.
 
 | Tier | Layer | Deterministic | Needs | Runs on | Gate |
 |------|-------|---------------|-------|---------|------|
-| 1 | Pure core (`hud_web_ui/core/`, `src/libhud/`) | Yes | Node + C compiler | Every push/PR | Merge |
+| 1 | Pure core (`hud_web_ui/core/`, `src/libhud/`, FTE adapter+import units, public-dist guard) | Yes | Node + C compiler | Every push/PR | Merge |
 | 2 | Bridge contract (`hud_web.c`, `hud_web_state.c`, `bridge.js`) | Yes | Built engine (C half) / Node stub (JS half) | PRs touching `engine/` or protocol | Merge |
 | 3 | View layer (`view/app.js`) | Mostly | Headless Chromium | PRs touching `hud_web_ui/` | Release |
-| 4 | Full end-to-end | No (flaky by nature) | Real engine + GPU host + browser | Release tags, nightly, manual | Release |
+| 3F | FTE page (`index-fte.html`, `fte/*`, `core/fte-adapter.js`) against a fake engine | Yes | Node + system Chrome | PRs touching `hud_web_ui/` | Merge |
+| 4 | Full end-to-end, ezQuake backend | No (flaky by nature) | Real engine + GPU host + browser | Release tags, nightly, manual | Release |
+| 4F | Full end-to-end, FTE backend: the **public dist** in a real browser | Mostly (wasm, no GPU host) | Assembled `dist/` + system Chrome | Pages deploys, and locally before one | Deploy |
 
-**Rule of thumb:** an agent must run tiers 1–2 before reporting any change done.
-Tier 4 failures require human interpretation and never block small changes.
+**Rule of thumb:** an agent must run tiers 1–2 (and 3F when the FTE page is
+touched) before reporting any change done. Tier 4 failures require human
+interpretation and never block small changes.
+
+The two FTE lanes exist because the FTE backend has no HTTP bridge to
+contract-test: its "bridge" is `core/fte-adapter.js` talking to an in-page
+wasm engine. Tier 3F swaps that engine for a scripted fake (states in, cbuf
+commands parsed back into the state — a closed loop, so drags and imports are
+tested end to end without wasm). Tier 4F is the honest half: the exact
+artifact `assemble-public.sh` built, served under the `/ez-hud/` prefix Pages
+uses, booted for real. Both run Playwright with `channel: 'chrome'` — the
+system Google Chrome — because the dev machines and GitHub's ubuntu runners
+already have it, and a pinned Playwright browser download is a supply-chain
+surface this repo does not need.
+
+```
+npm run test:tier3:fte   # fake-engine FTE page suite, < 30 s
+npm run test:tier4:fte   # public dist end to end (DIST_DIR=../dist default)
+```
 
 ---
 
@@ -112,6 +131,13 @@ free from GitHub's side in all cases.
 | `tier2-engine.yml` — engine build (ccache) + curl contract tests | self-hosted (home) | PRs touching `engine/**` |
 | `tier3.yml` — Playwright headless vs fixture | `ubuntu-latest` (Playwright container) | PRs touching `hud_web_ui/**` |
 | `tier4.yml` — full e2e + screenshots | self-hosted (GPU host) | release tags, nightly schedule, `workflow_dispatch` |
+| `pages.yml` — public build, tiers 1(js)+3F on the checkout and 4F on the built dist, then deploy | `ubuntu-24.04` | push to `main`, `workflow_dispatch` |
+
+The pages workflow is the FTE lanes' natural CI home: nothing can deploy
+without the artifact itself passing tier 4F first. The self-hosted rows
+describe pinnacle, which has run native Ubuntu Desktop since its 2026
+reinstall (it was WSL when this file was first written — the WSLg/D3D12
+notes in `tools/tests/tier4.sh` are kept as history).
 
 Notes:
 - Cache the ezQuake build with **ccache** so only ez-hud files recompile;

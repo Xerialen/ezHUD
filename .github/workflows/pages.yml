@@ -173,10 +173,21 @@ jobs:
           cp pak0.pak nquake.pk3 gpl_maps.pk3 "$gd/id1/"
           cp hudtest_src.mvd tb4gf_book_vs_s.mvd "$gd/qw/demos/"
 
-      - name: Guard test (fixture dist)
-        # Before the real assemble, not after: this builds a throwaway dist of
-        # its own and there is no reason to let it near the one we ship.
-        run: bash tools/tests/tier1_public_dist.sh
+      - name: Install test dependencies
+        # npm ci restores the one devDependency (playwright, the library only).
+        # No `npx playwright install`: both FTE test lanes launch the runner
+        # image's own Google Chrome via channel:'chrome' (docs/TESTING.md), so
+        # there is no browser download to trust or wait for.
+        run: npm ci
+
+      - name: Tier 1 (core units, C placement tests, public-dist guard)
+        # The full tier, C half included -- the runner has the compiler the
+        # dev sandbox lacks. This also runs tier1_public_dist.sh, the fixture
+        # guard, before the real assemble ever happens.
+        run: npm run test:tier1
+
+      - name: Tier 3F (FTE page against the fake engine)
+        run: npm run test:tier3:fte
 
       - name: Assemble the public dist
         run: |
@@ -248,6 +259,21 @@ jobs:
             echo "dist: index.html still has the site-root import-map key" >&2
             exit 1
           fi
+
+      - name: Tier 4F (the dist itself, end to end in a browser)
+        # The deploy gate that matters most: the exact artifact below is
+        # served under the /ez-hud/ prefix and booted in Chrome -- engine,
+        # pak0, gpl_maps' dm3, demo playback, drag, import, export. If this
+        # is red, there is nothing worth publishing.
+        run: DIST_DIR="$GITHUB_WORKSPACE/dist" npm run test:tier4:fte
+
+      - name: Upload tier 4F artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tier4-fte-artifacts
+          path: /tmp/ezhud-tier4-fte-artifacts
+          if-no-files-found: ignore
 
       - name: Upload the Pages artifact
         uses: actions/upload-pages-artifact@v3

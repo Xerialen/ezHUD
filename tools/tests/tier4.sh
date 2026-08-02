@@ -39,19 +39,24 @@ export HUD_WEB_ARTIFACT_DIR=${HUD_WEB_ARTIFACT_DIR:-/tmp/ezquake-hud-tier4-artif
 
 # Xvfb forces software rendering, which is the honest default: it is reproducible
 # and needs no display. A host with a real GPU can offer one instead by setting
-# EZHUD_USE_DISPLAY -- on WSL that is WSLg's ":0", and reaching the discrete card
-# additionally needs GALLIUM_DRIVER=d3d12 and MESA_D3D12_DEFAULT_ADAPTER_NAME,
-# because Mesa otherwise picks llvmpipe even with the display attached.
+# EZHUD_USE_DISPLAY -- on native Ubuntu Desktop (pinnacle since its 2026
+# reinstall) that is the session's own display, ":0" under Xorg or XWayland.
+# (Historical, kept because the fallback logic below was shaped by it: when
+# pinnacle ran WSL, ":0" came from WSLg and reaching the discrete card also
+# needed GALLIUM_DRIVER=d3d12 + MESA_D3D12_DEFAULT_ADAPTER_NAME, because Mesa
+# otherwise picked llvmpipe even with the display attached. None of that
+# applies to a native install.)
 #
 # When Xvfb is used the screen must be stated. Plain `xvfb-run -a` defaults to
 # 1280x1024 at a depth that leaves the engine with a 0-bit z-buffer, and renders at
 # a size the -width/-height arguments did not ask for.
 if [[ -n "${EZHUD_USE_DISPLAY:-}" ]]; then
-	# Prove the display answers before committing to it. On WSL, :0 comes from
-	# WSLg, which is tied to a Windows user session -- it can be absent after a
-	# reboot or a logoff even though the runner itself is perfectly healthy.
-	# Falling back keeps the nightly meaningful instead of failing on a missing
-	# X server, and says which mode it actually used.
+	# Prove the display answers before committing to it. A desktop display is
+	# tied to a login session -- it can be absent after a reboot or logoff
+	# (and on the old WSL setup, WSLg vanished with the Windows session) even
+	# though the runner itself is perfectly healthy. Falling back keeps the
+	# nightly meaningful instead of failing on a missing X server, and says
+	# which mode it actually used.
 	if DISPLAY="$EZHUD_USE_DISPLAY" timeout 20 xdpyinfo >/dev/null 2>&1; then
 		echo "tier 4: display ${EZHUD_USE_DISPLAY}, GALLIUM_DRIVER=${GALLIUM_DRIVER:-default}" >&2
 		export DISPLAY="$EZHUD_USE_DISPLAY"

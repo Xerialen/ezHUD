@@ -245,4 +245,6 @@ Separate files so both sides can land independently. Claude owns the shared edit
 avoid conflicts on the branch.
 
 Branch: `feat/hud-web-bridge`, cut from `feat/libhud-placement-core`.
-Build+test host: pinnacle WSL, `/home/xerial/projects/ezquake-libhud` (`SKIP_DEPS=1 ./build-linux.sh`).
+Build+test host: pinnacle, `/home/xerial/projects/ezquake-libhud` (`SKIP_DEPS=1 ./build-linux.sh`).
+(Pinnacle ran the above under WSL when this was written; since the 2026
+reinstall it is native Ubuntu Desktop, so no WSL indirection applies.)
