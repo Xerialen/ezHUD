@@ -8,6 +8,7 @@
     "test:tier2:js": "node tools/tests/tier2_bridge.test.js",
     "test:tier2:engine": "bash tools/tests/tier2_engine.sh",
     "test:tier3": "node tools/tests/tier3.mjs",
+    "test:tier3:fte": "node tools/tests/tier3_fte.mjs",
     "test:tier4": "bash tools/tests/tier4.sh"
   },
   "devDependencies": {
