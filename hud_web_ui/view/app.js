@@ -14,7 +14,9 @@ import {
 
 const $ = (id) => document.getElementById(id);
 const el = {
-	engine: $('engine'), readout: $('readout'), status: $('status'), chrome: $('chrome'),
+	readout: $('readout'), status: $('status'), chrome: $('chrome'),
+	sbCursor: $('sb-cursor'), sbDrawn: $('sb-drawn'), sbEngine: $('engine'),
+	sbFont: $('sb-font'), sbFrame: $('sb-frame'),
 	filter: $('filter'), showHidden: $('show-hidden'), showSpectator: $('show-spectator'), tree: $('tree'), treeCount: $('tree-count'),
 	stage: $('stage'), frame: $('frame'), overlay: $('overlay'), empty: $('empty'),
 	emptyTitle: $('empty-title'), emptyBody: $('empty-body'),
@@ -190,34 +192,62 @@ const STATUS_TEXT = {
 function renderBar() {
 	el.status.textContent = STATUS_TEXT[model.status];
 	el.status.dataset.status = model.status;
-	el.engine.textContent = model.state?.engine ?? '';
 
+	// The scale chip carries the one thing the raw telemetry never said: what a
+	// console pixel is worth on screen right now. It expands to per-axis form
+	// only when the factors differ — because then the layout is stretched and
+	// the user has to notice. Both ratios are independent and only look like one
+	// number when the console happens to share the screen's aspect; hiding one
+	// is what made a whole class of bug invisible during QA.
 	const s = model.screen;
 	const p = model.physical;
 	el.readout.replaceChildren();
+	el.readout.hidden = !(s && p);
 	if (s && p) {
 		const { kx, ky } = scaleFactors(s, p);
-		el.readout.append(termCell('canvas', `${s.vid_width}×${s.vid_height}`));
-		el.readout.append(termCell('render', `${p[0]}×${p[1]}`));
-		// Both ratios, because they are independent and only look like one number
-		// when the console happens to share the screen's aspect. A single figure
-		// here is what made a whole class of bug invisible during QA.
-		el.readout.append(termCell('scale', kx === ky
-			? `${kx.toFixed(2)}×`
-			: `${kx.toFixed(2)}×/${ky.toFixed(2)}×`));
+		const uneven = Math.abs(kx - ky) > 0.005;
+		el.readout.dataset.uneven = String(uneven);
+		const fmt = (n) => `${Math.round(n * 100) / 100}×`;
+		el.readout.append(
+			chipText('editing at '), chipStrong(`${s.vid_width}×${s.vid_height}`),
+			chipSep(), chipText('1 px = '),
+			chipStrong(uneven ? `${fmt(kx)} wide, ${fmt(ky)} tall` : `${fmt(kx)} on screen`),
+		);
+		if (uneven) {
+			el.readout.append(chipText(' — stretched'));
+		}
 	}
+
+	// Ambient meta lives in the status bar, where it never competes with a control.
+	el.sbEngine.textContent = model.state?.engine ?? '';
+	const drawn = model.placedElements.length;
+	el.sbDrawn.textContent = model.elements.length
+		? `${drawn} of ${model.elements.length} elements drawn`
+		: '';
 	const f = model.fonts;
-	if (f) {
-		el.readout.append(termCell('font',
-			f.proportional_loaded ? (f.facepath || 'proportional') : 'none'));
-	}
-	if (model.frameCost != null) {
-		el.readout.append(termCell('frame', `${model.frameCost}ms`));
-	}
+	el.sbFont.textContent = f
+		? `font ${f.proportional_loaded ? (f.facepath || 'proportional') : 'none'}`
+		: '';
+	el.sbFrame.textContent = model.frameCost != null ? `frame ${model.frameCost}ms` : '';
 }
 
-// <div><dt>term</dt><dd>value</dd></div> — the shape both the top-bar readout and
-// the inspector's metrics are made of.
+const chipText = (t) => document.createTextNode(t);
+
+function chipStrong(t) {
+	const s = document.createElement('strong');
+	s.textContent = t;
+	return s;
+}
+
+function chipSep() {
+	const s = document.createElement('span');
+	s.className = 'sep';
+	s.textContent = '·';
+	return s;
+}
+
+// <div><dt>term</dt><dd>value</dd></div> — the shape the inspector's metrics
+// grid is made of.
 function termCell(term, value) {
 	const wrap = document.createElement('div');
 	const dt = document.createElement('dt');
@@ -234,6 +264,27 @@ function icon(id) {
 	use.setAttribute('href', `#${id}`);
 	svg.append(use);
 	return svg;
+}
+
+// HUD element taxonomy: rows are tinted by element family so 83 entries stay
+// scannable. Purely presentational — classification lives here in the view, by
+// name, because the engine has no such concept. Unknown names read as system.
+const FAMILIES = [
+	[/^(face|health|armor|iarmor|bar_(health|armor)|(health|armor)damage)$/, 'combat'],
+	[/^(gun[0-9]?|ammo|iammo|weapon)/, 'weapons'],
+	[/^(quad|ring|pent|suit|key[0-9]|powerup)/, 'powerups'],
+	[/^(sigil[0-9]?|items?$|ibar|sbar)/, 'items'],
+	[/^(.*clock|fps|ping|score|match|frags|teamfrags|rank)/, 'score'],
+	[/^(tracking|teaminfo|notify|chat|centerprint|message)/, 'comms'],
+];
+
+function familyOf(name) {
+	for (const [re, fam] of FAMILIES) {
+		if (re.test(name)) {
+			return fam;
+		}
+	}
+	return 'system';
 }
 
 function updateTreeMeta() {
@@ -286,11 +337,15 @@ function renderTree() {
 			apply(`hud_${item.name}_show`, item.shown ? 0 : 1);
 		});
 
+		const fam = document.createElement('span');
+		fam.className = 'tree__fam';
+		fam.style.setProperty('--fam', `var(--fam-${familyOf(item.name)})`);
+
 		const name = document.createElement('span');
 		name.className = 'tree__name';
 		name.textContent = item.name;
 
-		row.append(vis, name);
+		row.append(vis, fam, name);
 
 		// Assigning an element to a group is setting its `place` cvar, which is not
 		// something anyone guesses. Dragging it onto the group says the same thing
@@ -1646,6 +1701,26 @@ el.frame.addEventListener('pointerdown', (ev) => {
 		(ev.clientY - rect.top) / (ky * displayScale),
 	);
 	model.set({ selected: hit?.name ?? null });
+});
+
+// The status bar's cursor readout, in console pixels — the coordinate space the
+// engine stores. Written directly rather than through the model: a mousemove per
+// frame must not trigger the render pipeline.
+el.stage.addEventListener('mousemove', (ev) => {
+	const s = model.screen;
+	const p = model.physical;
+	if (!s || !p || !el.frame.naturalWidth) { return; }
+	const rect = el.frame.getBoundingClientRect();
+	const displayScale = rect.width / el.frame.naturalWidth;
+	const { kx, ky } = scaleFactors(s, p);
+	const x = Math.round((ev.clientX - rect.left) / (kx * displayScale));
+	const y = Math.round((ev.clientY - rect.top) / (ky * displayScale));
+	el.sbCursor.dataset.live = 'true';
+	el.sbCursor.textContent = `x ${Math.max(0, x)} y ${Math.max(0, y)}`;
+});
+el.stage.addEventListener('mouseleave', () => {
+	delete el.sbCursor.dataset.live;
+	el.sbCursor.textContent = 'x — y —';
 });
 
 // Arrow keys nudge, matching the engine's integer steps. Shift multiplies.
