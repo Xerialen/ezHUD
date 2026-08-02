@@ -11,21 +11,15 @@ name: tests (engine, self-hosted)
 #     should not be enough.
 #   * Nothing here uses pull_request_target, which is the one trigger that would
 #     hand an untrusted branch both secrets and write scope.
-#
-# Manual-only for now: the self-hosted runners these jobs need (labels `ezhud`
-# and `ezhud-gpu`) lived on pinnacle's old WSL install and disappeared with its
-# 2026 reinstall to native Ubuntu Desktop. Until they are re-registered there,
-# a push/PR/schedule trigger only queues jobs that hang on a runner that does
-# not exist. When the runners are back, restore:
-#
-#   push: {branches: [main]}, pull_request:, schedule: [{cron: '17 3 * * *'}]
-#
-# (the nightly exists because tier 4 is flaky by nature and that should surface
-# before a release, not during one). Note for the re-registration: the GPU
-# runner's .env carried WSLg-era variables (GALLIUM_DRIVER=d3d12,
-# MESA_D3D12_DEFAULT_ADAPTER_NAME) that a native install must NOT set.
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
+  schedule:
+    # Tier 4 is flaky by nature, so it gets a nightly run to surface that before a
+    # release rather than during one.
+    - cron: '17 3 * * *'
 
 concurrency:
   group: engine-tests-${{ github.ref }}
