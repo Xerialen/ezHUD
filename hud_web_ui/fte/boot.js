@@ -121,6 +121,12 @@
 			'id1/pak0.pak': 'id1/pak0.pak',
 			'id1/pak1.pak': 'id1/pak1.pak',
 			'id1/nquake.pk3': 'id1/nquake.pk3',
+			// GPL remakes of the id maps (nQuake's gpl_maps.pk3). The public
+			// dist has no pak1, so without this dm3 -- the map both bundled
+			// demos play on -- exists nowhere and playdemo dies looking for
+			// it; runtime download is no rescue (the community map repo hosts
+			// no id maps and sends no CORS headers).
+			'id1/gpl_maps.pk3': 'id1/gpl_maps.pk3',
 			'qw/demos/hudtest_src.mvd': 'qw/demos/hudtest_src.mvd',
 			'qw/demos/tb4gf_book_vs_s.mvd': 'qw/demos/tb4gf_book_vs_s.mvd'
 		},

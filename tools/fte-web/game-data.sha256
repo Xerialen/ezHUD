@@ -21,6 +21,16 @@
 #     the file rather than to master, which moves. Byte-identical to the copy
 #     an nQuake install put in the dev site.
 #
+#   gpl_maps.pk3  https://raw.githubusercontent.com/nQuake/distfiles/d93997920e028343eee24377f75b2addff066990/gpl/id1/gpl_maps.pk3
+#     GPL remakes of the id maps, from the same pinned distfiles commit as
+#     nquake.pk3. Load-bearing, not decoration: both bundled demos play on
+#     dm3, and shareware pak0 has no dm maps at all (e1/start only --
+#     verified by listing its directory). The real dm3.bsp is registered
+#     Quake, and FTE's runtime map download is doubly dead from a Pages
+#     origin: maps.quakeworld.nu deliberately hosts no id maps (dm7-9 yes,
+#     dm3-6 no) and sends no CORS headers. This pk3's maps/dm3.bsp is the
+#     freely-distributable answer nQuake itself ships.
+#
 #   *.mvd         https://github.com/Xerialen/ez-hud/releases/download/web-assets-v1/<name>
 #     Our own release, because these two demos are not published anywhere else:
 #     hudtest_src.mvd is a synthetic recording made for this editor and
@@ -33,5 +43,6 @@
 ec6c9d34b1ae0252ac0066045b6611a7919c2a0d78a3a66d9387a8f597553239  quake106.zip
 35a9c55e5e5a284a159ad2a62e0e8def23d829561fe2f54eb402dbc0a9a946af  pak0.pak
 7295a0ee15370a47fdaf492ebf7479241b5b36554c32eb9be9330a234083e8b4  nquake.pk3
+6e409cab705ea6046872383149a222fe76a351f03ac48055b3e5f1faaec9d6c6  gpl_maps.pk3
 d9d2121e997e7980df3326dc1a91228c58aa523f56a843a152137f6c57871aa3  hudtest_src.mvd
 45f653c08fbb5488e2619a24ee0dd71347316e60265b8e4caaff0f3607ce0f30  tb4gf_book_vs_s.mvd

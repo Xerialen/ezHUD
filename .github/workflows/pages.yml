@@ -37,6 +37,12 @@ env:
   QUAKE106_URL: https://ftp.gwdg.de/pub/misc/ftp.idsoftware.com/idstuff/quake/quake106.zip
   # nQuake's own distfiles, pinned to a commit rather than master.
   NQUAKE_PK3_URL: https://raw.githubusercontent.com/nQuake/distfiles/d93997920e028343eee24377f75b2addff066990/non-gpl/qw/nquake.pk3
+  # GPL remakes of the id maps, same pinned commit. Without this neither
+  # bundled demo can play: they are on dm3, shareware pak0 has no dm maps,
+  # and FTE's runtime map download cannot work from a Pages origin (the
+  # community map repo hosts no id maps and sends no CORS headers) -- see
+  # tools/fte-web/game-data.sha256 for the full finding.
+  GPL_MAPS_URL: https://raw.githubusercontent.com/nQuake/distfiles/d93997920e028343eee24377f75b2addff066990/gpl/id1/gpl_maps.pk3
   # Our own release, holding the two demos nothing else publishes. Rolling the
   # demos means a new tag here plus new pins -- see NOTES.md, "Publishing".
   WEB_ASSETS_BASE: https://github.com/Xerialen/ez-hud/releases/download/web-assets-v1
@@ -152,6 +158,9 @@ jobs:
           curl -fsSL --retry 3 --retry-delay 5 -o nquake.pk3 "$NQUAKE_PK3_URL"
           verify nquake.pk3
 
+          curl -fsSL --retry 3 --retry-delay 5 -o gpl_maps.pk3 "$GPL_MAPS_URL"
+          verify gpl_maps.pk3
+
           for demo in hudtest_src.mvd tb4gf_book_vs_s.mvd; do
             curl -fsSL --retry 3 --retry-delay 5 -o "$demo" "$WEB_ASSETS_BASE/$demo"
             verify "$demo"
@@ -161,7 +170,7 @@ jobs:
           # assemble-public.sh's GAME_DATA_DIR means.
           gd="$GITHUB_WORKSPACE/game-data"
           mkdir -p "$gd/id1" "$gd/qw/demos"
-          cp pak0.pak nquake.pk3 "$gd/id1/"
+          cp pak0.pak nquake.pk3 gpl_maps.pk3 "$gd/id1/"
           cp hudtest_src.mvd tb4gf_book_vs_s.mvd "$gd/qw/demos/"
 
       - name: Guard test (fixture dist)
@@ -188,7 +197,7 @@ jobs:
           # Present and non-empty -- a 0-byte pak is a download that "worked".
           for f in index.html ui.css favicon.svg default.fmf \
                    ftewebglcl.js ftewebglcl.wasm \
-                   id1/pak0.pak id1/nquake.pk3 \
+                   id1/pak0.pak id1/nquake.pk3 id1/gpl_maps.pk3 \
                    qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd; do
             if [ ! -s "$f" ]; then
               echo "dist: missing or empty $f" >&2
@@ -205,7 +214,7 @@ jobs:
             case $f in
               ./index.html|./ui.css|./favicon.svg|./default.fmf) ;;
               ./ftewebglcl.js|./ftewebglcl.wasm) ;;
-              ./id1/pak0.pak|./id1/nquake.pk3) ;;
+              ./id1/pak0.pak|./id1/nquake.pk3|./id1/gpl_maps.pk3) ;;
               ./qw/demos/hudtest_src.mvd|./qw/demos/tb4gf_book_vs_s.mvd) ;;
               # core/ is flat; a nested path means core/tests/ came along.
               ./core/*/*) bad="$bad $f" ;;

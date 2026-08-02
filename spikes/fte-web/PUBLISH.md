@@ -67,8 +67,14 @@ The dist allowlist (exhaustive — the script copies exactly this):
                             one into the repo as tools/fte-web/default.fmf
                             first — it is a 10-line text manifest, not a
                             binary — and treat that as the source of truth)
-    id1/pak0.pak id1/nquake.pk3     <- GAME_DATA_DIR
+    id1/pak0.pak id1/nquake.pk3 id1/gpl_maps.pk3   <- GAME_DATA_DIR
     qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd  <- GAME_DATA_DIR
+
+(`id1/gpl_maps.pk3` was added in review: both bundled demos play on dm3,
+which shareware pak0 does not contain — it ships e1/start only — and FTE's
+runtime map download cannot work from a Pages origin, since the community
+map repo hosts no id maps and sends no CORS headers. nQuake's GPL remakes
+of the id maps close the gap without shipping registered content.)
 
 The `index.html` transformation, and the one subtle bit: import-map keys
 are resolved URLs, so the dev page's `"/core/bridge.js"` key only matches

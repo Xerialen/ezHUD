@@ -109,7 +109,11 @@ done
 # gamedirs mount.
 copy "$repo_dir/tools/fte-web/default.fmf" default.fmf
 
-for rel in id1/pak0.pak id1/nquake.pk3 qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd; do
+# gpl_maps.pk3 is load-bearing: both bundled demos are on dm3, which the
+# shareware pak0 does not contain and FTE cannot download at runtime from a
+# Pages origin (no id maps and no CORS on the community map repo). The GPL
+# remake nQuake ships is what makes the demos playable at all.
+for rel in id1/pak0.pak id1/nquake.pk3 id1/gpl_maps.pk3 qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd; do
 	copy "$game_data_dir/$rel" "$rel"
 done
 

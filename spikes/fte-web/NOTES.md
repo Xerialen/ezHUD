@@ -144,6 +144,15 @@ half.
   id's own `quake106.zip` and pulls `ID1/PAK0.PAK` out of its `resource.1` (an
   lh5-encoded LZH archive) with 7-Zip. Archive and extracted pak are both
   pinned; the second pin is the one that decides what ships.
+- **gpl_maps.pk3 is what makes the bundled demos playable.** Both are on dm3,
+  and shareware pak0 ships e1/start only — no dm maps (verified by listing its
+  directory). The real dm3.bsp is registered Quake, and FTE's runtime map
+  download is doubly dead from a Pages origin: `maps.quakeworld.nu`
+  deliberately hosts no id maps (dm7–9 yes, dm3–6 no) and sends no CORS
+  headers, so the in-engine fetch fails with `DL ERROR(0)` (observed live).
+  nQuake's GPL remakes, from the same pinned distfiles commit as nquake.pk3,
+  are the freely-distributable answer; `fte/boot.js` lists the pk3 in
+  `Module.files` alongside pak1 — whichever the serving site has, boots.
 - **The engine build is cached** on (emsdk version, fteqw sha, hash of
   `fteqw.diff`), with no restore-keys, and the link outputs are deleted before
   `make`. Anything looser relinks stale objects with the old `EMCC_LDFLAGS` and

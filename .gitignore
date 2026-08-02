@@ -1,2 +1,3 @@
 # Built by engine/src/libhud/tests/Makefile
 /engine/src/libhud/tests/test_place
+.claude/
