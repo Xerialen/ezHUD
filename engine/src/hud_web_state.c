@@ -283,6 +283,47 @@ char *HUD_Web_StateJSON(size_t *out_len)
 	          (cl_sbar.value || scr_viewsize.value < 100) ? "true" : "false");
 	sb_puts(&b, "}");
 
+	/* Killfeed placement, style and content, as the engine's own cvar strings:
+	 *   r_tracker              the dedicated feed on/off
+	 *   con_fragmessages       frag lines among normal console/notify messages
+	 *   cl_useimagesinfraglog  0 classic text obituaries / 1 weapon-image feed
+	 *   r_tracker_*            content, timing and layout of the feed
+	 * Looked up by name rather than extern'd, because these live in renderer
+	 * and console code this file has no business including. If r_tracker
+	 * itself is absent the whole block is omitted: the UI reads absence as
+	 * "this engine does not expose a killfeed", which is different from
+	 * "everything off". */
+	{
+		static const char *killfeed_cvars[] = {
+			"con_fragmessages", "cl_useimagesinfraglog", "r_tracker_inconsole",
+			"r_tracker_time", "r_tracker_messages", "r_tracker_frags",
+			"r_tracker_streaks", "r_tracker_flags", "r_tracker_pickups",
+			"r_tracker_scale", "r_tracker_align_right",
+		};
+		cvar_t *tracker = Cvar_Find("r_tracker");
+
+		if (tracker) {
+			size_t i;
+
+			sb_puts(&b, ",\"killfeed\":{\"r_tracker\":");
+			sb_json_string(&b, tracker->string);
+			for (i = 0; i < sizeof(killfeed_cvars) / sizeof(killfeed_cvars[0]); ++i) {
+				cvar_t *v = Cvar_Find(killfeed_cvars[i]);
+
+				/* Defensive per-name: a build without one knob still reports
+				 * the rest rather than lying about or dropping all of them. */
+				if (!v) {
+					continue;
+				}
+				sb_puts(&b, ",");
+				sb_json_string(&b, killfeed_cvars[i]);
+				sb_puts(&b, ":");
+				sb_json_string(&b, v->string);
+			}
+			sb_puts(&b, "}");
+		}
+	}
+
 	/* Font state. proportional_loaded is the one that matters and cannot be
 	 * inferred client-side: font_facepath being non-empty does not mean a face
 	 * loaded, because Draw_InitFont discards FontCreate's result at startup. With

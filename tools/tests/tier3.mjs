@@ -51,6 +51,12 @@ state.hud_modes = {
 	scr_compacthud: 0,
 	viewsize: 100,
 };
+state.killfeed = {
+	r_tracker: '1', con_fragmessages: '0', cl_useimagesinfraglog: '1',
+	r_tracker_inconsole: '0', r_tracker_time: '4', r_tracker_messages: '4',
+	r_tracker_frags: '1', r_tracker_streaks: '1', r_tracker_flags: '1',
+	r_tracker_pickups: '0', r_tracker_scale: '1', r_tracker_align_right: '1',
+};
 const percentage = state.elements.find((element) => element.name === 'bar_health');
 percentage.cvars.hud_bar_health_width = '30%';
 percentage.cvars.hud_bar_health_height = '25%';
@@ -114,6 +120,14 @@ const commands = [];
 
 function applyCommand(command) {
 	commands.push(command);
+	// The killfeed cvars are global, not per-element: fold them straight into
+	// the fixture's killfeed block so the panel's active states settle.
+	const killfeed = /^(\S+) (.+)$/.exec(command);
+	if (killfeed && state.killfeed
+			&& Object.prototype.hasOwnProperty.call(state.killfeed, killfeed[1])) {
+		state.killfeed[killfeed[1]] = killfeed[2];
+		return;
+	}
 	const match = /^(hud_([^ ]+)_(pos_x|pos_y|scale)) ([^ ]+)$/.exec(command);
 	if (!match) return;
 	const [, cvar, name, suffix, raw] = match;
@@ -241,9 +255,23 @@ try {
 	assert(/percentage/.test(await selected.getAttribute('title') ?? ''),
 		'percentage-sized element did not explain why its handles are absent');
 
-	await page.waitForSelector('#hudmodes > *, #groups > *, #fonts > *');
+	// The killfeed's "where" seg is one choice writing a *pair* of cvars, so a
+	// click must send both r_tracker and con_fragmessages together.
+	await page.waitForSelector('#killfeed .seg__item');
+	const commandsBeforeKillfeed = commands.length;
+	await page.locator('#killfeed .seg__item', { hasText: 'Console messages' }).click();
+	await page.waitForFunction(() => [...document.querySelectorAll('#killfeed .seg__item')]
+		.some((b) => b.textContent === 'Console messages' && b.dataset.on === 'true'));
+	const killfeedSent = commands.slice(commandsBeforeKillfeed);
+	assert(killfeedSent.includes('r_tracker 0') && killfeedSent.includes('con_fragmessages 1'),
+		`the "where" seg did not send the cvar pair: ${JSON.stringify(killfeedSent)}`);
+	assert(await page.locator('#killfeed .font-state').first().textContent()
+		=== 'Kills appear only among console messages (weapon icons).',
+	'the killfeed summary does not describe the new combination');
+
+	await page.waitForSelector('#hudmodes > *, #killfeed > *, #groups > *, #fonts > *');
 	await page.evaluate(() => {
-		for (const id of ['hudmodes', 'groups', 'fonts']) {
+		for (const id of ['hudmodes', 'killfeed', 'groups', 'fonts']) {
 			document.querySelector(`#${id} > *`).__tier3Identity = id;
 		}
 	});
@@ -254,13 +282,14 @@ try {
 	}
 	assert(frameRequests > beforeTick, 'no frame tick arrived to exercise stale() guards');
 	const identities = await page.evaluate(() => Object.fromEntries(
-		['hudmodes', 'groups', 'fonts'].map((id) => [id, document.querySelector(`#${id} > *`)?.__tier3Identity]),
+		['hudmodes', 'killfeed', 'groups', 'fonts'].map((id) => [id, document.querySelector(`#${id} > *`)?.__tier3Identity]),
 	));
 	assert(identities.hudmodes === 'hudmodes', 'renderModes rebuilt its DOM on a frame-only tick');
+	assert(identities.killfeed === 'killfeed', 'renderKillfeed rebuilt its DOM on a frame-only tick');
 	assert(identities.groups === 'groups', 'renderGroups rebuilt its DOM on a frame-only tick');
 	assert(identities.fonts === 'fonts', 'renderFonts rebuilt its DOM on a frame-only tick');
 
-	console.log('Tier 3: geometry, percentage resize refusal, and stale DOM guards passed');
+	console.log('Tier 3: geometry, killfeed pair-write, percentage resize refusal, and stale DOM guards passed');
 } finally {
 	await page.close();
 	await browser.close();

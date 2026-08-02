@@ -22,7 +22,7 @@ const el = {
 	emptyTitle: $('empty-title'), emptyBody: $('empty-body'),
 	inspector: $('inspector'), fontPanel: $('fonts'), groupPanel: $('groups'),
 	saveOpen: $('save-open'), saveDialog: $('save-dialog'),
-	modePanel: $('hudmodes'), resetDialog: $('reset-dialog'),
+	modePanel: $('hudmodes'), killfeedPanel: $('killfeed'), resetDialog: $('reset-dialog'),
 };
 
 const bridge = Bridge.fromLocation(location.search);
@@ -165,6 +165,7 @@ function render() {
 	try {
 		renderBar();
 		renderModes();
+		renderKillfeed();
 		renderGroups();
 		renderFonts();
 		renderTree();
@@ -766,6 +767,28 @@ function renderInspector() {
 	}
 }
 
+// The one way a segmented control is built. Three sections need the same
+// buttons-with-one-active shape (directionGroup, renderModes, renderKillfeed),
+// and each hand-rolling its own loop is how the active-state comparison drifted
+// between string and number once already.
+function seg(options, current, onPick) {
+	const wrap = document.createElement('div');
+	wrap.className = 'seg';
+	for (const option of options) {
+		const b = document.createElement('button');
+		b.type = 'button';
+		b.className = 'seg__item';
+		b.dataset.on = String(String(current) === String(option.value));
+		b.textContent = option.label;
+		if (option.title) {
+			b.title = option.title;
+		}
+		b.addEventListener('click', () => onPick(option.value));
+		wrap.append(b);
+	}
+	return wrap;
+}
+
 // The bars and speed spell this three different ways and none of them is a number
 // worth typing. Buttons also make the swap-width-and-height rule enforceable: it
 // happens as part of the change, instead of being a second edit to remember.
@@ -777,19 +800,13 @@ function directionGroup(control, item) {
 	h.textContent = control.label;
 	section.append(h);
 
-	const seg = document.createElement('div');
-	seg.className = 'seg';
-	for (const option of control.options) {
-		const b = document.createElement('button');
-		b.type = 'button';
-		b.className = 'seg__item';
-		b.dataset.on = String(control.value === option.value);
-		b.textContent = option.label;
-		b.title = `Sets ${control.cvar} ${option.value}.`;
-		b.addEventListener('click', () => applyAll(model.directionChanges(item, option.value)));
-		seg.append(b);
-	}
-	section.append(seg);
+	section.append(seg(
+		control.options.map((option) => ({
+			...option, title: `Sets ${control.cvar} ${option.value}.`,
+		})),
+		control.value,
+		(value) => applyAll(model.directionChanges(item, value)),
+	));
 
 	if (control.swaps) {
 		const note = document.createElement('p');
@@ -1108,25 +1125,20 @@ function renderModes() {
 	h.textContent = 'HUD system';
 	section.append(h);
 
-	const seg = document.createElement('div');
-	seg.className = 'seg';
-	for (const [value, label, hint] of NEWHUD_MODES) {
-		const b = document.createElement('button');
-		b.type = 'button';
-		b.className = 'seg__item';
-		b.dataset.on = String(String(m.scr_newhud) === value);
-		b.textContent = label;
-		b.title = hint;
-		b.addEventListener('click', () => apply('scr_newhud', value));
-		seg.append(b);
-	}
-	section.append(seg);
+	section.append(seg(
+		NEWHUD_MODES.map(([value, label, hint]) => ({ value, label, title: hint })),
+		m.scr_newhud,
+		(value) => apply('scr_newhud', value),
+	));
 
 	const summary = document.createElement('p');
 	summary.className = 'font-state';
 	summary.dataset.ok = 'true';
 	summary.textContent = model.modeSummary;
 	section.append(summary);
+	if (m.synthetic) {
+		section.append(syntheticNote());
+	}
 
 	// QW262 is drawn outside any scr_newhud test, so it is genuinely a third HUD
 	// rather than an alternative to the other two.
@@ -1167,6 +1179,124 @@ function renderModes() {
 	reset.textContent = 'Reset positions…';
 	reset.addEventListener('click', () => openReset());
 	section.append(reset);
+	box.append(section);
+}
+
+// The FTE adapter synthesizes these blocks from its own ledger because the
+// plugin ignores the cvars; the pixels will not move, and saying so beats
+// letting the user conclude the control is broken (PARITY.md:93).
+function syntheticNote() {
+	const note = document.createElement('p');
+	note.className = 'font-state';
+	note.textContent =
+		"Preview can't mirror this on the FTE backend — the setting still lands in your exported config.";
+	return note;
+}
+
+// ---- killfeed --------------------------------------------------------------
+// Where kills are announced is three cvars pretending to be one setting, plus a
+// family of r_tracker_* content knobs. The seg writes the r_tracker /
+// con_fragmessages *pair*, because each combination is a distinct behaviour
+// and setting one cvar at a time walks through the others on the way.
+
+const KILLFEED_WHERE = [
+	{
+		value: 'tracker', label: 'Dedicated killfeed',
+		title: 'Sets r_tracker 1, con_fragmessages 0.',
+		changes: [['r_tracker', 1], ['con_fragmessages', 0]],
+	},
+	{
+		value: 'console', label: 'Console messages',
+		title: 'Sets r_tracker 0, con_fragmessages 1.',
+		changes: [['r_tracker', 0], ['con_fragmessages', 1]],
+	},
+	{
+		value: 'both', label: 'Both',
+		title: 'Sets r_tracker 1, con_fragmessages 1.',
+		changes: [['r_tracker', 1], ['con_fragmessages', 1]],
+	},
+];
+
+function renderKillfeed() {
+	const k = model.killfeed;
+	// Same stale() discipline as renderModes: a frame-only tick must not churn
+	// the nodes under an open select or a half-typed number.
+	if (!stale('killfeed', JSON.stringify(k), '|', model.killfeedSummary)) {
+		return;
+	}
+	const box = el.killfeedPanel;
+	box.replaceChildren();
+	// Absent block means this engine does not expose the killfeed cvars, which
+	// is not a state worth an empty section.
+	if (!k) {
+		return;
+	}
+
+	const section = document.createElement('section');
+	section.className = 'group';
+	const h = document.createElement('h3');
+	h.className = 'group__title';
+	h.textContent = 'Killfeed';
+	section.append(h);
+
+	const on = (cvar) => Number(k[cvar]) !== 0;
+	const where = on('r_tracker')
+		? (on('con_fragmessages') ? 'both' : 'tracker')
+		: (on('con_fragmessages') ? 'console' : 'none');
+	section.append(field('Where kills appear', seg(KILLFEED_WHERE, where,
+		(value) => applyAll(KILLFEED_WHERE.find((o) => o.value === value).changes))));
+
+	section.append(field('Style', seg([
+		{ value: '0', label: 'Classic text', title: 'Sets cl_useimagesinfraglog 0.' },
+		{ value: '1', label: 'Weapon icons', title: 'Sets cl_useimagesinfraglog 1.' },
+	], on('cl_useimagesinfraglog') ? '1' : '0',
+	(value) => apply('cl_useimagesinfraglog', value))));
+
+	const toggle = (label, cvar) => {
+		const wrap = document.createElement('label');
+		wrap.className = 'toggle toggle--sm';
+		wrap.title = `Sets ${cvar} 0/1.`;
+		const cb = document.createElement('input');
+		cb.type = 'checkbox';
+		cb.checked = on(cvar);
+		cb.addEventListener('change', () => apply(cvar, cb.checked ? 1 : 0));
+		const text = document.createElement('span');
+		text.textContent = label;
+		wrap.append(cb, text);
+		return wrap;
+	};
+	section.append(
+		toggle('Show frags', 'r_tracker_frags'),
+		toggle('Show streaks', 'r_tracker_streaks'),
+		toggle('Show flag events', 'r_tracker_flags'),
+		toggle('Show pickups', 'r_tracker_pickups'),
+		toggle('Align right', 'r_tracker_align_right'),
+	);
+
+	const numeric = (label, cvar) => {
+		const input = document.createElement('input');
+		input.type = 'text';
+		input.value = String(k[cvar] ?? '');
+		input.spellcheck = false;
+		input.title = `Sets ${cvar}.`;
+		input.addEventListener('change', () => apply(cvar, input.value.trim()));
+		input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { input.blur(); } });
+		return field(label, input);
+	};
+	section.append(
+		numeric('Seconds on screen', 'r_tracker_time'),
+		numeric('Max lines', 'r_tracker_messages'),
+		numeric('Scale', 'r_tracker_scale'),
+	);
+
+	const summary = document.createElement('p');
+	summary.className = 'font-state';
+	summary.dataset.ok = 'true';
+	summary.textContent = model.killfeedSummary;
+	section.append(summary);
+	if (k.synthetic) {
+		section.append(syntheticNote());
+	}
 	box.append(section);
 }
 

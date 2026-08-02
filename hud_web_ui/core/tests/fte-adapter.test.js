@@ -240,6 +240,82 @@ test('a cvar the defaults snapshot never saw counts as an addition', async () =>
 	assert.match(out, /hud_health_scale "2"/);
 });
 
+test('the ledger synthesizes hud_modes and killfeed, flagged synthetic', async () => {
+	const fake = fakeEngine(oneElement);
+	const bridge = new Bridge(fake);
+	let state = await bridge.state();
+
+	// The plugin exports neither block; the adapter answers from its ledger and
+	// says so, which is what the view's honesty note keys on.
+	assert.equal(state.hud_modes.synthetic, true);
+	assert.equal(state.killfeed.synthetic, true);
+	// ezQuake's default seed: this fake has no boot launch arguments.
+	assert.equal(state.hud_modes.scr_newhud, 0);
+	assert.equal(state.killfeed.r_tracker, '1');
+
+	await bridge.setCvar('r_tracker', 0);
+	await bridge.setCvar('scr_newhud', 2);
+	await bridge.setCvar('viewsize', 110);
+	state = await bridge.state();
+	assert.equal(state.killfeed.r_tracker, '0');
+	assert.equal(state.hud_modes.scr_newhud, 2);
+	// Same derivations as hud_web_state.c: 2 draws both systems.
+	assert.equal(state.hud_modes.classic_drawn, true);
+	assert.equal(state.hud_modes.new_drawn, true);
+	assert.equal(state.hud_modes.viewsize, 110);
+	assert.equal(state.hud_modes.standard_bar, false);
+});
+
+test('the ledger seeds scr_newhud from the boot launch arguments, never a lie', async () => {
+	const fake = fakeEngine(oneElement);
+	// boot.js forces the new HUD for the preview; the switch must show it.
+	fake.engine.module.arguments = ['-manifest', 'default.fmf', '+plug_sbar', '3', '+scr_newhud', '1'];
+	const bridge = new Bridge(fake);
+	const state = await bridge.state();
+	assert.equal(state.hud_modes.scr_newhud, 1);
+	assert.equal(state.hud_modes.classic_drawn, false);
+	assert.equal(state.hud_modes.new_drawn, true);
+});
+
+test('killfeed and classic-bar cvars pass the allowlist; the rest of r_ stays refused', async () => {
+	const fake = fakeEngine(oneElement);
+	const bridge = new Bridge(fake);
+	const accepted = [
+		'r_tracker 1', 'r_tracker_scale 1.5', 'r_tracker_align_right 0',
+		'con_fragmessages 0', 'cl_useimagesinfraglog 1', 'cl_sbar 1', 'viewsize 110',
+	];
+	for (const line of accepted) {
+		await bridge.send(line);
+	}
+	assert.deepEqual(fake.sent, accepted.map((line) => `${line}\n`));
+	for (const line of ['r_speeds 1', 'r_dynamic 0', 'exec autoexec.cfg']) {
+		await assert.rejects(() => bridge.send(line), (err) => {
+			assert.equal(err.status, 403);
+			return true;
+		}, `expected refusal: ${line}`);
+	}
+});
+
+test('an editor-set killfeed cvar with no imported line lands in the appended block', async () => {
+	const fake = fakeEngine(oneElement);
+	const bridge = new Bridge(fake);
+	await bridge.state();
+	bridge.captureDefaults();
+	await bridge.setCvar('r_tracker', 0);
+	await bridge.state();
+	bridge.retainedLines = [{ raw: 'bind SPACE +jump', cvar: null, applied: false }];
+	const out = bridge.exportFullCfg().trimEnd().split('\n');
+	assert.deepEqual(out, [
+		'bind SPACE +jump',
+		'',
+		'// added in ez-hud',
+		'r_tracker "0"',
+	]);
+	// The HUD-only export stays what ezQuake's hud_export writes: hud_ cvars,
+	// never the ledger's scr_/r_tracker entries.
+	assert.doesNotMatch(bridge.exportHudCfg(), /r_tracker|scr_newhud/);
+});
+
 test('the editor-facing surface app.js needs is all present', async () => {
 	const bridge = new Bridge(fakeEngine(oneElement));
 	assert.equal(bridge.configured, true);
