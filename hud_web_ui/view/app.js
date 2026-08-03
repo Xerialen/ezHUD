@@ -1192,12 +1192,26 @@ function renderModes() {
 
 // The FTE adapter synthesizes these blocks from its own ledger because the
 // plugin ignores the cvars; the pixels will not move, and saying so beats
-// letting the user conclude the control is broken (PARITY.md:93).
+// letting the user conclude the control is broken (PARITY.md:93). Used
+// as-is by renderModes, which has no FTE equivalent for any of its cvars.
 function syntheticNote() {
 	const note = document.createElement('p');
 	note.className = 'font-state';
 	note.textContent =
 		"Preview can't mirror this on the FTE backend — the setting still lands in your exported config.";
+	return note;
+}
+
+// Killfeed-specific: since core/fte-adapter.js's TRACKER_TRANSLATE mirrors
+// on/off, timing and line count onto FTE's own r_tracker_frags/_time/_lines,
+// those genuinely do preview here. Only the parts with no FTE-side feature at
+// all -- image style, ezQuake's console-integration cvars, and colours --
+// stay unpreviewable, so this note is narrower than syntheticNote() above.
+function killfeedSyntheticNote() {
+	const note = document.createElement('p');
+	note.className = 'font-state';
+	note.textContent =
+		"Preview can't mirror style, console-integration or colours on the FTE backend — on/off, timing and line count do. All settings still land in your exported config.";
 	return note;
 }
 
@@ -1303,7 +1317,7 @@ function renderKillfeed() {
 	summary.textContent = model.killfeedSummary;
 	section.append(summary);
 	if (k.synthetic) {
-		section.append(syntheticNote());
+		section.append(killfeedSyntheticNote());
 	}
 	box.append(section);
 }

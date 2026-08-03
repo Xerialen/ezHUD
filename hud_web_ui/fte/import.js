@@ -24,11 +24,16 @@ const CACHE_PREFIX = '/_/';
 // of which would be actively rude to run.
 const APPLY_EXACT = new Set([
 	'scr_newhud', 'cl_sbar', 'viewsize',
-	// The killfeed set. FTE's engine ignores them, but the adapter's ledger
-	// tracks each one, so applying seeds the synthetic killfeed/hud_modes
-	// blocks and keeps the export honest. Unknown cvars are simply created on
-	// the FTE side, so the engine-side set is harmless. No TRANSLATE entries:
-	// FTE has no equivalent feature to point them at.
+	// The killfeed set. Every write here goes through bridge.setCvar(), which
+	// is core/fte-adapter.js's send() -- so core/fte-adapter.js's
+	// TRACKER_TRANSLATE table (on/off, timing, line count) fires for imports
+	// exactly as it does for inspector edits, with no extra plumbing needed
+	// here. The adapter's ledger still tracks the ezQuake-dialect value of
+	// each one, so applying seeds the synthetic killfeed/hud_modes blocks and
+	// keeps the export honest. Unknown cvars are simply created on the FTE
+	// side, so the engine-side set is harmless. No entry in this file's own
+	// TRANSLATE map: that one is name-only and unsuited to a value
+	// transformation like r_tracker's 0/1 -> r_tracker_frags 0/2.
 	'r_tracker', 'con_fragmessages', 'cl_useimagesinfraglog', 'r_tracker_inconsole',
 	'r_tracker_time', 'r_tracker_messages', 'r_tracker_frags', 'r_tracker_streaks',
 	'r_tracker_flags', 'r_tracker_pickups', 'r_tracker_scale', 'r_tracker_align_right',
