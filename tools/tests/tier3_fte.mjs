@@ -123,8 +123,9 @@ const FIXTURE = {
 // The config dropped in case 4. Every line is here to exercise one branch of
 // fte/import.js: an applying placement cvar, an applying param, a hud_ cvar for
 // an element FTE does not register, the gl_consolefont → gl_font translation, an
-// applying non-hud cvar the state never reports back, and a line the parser must
-// keep verbatim rather than run.
+// applying non-hud cvar the state never reports back, a `volume` line the
+// pipeline must retain rather than apply (#10 — the editor owns the preview's
+// volume), and a line the parser must keep verbatim rather than run.
 const IMPORT_CFG = [
 	'// tier3-fte import fixture',
 	'hud_health_pos_x 12',
@@ -133,12 +134,13 @@ const IMPORT_CFG = [
 	'gl_consolefont povo5f',
 	'scr_newhud 1',
 	'r_tracker 0',
+	'volume "1"',
 	'bind SPACE +jump',
 	'',
 ].join('\n');
 const IMPORT_NAME = 'tier3f.cfg';
-const IMPORT_APPLIED = 6;   // everything but the comment and the bind
-const IMPORT_LINES = 8;
+const IMPORT_APPLIED = 6;   // everything but the comment, the bind and volume
+const IMPORT_LINES = 9;
 
 // ---- static server ----------------------------------------------------------
 // hud_web_ui/ at the root, the way tools/fte-web/serve.sh serves it. Nothing is
@@ -500,7 +502,7 @@ try {
 		'a ledger-tracked cvar is still reported as something the preview cannot show');
 	assert(drift.includes('gl_consolefont "povo5f" → gl_font'),
 		'the drift panel does not report the charset cvar translation');
-	assert(drift.includes('1 line carried verbatim'),
+	assert(drift.includes('2 lines carried verbatim'),
 		'the drift panel does not count the retained lines');
 	assert(await page.locator('#fte-drift').getAttribute('hidden') === null,
 		'the drift panel stayed hidden after an import that lost things');
@@ -648,12 +650,69 @@ try {
 
 	console.log('  8 reload guard: engine key and beforeunload listeners released');
 
+	// ---- 9. volume ----------------------------------------------------------
+	// The page's own sound knob (#10). The engine side is a plain cvar write, so
+	// the assertions are about the contract around it: the quiet boot default,
+	// the mute/unmute round trip, the imported line that must never apply, and
+	// the localStorage state a reload boots from.
+	const bootArgs = await page.evaluate(() => window.Module.arguments.join(' '));
+	assert(bootArgs.includes('+volume 0.175'),
+		`boot args lack the quiet default +volume 0.175: ${bootArgs}`);
+	// Case 4's config said `volume "1"`; the pipeline retains it (cases 5/6
+	// proved the export byte-identical) and must never have applied it.
+	assert(!(await sentLines()).some((l) => /^volume\b/.test(l)),
+		'the imported volume line reached the engine');
+
+	const sentBeforeSlider = (await sentLines()).length;
+	await page.locator('#fte-volume').evaluate((el) => {
+		el.value = '0.4';
+		el.dispatchEvent(new Event('input', { bubbles: true }));
+	});
+	await page.waitForFunction((n) => window.__fake.sent.length > n, sentBeforeSlider);
+	assert((await sentLines()).slice(sentBeforeSlider).includes('volume 0.4'),
+		'moving the slider did not send volume 0.4');
+	assert(await page.evaluate(() => localStorage.getItem('ezhud.fte.volume')) === '0.4',
+		'the slider value was not persisted');
+
+	const sentBeforeMute = (await sentLines()).length;
+	await page.locator('#fte-mute').click();
+	await page.waitForFunction((n) => window.__fake.sent.length > n, sentBeforeMute);
+	assert((await sentLines()).slice(sentBeforeMute).includes('volume 0'),
+		'muting did not send volume 0');
+	assert(await page.locator('#fte-mute').getAttribute('aria-pressed') === 'true',
+		'muting did not flip aria-pressed');
+	assert(await page.evaluate(() => localStorage.getItem('ezhud.fte.muted')) === '1',
+		'the muted flag was not persisted');
+
+	const sentBeforeUnmute = (await sentLines()).length;
+	await page.locator('#fte-mute').click();
+	await page.waitForFunction((n) => window.__fake.sent.length > n, sentBeforeUnmute);
+	assert((await sentLines()).slice(sentBeforeUnmute).includes('volume 0.4'),
+		'unmuting did not restore the prior volume');
+	assert(await page.locator('#fte-mute').getAttribute('aria-pressed') === 'false',
+		'unmuting did not flip aria-pressed back');
+
+	// The reload half of persistence: storage now says 0.4/unmuted, so a fresh
+	// boot must launch with that value and the slider must read it back. The
+	// fake engine dies with the page, which is fine — everything asserted here
+	// happens before any engine exists.
+	await page.reload();
+	await page.waitForFunction(() => Boolean(window.Module && window.EZHUD_FTE));
+	const rebootArgs = await page.evaluate(() => window.Module.arguments.join(' '));
+	assert(rebootArgs.includes('+volume 0.4'),
+		`a reload did not boot at the stored volume: ${rebootArgs}`);
+	await page.waitForFunction(() => document.getElementById('fte-volume')?.value === '0.4');
+	assert(await page.locator('#fte-mute').getAttribute('aria-pressed') === 'false',
+		'the unmuted state did not survive the reload');
+
+	console.log('  9 volume: quiet boot default, mute round trip, import refusal, persistence');
+
 	// The whole suite ran against a page whose engine script never downloaded.
 	assert(engineScript.length && engineScript.every((status) => status === 404),
 		`ftewebglcl.js should 404 here, got ${JSON.stringify(engineScript)}`);
 	assert(crashes.length === 0, `uncaught page errors: ${crashes.join('; ')}`);
 
-	console.log('Tier 3 FTE: 8 cases passed with no wasm (ftewebglcl.js 404 throughout)');
+	console.log('Tier 3 FTE: 9 cases passed with no wasm (ftewebglcl.js 404 throughout)');
 } catch (err) {
 	// A CI-only failure is undiagnosable from a TimeoutError alone; dump what
 	// the editor actually did before dying. Temporary debug aid — cheap enough

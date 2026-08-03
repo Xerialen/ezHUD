@@ -22,6 +22,8 @@
 	];
 
 	var DEMO_KEY = 'ezhud.fte.demo';        // last demo played, replayed on reload
+	var VOLUME_KEY = 'ezhud.fte.volume';    // the fte-bar slider, written by chrome.js
+	var MUTED_KEY = 'ezhud.fte.muted';      // '1' while the mute button is pressed
 	var IMPORTED_DEMOS_KEY = 'ezhud.fte.demos'; // JSON array of imported .mvd paths
 
 	function readJSON(key, fallback) {
@@ -57,6 +59,23 @@
 	function demoCmdPath(path) {
 		return String(path).replace(/^qw\//, '');
 	}
+
+	// What +volume gets: the fte-bar's stored state when there is any, else the
+	// owner-decided quiet default (#10) — FTE's own default is `volume 0.7`,
+	// which is far too loud under an editor. One constant, trivially adjustable.
+	var initialVolume = (function () {
+		var volume = null;
+		var muted = null;
+		try {
+			volume = window.localStorage.getItem(VOLUME_KEY);
+			muted = window.localStorage.getItem(MUTED_KEY);
+		} catch (e) { /* private mode: the default it is */ }
+		if (muted === '1') {
+			return '0';
+		}
+		var n = parseFloat(volume);
+		return n >= 0 && n <= 1 ? String(n) : '0.175';
+	})();
 
 	var canvas = document.getElementById('canvas');
 	var statusEl = document.getElementById('fte-status');
@@ -145,9 +164,11 @@
 			'-manifest', 'default.fmf',
 			'+plug_sbar', '3',
 			'+scr_newhud', '1',
-			// Owner decision 2026-08-03: demo audio at a quarter of the engine's
-			// 0.7 default — full blast behind an editor is a bug, not a feature.
-			'+volume', '0.175',
+			// Owner decision (#10): demos default quiet — a quarter of FTE's
+			// volume 0.7, not full blast under an editor. The value follows the
+			// fte-bar's stored slider/mute state, so a reload never blasts a
+			// volume the user already turned down.
+			'+volume', initialVolume,
 			'+playdemo', demoCmdPath(initialDemo)
 		],
 

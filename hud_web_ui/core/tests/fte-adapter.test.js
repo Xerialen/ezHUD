@@ -316,6 +316,35 @@ test('an editor-set killfeed cvar with no imported line lands in the appended bl
 	assert.doesNotMatch(bridge.exportHudCfg(), /r_tracker|scr_newhud/);
 });
 
+test('volume passes exactly, and never leaks into the snapshot or an export', async () => {
+	const fake = fakeEngine(oneElement);
+	const bridge = new Bridge(fake);
+
+	// Exact cvar, not a prefix: the page's sound knob, and only it.
+	await bridge.setCvar('volume', 0.4);
+	assert.deepEqual(fake.sent, ['volume 0.4\n']);
+	for (const line of ['volumefoo 1', 'vol 1']) {
+		await assert.rejects(() => bridge.send(line), (err) => {
+			assert.equal(err.status, 403);
+			return true;
+		}, `expected refusal: ${line}`);
+	}
+
+	// Editor chrome, not HUD state: a written volume must be invisible to the
+	// snapshot and to both exports, or a saved config would grow a line the
+	// user never wrote.
+	await bridge.state();
+	bridge.captureDefaults();
+	await bridge.setCvar('volume', 0.7);
+	await bridge.state();
+	assert.equal(bridge.cvarSnapshot().has('volume'), false);
+	assert.doesNotMatch(bridge.exportHudCfg(), /volume/);
+
+	// An imported `volume "1"` line is retained verbatim, never rewritten.
+	bridge.retainedLines = [{ raw: 'volume "1"', cvar: 'volume', value: '1', applied: false }];
+	assert.equal(bridge.exportFullCfg(), 'volume "1"\n');
+});
+
 test('the editor-facing surface app.js needs is all present', async () => {
 	const bridge = new Bridge(fakeEngine(oneElement));
 	assert.equal(bridge.configured, true);

@@ -79,6 +79,48 @@
 	color: var(--text-dim);
 }
 
+/* The volume pair (#10): deliberately quiet chrome. A dim icon-button whose
+ * two speaker glyphs swap on aria-pressed — state lives in the attribute the
+ * accessibility tree reads, so the icon can never disagree with it — and a
+ * short slider that sits in the bar without asking for attention. */
+.fte-mute {
+	display: inline-flex;
+	align-items: center;
+	padding: 2px;
+	border: 0;
+	background: none;
+	color: var(--text-dim);
+	cursor: pointer;
+}
+
+.fte-mute:hover {
+	color: var(--text-body);
+}
+
+.fte-mute__off {
+	display: none;
+}
+
+.fte-mute[aria-pressed="true"] .fte-mute__on {
+	display: none;
+}
+
+.fte-mute[aria-pressed="true"] .fte-mute__off {
+	display: inline;
+}
+
+.fte-volume {
+	width: 84px;
+	margin: 0;
+	accent-color: var(--accent);
+	opacity: 0.7;
+}
+
+.fte-volume:hover,
+.fte-volume:focus-visible {
+	opacity: 1;
+}
+
 .fte-bar__hint,
 .fte-status,
 .fte-note {
