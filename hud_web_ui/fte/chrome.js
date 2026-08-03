@@ -13,6 +13,9 @@ import { currentBridge } from '../core/bridge.js';
 import { importFile, importDemoUrl } from './import.js';
 
 const $ = (id) => document.getElementById(id);
+// This caches only boot.js's stable facade. Engine handles themselves must be
+// obtained from host.engine() at the moment a future chrome control needs one;
+// the existing controls use host.play() or the adapter, which do that already.
 const host = window.EZHUD_FTE ?? {};
 
 // ---- demo picker ------------------------------------------------------------

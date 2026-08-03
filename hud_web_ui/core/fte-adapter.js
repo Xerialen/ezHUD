@@ -163,6 +163,14 @@ export class Bridge {
 		// it back out as the synthetic hud_modes/killfeed blocks.
 		this.ledger = new Map(LEDGER_SEED);
 		this.seededFromBoot = false;
+		globalThis.addEventListener?.('ezhud:engine-replaced', () => {
+			// An injected handle is useful in tests, but must not pin a dead runtime
+			// after boot.js has positively identified a replacement. The export
+			// ledger/defaults are user-session state and deliberately survive.
+			this.engine = null;
+			this.lastState = null;
+			this.seededFromBoot = false;
+		});
 	}
 
 	static fromLocation() {
