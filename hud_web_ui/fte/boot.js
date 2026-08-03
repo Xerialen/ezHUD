@@ -145,6 +145,9 @@
 			'-manifest', 'default.fmf',
 			'+plug_sbar', '3',
 			'+scr_newhud', '1',
+			// Owner decision 2026-08-03: demo audio at a quarter of the engine's
+			// 0.7 default — full blast behind an editor is a bug, not a feature.
+			'+volume', '0.175',
 			'+playdemo', demoCmdPath(initialDemo)
 		],
 
