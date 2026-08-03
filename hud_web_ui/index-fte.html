@@ -39,6 +39,15 @@
       <path d="M6.3 4.2A6.6 6.6 0 0 1 8 4c4.1 0 6.5 4 6.5 4a11 11 0 0 1-1.9 2.2" fill="none" stroke="currentColor" stroke-width="1.3"/>
       <path d="M2.5 2.5l11 11" fill="none" stroke="currentColor" stroke-width="1.3"/>
     </symbol>
+    <symbol id="i-sound" viewBox="0 0 16 16">
+      <path d="M3 6h2.5L9 3v10L5.5 10H3z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M11 5.5a3.5 3.5 0 0 1 0 5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+      <path d="M12.8 3.8a6 6 0 0 1 0 8.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-muted" viewBox="0 0 16 16">
+      <path d="M3 6h2.5L9 3v10L5.5 10H3z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+      <path d="M11 6l3.5 4M14.5 6L11 10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+    </symbol>
   </defs>
 </svg>
 
@@ -102,6 +111,17 @@
         <span>Demo</span>
         <select id="fte-demo"></select>
       </label>
+      <!-- Demo sound (#10). The default is quiet — fte/boot.js launches with
+           +volume 0.25 — and this pair is the page's knob over it. The cvar is
+           editor chrome, not HUD state: the adapter allows it exactly but keeps
+           it out of every export. -->
+      <button class="fte-mute" type="button" id="fte-mute" aria-pressed="false"
+              aria-label="Mute demo sound" title="Mute demo sound">
+        <svg class="fte-mute__on" width="14" height="14" aria-hidden="true"><use href="#i-sound"/></svg>
+        <svg class="fte-mute__off" width="14" height="14" aria-hidden="true"><use href="#i-muted"/></svg>
+      </button>
+      <input class="fte-volume" id="fte-volume" type="range" min="0" max="1" step="0.05" value="0.25"
+             aria-label="Demo volume">
       <p class="fte-bar__hint">Drop a .cfg, a .pak/.pk3/.zip of textures, or a .mvd anywhere on this panel.</p>
       <p class="fte-status" id="fte-status" hidden></p>
     </div>

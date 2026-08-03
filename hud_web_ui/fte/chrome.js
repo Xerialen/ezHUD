@@ -89,6 +89,84 @@ async function buildDemoPicker() {
 	});
 }
 
+// ---- volume -----------------------------------------------------------------
+// The demo's sound, owner decision #10: it defaults quiet (0.175, applied by
+// boot.js's +volume launch argument, which also replays the state stored here)
+// and this pair is the only knob over it. `volume` is editor chrome, not HUD
+// state — the adapter allows the exact cvar but keeps it out of the ledger and
+// every export path, so a saved config never grows a line the user did not
+// write.
+
+const VOLUME_KEY = 'ezhud.fte.volume';
+const MUTED_KEY = 'ezhud.fte.muted';
+const DEFAULT_VOLUME = 0.175;
+
+function rememberVolume(volume, muted) {
+	try {
+		window.localStorage.setItem(VOLUME_KEY, String(volume));
+		window.localStorage.setItem(MUTED_KEY, muted ? '1' : '0');
+	} catch { /* private mode: the session keeps its sound control anyway */ }
+}
+
+function sendVolume(value) {
+	// The engine already booted at the stored volume (boot.js's +volume), so
+	// this only ever runs on a user gesture. A bridge that is not up yet means
+	// the engine the write was for is gone too — nothing to recover.
+	currentBridge()?.setCvar('volume', value).catch(() => {});
+}
+
+function installVolume() {
+	const button = $('fte-mute');
+	const slider = $('fte-volume');
+	if (!button || !slider) {
+		return;
+	}
+	let muted = false;
+	try {
+		muted = window.localStorage.getItem(MUTED_KEY) === '1';
+		const stored = parseFloat(window.localStorage.getItem(VOLUME_KEY));
+		if (stored >= 0 && stored <= 1) {
+			slider.value = String(stored);
+		}
+	} catch { /* private mode: the markup's default stands */ }
+	button.setAttribute('aria-pressed', String(muted));
+
+	// One engine write per frame, however fast 'input' fires during a drag —
+	// the same coalescing shape as the editor's own drag writes.
+	let pending = 0;
+	function queueVolume() {
+		if (!pending) {
+			pending = requestAnimationFrame(() => {
+				pending = 0;
+				sendVolume(slider.value);
+			});
+		}
+	}
+
+	slider.addEventListener('input', () => {
+		// Touching the slider while muted unmutes: the gesture says "I want to
+		// hear this", and a slider that moves silently would look broken.
+		if (muted) {
+			muted = false;
+			button.setAttribute('aria-pressed', 'false');
+		}
+		rememberVolume(slider.value, muted);
+		queueVolume();
+	});
+
+	button.addEventListener('click', () => {
+		muted = !muted;
+		button.setAttribute('aria-pressed', String(muted));
+		if (!muted && !(parseFloat(slider.value) > 0)) {
+			// Never unmute to silence: a slider parked at 0 comes back at the
+			// default rather than flipping the icon and changing nothing.
+			slider.value = String(DEFAULT_VOLUME);
+		}
+		sendVolume(muted ? 0 : slider.value);
+		rememberVolume(slider.value, muted);
+	});
+}
+
 // ---- drop zone --------------------------------------------------------------
 
 function note(text) {
@@ -232,4 +310,5 @@ function renderDrift(report) {
 // ---- go ---------------------------------------------------------------------
 
 buildDemoPicker();
+installVolume();
 installDropZone();

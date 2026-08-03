@@ -44,6 +44,11 @@ const PREFIXES = ['hud_', 'vid_', 'scr_', 'cl_hud', 'font_', 'r_tracker'];
 const EXACT_CVARS = new Set([
 	'gl_consolefont', 'gl_font', 'con_fragmessages', 'cl_useimagesinfraglog',
 	'cl_sbar', 'viewsize',
+	// The page's own demo-sound knob (#10). Exact on purpose — no prefix, so
+	// `volumefoo` stays refused — and deliberately absent from the ledger and
+	// every export path: it is editor chrome, not HUD state, and a saved
+	// config must never grow a volume line the user did not write.
+	'volume',
 ]);
 
 // Cvars the FTE plugin ignores but the editor edits anyway. The adapter keeps
