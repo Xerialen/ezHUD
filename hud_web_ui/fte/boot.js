@@ -87,6 +87,15 @@
 		}
 	}
 
+	// The wasm glue can replace either global while recovering from a restart.
+	// Never let page-side code keep an instance handle past this call.
+	function engine() {
+		return {
+			module: window.Module || null,
+			ftec: window.FTEC || null
+		};
+	}
+
 	// ---- the #frame shim ---------------------------------------------------
 	// app.js believes #frame is the <img> holding the last captured frame: it
 	// assigns .src, reads .naturalWidth/.naturalHeight for the render's true
@@ -204,7 +213,8 @@
 		},
 
 		postRun: [function () {
-			if (Module.sched === undefined) {
+			var module = engine().module;
+			if (!module || module.sched === undefined) {
 				say('FTE started but never set up its main loop. Reload, or try a 64-bit browser.');
 			}
 		}]
@@ -214,10 +224,11 @@
 	// ---- start -------------------------------------------------------------
 
 	function begin() {
-		if (Module.began) {
+		var module = engine().module;
+		if (!module || module.began) {
 			return;
 		}
-		Module.began = true;
+		module.began = true;
 		say('Loading engine…');
 		var s = document.createElement('script');
 		s.src = 'ftewebglcl.js';
@@ -231,11 +242,12 @@
 	// ---- readiness, keyboard, and the playdemo fallback --------------------
 
 	function stateJSON() {
-		if (!Module._EZHud_StateJSON || !Module.UTF8ToString) {
+		var module = engine().module;
+		if (!module || !module._EZHud_StateJSON || !module.UTF8ToString) {
 			return null;
 		}
 		try {
-			return JSON.parse(Module.UTF8ToString(Module._EZHud_StateJSON()));
+			return JSON.parse(module.UTF8ToString(module._EZHud_StateJSON()));
 		} catch (e) {
 			return null;
 		}
@@ -250,7 +262,7 @@
 	// just calls this every tick until the HUD draws, which is comfortably
 	// after setupcanvas.
 	function releaseKeyboard() {
-		var ftec = window.FTEC;
+		var ftec = engine().ftec;
 		if (!ftec || !ftec.handleevent) {
 			return;
 		}
@@ -280,27 +292,46 @@
 
 	var started = Date.now();
 	var demoRetried = false;
+	var demoRetriedAt = 0;
+	var lastFTEC = null;
 
 	function watch() {
+		var live = engine();
+		var ftec = live.ftec;
+		var replaced = false;
+		if (ftec && lastFTEC && ftec !== lastFTEC) {
+			replaced = true;
+			window.dispatchEvent(new CustomEvent('ezhud:engine-replaced'));
+			console.warn('FTE engine instance replaced; resolving fresh page-side handles.');
+		}
+		if (ftec) {
+			lastFTEC = ftec;
+		}
+
 		releaseKeyboard();
 		var state = stateJSON();
-		if (!state) {
-			return;
-		}
-		var drawn = (state.elements || []).some(function (e) { return e.rect; });
+		var drawn = Boolean(state && (state.elements || []).some(function (e) { return e.rect; }));
 		if (drawn) {
 			say('');
 			clearInterval(watch.timer);
 			return;
 		}
+		if (replaced) {
+			say('FTE restarted — waiting for the current engine to draw the HUD.');
+		}
+
 		// +playdemo on the command line runs before the manifest's gamedirs are
 		// mounted in some orderings, and a demo that never started looks exactly
 		// like a HUD with nothing to draw. Ask once more through the console,
 		// which cannot race the filesystem because the filesystem is up by now.
-		if (!demoRetried && Date.now() - started > 8000 && window.FTEC) {
+		var now = Date.now();
+		if (!demoRetried && state && now - started > 8000 && ftec) {
 			demoRetried = true;
+			demoRetriedAt = now;
 			say('No HUD drawn yet — asking the engine to play ' + initialDemo + ' again.');
-			window.FTEC.cbufadd('playdemo ' + demoCmdPath(initialDemo) + '\n');
+			ftec.cbufadd('playdemo ' + demoCmdPath(initialDemo) + '\n');
+		} else if (demoRetried && now - demoRetriedAt > 10000) {
+			say('No HUD was drawn after retrying the demo. Reload the page to try again.');
 		}
 	}
 
@@ -309,6 +340,7 @@
 	// ---- what the host chrome needs ---------------------------------------
 
 	window.EZHUD_FTE = {
+		engine: engine,
 		bundledDemos: BUNDLED_DEMOS,
 		initialDemo: initialDemo,
 		demoKey: DEMO_KEY,
@@ -320,16 +352,17 @@
 		// `exec` stays forbidden everywhere -- an imported config is parsed by
 		// fte/import.js and applied cvar by cvar, never handed to the console.
 		play: function (path) {
-			if (!window.FTEC || /[;\r\n$"]/.test(path)) {
+			var ftec = engine().ftec;
+			if (!ftec || /[;\r\n$"]/.test(path)) {
 				return false;
 			}
 			try { window.localStorage.setItem(DEMO_KEY, path); } catch (e) { /* private mode */ }
-			window.FTEC.cbufadd('playdemo ' + demoCmdPath(path) + '\n');
+			ftec.cbufadd('playdemo ' + demoCmdPath(path) + '\n');
 			return true;
 		}
 	};
 
-	if (Module.autostart) {
+	if (engine().module.autostart) {
 		begin();
 	}
 })();
