@@ -88,6 +88,23 @@ function parseAssignment(line) {
 	return { name: m[1].toLowerCase(), value: m[2] !== undefined ? m[2] : m[3] };
 }
 
+// FTE's `set` (cmd.c:4466) creates an unregistered cvar silently and assigns
+// a registered one exactly like a bare `<cvar> <value>` line would -- but a
+// bare line for a cvar the engine has never registered prints "Unknown
+// command" to the console instead. The ezhud plugin now registers nearly
+// every GUI cvar the editor writes (killfeed, #15 P2), but a few still have
+// no plugin registration (cl_hud, scr_compacthud) and a future addition may
+// not either; `set` makes every write silent regardless, so the wire format
+// no longer depends on knowing which side of that line a given cvar falls
+// on. Applied at the single cbufadd() call site in send().
+function wireLine(line) {
+	const name = String(line).trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+	// Bare commands (hud_recalculate, fontload, ...) are not cvars: `set`
+	// would either error on them or, worse, silently create a same-named
+	// cvar that shadows the command on every write after the first.
+	return BARE_COMMANDS.has(name) ? line : `set ${line}`;
+}
+
 function commandAllowed(line) {
 	if (/[;\r\n$]/.test(line)) {
 		return false;
@@ -171,10 +188,12 @@ export class Bridge {
 		return Boolean(m && m._EZHud_StateJSON && this.#ftec());
 	}
 
-	// boot.js launches the engine with +cvar value pairs (notably +scr_newhud 1
-	// for the preview), which the ledger's ezQuake-default seeds would
-	// contradict. Read the actual launch arguments once, so the HUD-system
-	// switch starts on what the page really booted with — never a lie.
+	// boot.js launches the engine with +cvar value pairs and, since the wire
+	// format switched to `set` (see wireLine()), a `+set <name> <value>` triad
+	// for scr_newhud specifically (notably +set scr_newhud 1 for the preview),
+	// either of which the ledger's ezQuake-default seeds would contradict.
+	// Read the actual launch arguments once, so the HUD-system switch starts
+	// on what the page really booted with — never a lie.
 	#seedFromBoot() {
 		if (this.seededFromBoot) {
 			return;
@@ -184,10 +203,25 @@ export class Bridge {
 			return;
 		}
 		this.seededFromBoot = true;
-		for (let i = 0; i + 1 < args.length; i++) {
-			const name = String(args[i]);
-			if (name.startsWith('+') && this.ledger.has(name.slice(1))) {
-				this.ledger.set(name.slice(1), String(args[i + 1]));
+		for (let i = 0; i < args.length; i++) {
+			const token = String(args[i]);
+			// `+set <name> <value>` is a triad, not a pair: it must consume two
+			// tokens, or the scan would misread `<name>` as its own bare +arg
+			// (it has no leading '+') and skip straight past the value too.
+			if (token === '+set' && i + 2 < args.length) {
+				const name = String(args[i + 1]);
+				if (this.ledger.has(name)) {
+					this.ledger.set(name, String(args[i + 2]));
+				}
+				i += 2;
+				continue;
+			}
+			if (token.startsWith('+') && i + 1 < args.length) {
+				const name = token.slice(1);
+				if (this.ledger.has(name)) {
+					this.ledger.set(name, String(args[i + 1]));
+				}
+				i += 1;
 			}
 		}
 	}
@@ -339,9 +373,11 @@ export class Bridge {
 			throw new BridgeError('command not permitted', { status: 403 });
 		}
 		this.#recordWrite(line);
-		// The plugin now registers this ezQuake-dialect cvar itself (#15 P2), so
-		// a plain write is correct — no dialect translation needed.
-		ftec.cbufadd(line + '\n');
+		// wireLine(): `set` on every cvar write, bare for commands -- see its
+		// comment for why. The plugin registers the killfeed cvars itself now
+		// (#15 P2), so this is no longer working around that specific write;
+		// it is uniform cover for whatever the plugin has not registered yet.
+		ftec.cbufadd(wireLine(line) + '\n');
 		return { ok: true };
 	}
 

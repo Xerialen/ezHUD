@@ -200,8 +200,11 @@ test('importing killfeed cvars writes the ezQuake-dialect lines straight through
 
 	await importCfg('r_tracker 0\nr_tracker_messages 6\nr_tracker_frags 1\n', 'kf.cfg', bridge);
 
-	assert.deepEqual(sent,
-		['r_tracker 0\n', 'r_tracker_messages 6\n', 'r_tracker_frags 1\n', 'hud_recalculate\n']);
+	// hud_recalculate is a bare command (BARE_COMMANDS); the three cvar writes
+	// each get wireLine()'s `set` prefix.
+	assert.deepEqual(sent, [
+		'set r_tracker 0\n', 'set r_tracker_messages 6\n', 'set r_tracker_frags 1\n', 'hud_recalculate\n',
+	]);
 });
 
 test('the drift report names elements FTE does not register and cvars it never reports back', async () => {

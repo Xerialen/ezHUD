@@ -163,7 +163,17 @@
 		arguments: [
 			'-manifest', 'default.fmf',
 			'+plug_sbar', '3',
-			'+scr_newhud', '1',
+			// `+set` rather than a bare `+scr_newhud 1`: the ezhud plugin
+			// (LINK_EZHUD, statically linked) registers scr_newhud itself
+			// (#15 P1), but plugin registration and the command line's
+			// deferred "+" queue are two different subsystems, and this repo
+			// carries no vendored fteqw source at the pinned SHA to prove
+			// which one runs first. If argv runs before plugin init, a bare
+			// +scr_newhud hits an unregistered cvar and logs "Unknown
+			// command" at boot; if plugin init runs first, `+set` is a
+			// harmless no-op-equivalent. Either way `+set` is the safe,
+			// uniform choice (core/fte-adapter.js's wireLine()).
+			'+set', 'scr_newhud', '1',
 			// Owner decision (#10): demos default quiet — a quarter of FTE's
 			// volume 0.7, not full blast under an editor. The value follows the
 			// fte-bar's stored slider/mute state, so a reload never blasts a
