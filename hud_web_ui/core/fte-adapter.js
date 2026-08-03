@@ -131,6 +131,26 @@ function formatCvarLine(name, value) {
 	return /\s/.test(text) || text === '' ? `${name} "${text}"` : `${name} ${text}`;
 }
 
+// Wire format for cbufadd. FTE's bare `<cvar> <value>` goes through
+// Cvar_Command (engine/common/cvar.c), which only recognises already-
+// registered cvars -- an unregistered name (scr_newhud, cl_sbar,
+// con_fragmessages, cl_useimagesinfraglog, and most of the ezQuake-dialect
+// r_tracker_* names, none of which FTE registers) falls through to
+// Cmd_ExecuteString's "Unknown command" print into the notify area, spammed
+// over the live demo every time the editor touches one. `set` (and `seta`)
+// are registered explicitly for this (engine/common/cmd.c:4466 — "Changes
+// the current value of the named cvar, creating it if it doesn't yet
+// exist") -- an unknown name is created silently, a known one is assigned
+// exactly like the bare form. So every cvar write here goes out prefixed
+// `set `, and only the genuine commands in BARE_COMMANDS (which `set` does
+// not apply to at all) stay bare. Allowlist checks and ledger parsing all
+// read the unprefixed line -- this only changes what reaches the wire.
+function wireLine(line) {
+	const text = String(line);
+	const name = text.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+	return BARE_COMMANDS.has(name) ? text : `set ${text}`;
+}
+
 // Parses "<cvar> <value>" / "<cvar> \"value\"" the same way #recordWrite does,
 // shared so translation reads exactly what was just sent.
 function parseAssignment(line) {
@@ -237,10 +257,28 @@ export class Bridge {
 			return;
 		}
 		this.seededFromBoot = true;
-		for (let i = 0; i + 1 < args.length; i++) {
-			const name = String(args[i]);
-			if (name.startsWith('+') && this.ledger.has(name.slice(1))) {
-				this.ledger.set(name.slice(1), String(args[i + 1]));
+		for (let i = 0; i < args.length; i++) {
+			const token = String(args[i]);
+			// '+set <name> <value>' triad -- boot.js uses this for cvars FTE does
+			// not register natively (scr_newhud), per wireLine()'s comment above:
+			// a bare '+scr_newhud 1' would print "Unknown command" before the
+			// editor ever gets a state to read.
+			if (token === '+set' && i + 2 < args.length) {
+				const name = String(args[i + 1]);
+				if (this.ledger.has(name)) {
+					this.ledger.set(name, String(args[i + 2]));
+				}
+				i += 2;
+				continue;
+			}
+			// '+<name> <value>' pair, for cvars FTE registers natively
+			// (+plug_sbar, +volume).
+			if (token.startsWith('+') && i + 1 < args.length) {
+				const name = token.slice(1);
+				if (this.ledger.has(name)) {
+					this.ledger.set(name, String(args[i + 1]));
+				}
+				i += 1;
 			}
 		}
 	}
@@ -281,7 +319,7 @@ export class Bridge {
 		for (const [name, value] of translate(parsed.value)) {
 			const translated = formatCvarLine(name, value);
 			if (commandAllowed(translated)) {
-				ftec.cbufadd(translated + '\n');
+				ftec.cbufadd(wireLine(translated) + '\n');
 			}
 		}
 	}
@@ -423,7 +461,7 @@ export class Bridge {
 		// meant to receive (see SUPPRESS_RAW's comment for the audit).
 		const parsedForSuppress = parseAssignment(line);
 		if (!parsedForSuppress || !SUPPRESS_RAW.has(parsedForSuppress.name)) {
-			ftec.cbufadd(line + '\n');
+			ftec.cbufadd(wireLine(line) + '\n');
 		}
 		// Value-transforming killfeed translation, on every write regardless of
 		// origin (inspector or import.js's importCfg, since both call send()/

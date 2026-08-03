@@ -269,7 +269,13 @@ try {
 		// next state export, so folding it in would hide the drift report's whole
 		// reason to exist.
 		function fold(line) {
-			const m = /^(\S+)\s+(?:"([^"]*)"|(.+?))\s*$/.exec(line);
+			// core/fte-adapter.js's wireLine() prefixes every cvar write `set `
+			// (#15 follow-up) so FTE creates unregistered ezQuake-dialect cvars
+			// silently instead of spamming "Unknown command"; strip it here the
+			// same way FTE's own `set` command consumes its own name before
+			// looking up the cvar (engine/common/cmd.c's Cmd_set_f).
+			const unset = line.replace(/^set\s+/i, '');
+			const m = /^(\S+)\s+(?:"([^"]*)"|(.+?))\s*$/.exec(unset);
 			if (!m) {
 				return;
 			}
@@ -433,11 +439,14 @@ try {
 	const dragLines = (await sentLines()).slice(sentBeforeDrag);
 	assert(dragLines.length > 0, 'the drag sent nothing to FTEC');
 	for (const line of dragLines) {
-		assert(/^hud_health_pos_[xy] -?\d+$/.test(line),
+		// `set`-prefixed on the wire (#15 follow-up): wireLine() in
+		// core/fte-adapter.js sends every cvar write through `set` so FTE
+		// doesn't spam "Unknown command" for names it never registered.
+		assert(/^set hud_health_pos_[xy] -?\d+$/.test(line),
 			`drag sent something outside the placement allowlist: ${JSON.stringify(line)}`);
 	}
-	assert(dragLines.some((l) => l.startsWith('hud_health_pos_x '))
-		&& dragLines.some((l) => l.startsWith('hud_health_pos_y ')),
+	assert(dragLines.some((l) => l.startsWith('set hud_health_pos_x '))
+		&& dragLines.some((l) => l.startsWith('set hud_health_pos_y ')),
 		'the drag did not write both placement cvars');
 
 	// Where the box actually landed, against what core/geometry.js says those
@@ -587,8 +596,10 @@ try {
 	await page.waitForFunction(() => [...document.querySelectorAll('#hudmodes .seg__item')]
 		.some((b) => b.textContent === 'Classic' && b.dataset.on === 'true'));
 	const modeLines = (await sentLines()).slice(sentBeforeModes);
-	assert(modeLines.includes('scr_newhud 0'),
-		`clicking Classic sent ${JSON.stringify(modeLines)} instead of scr_newhud 0`);
+	// `set`-prefixed (#15 follow-up): scr_newhud is unregistered in FTE, so a
+	// bare write would print "Unknown command".
+	assert(modeLines.includes('set scr_newhud 0'),
+		`clicking Classic sent ${JSON.stringify(modeLines)} instead of set scr_newhud 0`);
 
 	// Narrower than the HUD-system note (#15 phase 1): on/off, timing and line
 	// count now preview via TRACKER_TRANSLATE, so only style/console-integration/
@@ -614,13 +625,13 @@ try {
 	await page.waitForFunction(() => [...document.querySelectorAll('#killfeed .seg__item')]
 		.some((b) => b.textContent === 'Dedicated killfeed' && b.dataset.on === 'true'));
 	const killfeedLines = (await sentLines()).slice(sentBeforeKillfeed);
-	assert(killfeedLines.includes('r_tracker 1') && killfeedLines.includes('con_fragmessages 0'),
+	assert(killfeedLines.includes('set r_tracker 1') && killfeedLines.includes('set con_fragmessages 0'),
 		`the killfeed seg sent ${JSON.stringify(killfeedLines)} instead of the pair`);
 	// Flipping "Where kills appear" to Dedicated must send BOTH dialects: the
 	// ezQuake pair above, and FTE's own r_tracker_frags 2 (fragstats.c:83, "all
-	// kills") so the live preview actually follows.
-	assert(killfeedLines.includes('r_tracker_frags 2'),
-		`the killfeed seg sent ${JSON.stringify(killfeedLines)}, missing the FTE-dialect r_tracker_frags 2`);
+	// kills") so the live preview actually follows. Both `set`-prefixed.
+	assert(killfeedLines.includes('set r_tracker_frags 2'),
+		`the killfeed seg sent ${JSON.stringify(killfeedLines)}, missing the FTE-dialect set r_tracker_frags 2`);
 	assert((await page.evaluate(() => window.__fake.tracker.r_tracker_frags)) === '2',
 		'the FTE-dialect write did not reach the fake engine');
 
@@ -688,8 +699,11 @@ try {
 	assert(bootArgs.includes('+volume 0.175'),
 		`boot args lack the quiet default +volume 0.175: ${bootArgs}`);
 	// Case 4's config said `volume "1"`; the pipeline retains it (cases 5/6
-	// proved the export byte-identical) and must never have applied it.
-	assert(!(await sentLines()).some((l) => /^volume\b/.test(l)),
+	// proved the export byte-identical) and must never have applied it. Checks
+	// both wire forms: a bare "volume ..." can never happen post-#15-follow-up
+	// (every write is `set`-prefixed), but the point here is that the line was
+	// never *applied* at all, in either form.
+	assert(!(await sentLines()).some((l) => /^(set\s+)?volume\b/.test(l)),
 		'the imported volume line reached the engine');
 
 	const sentBeforeSlider = (await sentLines()).length;
@@ -698,16 +712,19 @@ try {
 		el.dispatchEvent(new Event('input', { bubbles: true }));
 	});
 	await page.waitForFunction((n) => window.__fake.sent.length > n, sentBeforeSlider);
-	assert((await sentLines()).slice(sentBeforeSlider).includes('volume 0.4'),
-		'moving the slider did not send volume 0.4');
+	// `set`-prefixed like every other cvar write (volume is a real, registered
+	// FTE cvar, but wireLine() does not special-case that -- `set` is harmless
+	// either way).
+	assert((await sentLines()).slice(sentBeforeSlider).includes('set volume 0.4'),
+		'moving the slider did not send set volume 0.4');
 	assert(await page.evaluate(() => localStorage.getItem('ezhud.fte.volume')) === '0.4',
 		'the slider value was not persisted');
 
 	const sentBeforeMute = (await sentLines()).length;
 	await page.locator('#fte-mute').click();
 	await page.waitForFunction((n) => window.__fake.sent.length > n, sentBeforeMute);
-	assert((await sentLines()).slice(sentBeforeMute).includes('volume 0'),
-		'muting did not send volume 0');
+	assert((await sentLines()).slice(sentBeforeMute).includes('set volume 0'),
+		'muting did not send set volume 0');
 	assert(await page.locator('#fte-mute').getAttribute('aria-pressed') === 'true',
 		'muting did not flip aria-pressed');
 	assert(await page.evaluate(() => localStorage.getItem('ezhud.fte.muted')) === '1',
@@ -716,7 +733,7 @@ try {
 	const sentBeforeUnmute = (await sentLines()).length;
 	await page.locator('#fte-mute').click();
 	await page.waitForFunction((n) => window.__fake.sent.length > n, sentBeforeUnmute);
-	assert((await sentLines()).slice(sentBeforeUnmute).includes('volume 0.4'),
+	assert((await sentLines()).slice(sentBeforeUnmute).includes('set volume 0.4'),
 		'unmuting did not restore the prior volume');
 	assert(await page.locator('#fte-mute').getAttribute('aria-pressed') === 'false',
 		'unmuting did not flip aria-pressed back');

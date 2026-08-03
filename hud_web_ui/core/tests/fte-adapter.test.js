@@ -85,7 +85,41 @@ test('send passes allowlisted commands through to cbufadd, newline included', as
 	const bridge = new Bridge(fake);
 	await bridge.send('hud_recalculate');
 	await bridge.send('hud_health_pos_x 12');
-	assert.deepEqual(fake.sent, ['hud_recalculate\n', 'hud_health_pos_x 12\n']);
+	// hud_recalculate is a BARE_COMMANDS entry, sent as-is; hud_health_pos_x is
+	// a cvar write, so it goes out `set`-prefixed (see wireLine()'s comment).
+	assert.deepEqual(fake.sent, ['hud_recalculate\n', 'set hud_health_pos_x 12\n']);
+});
+
+// ---- wire format: `set`-prefixed cvar writes, bare commands (#15 follow-up) -
+// FTE's bare `<cvar> <value>` requires the cvar already registered
+// (engine/common/cvar.c's Cvar_Command); an unregistered name -- scr_newhud,
+// cl_sbar, con_fragmessages, cl_useimagesinfraglog, most ezQuake-dialect
+// r_tracker_* names -- falls through to "Unknown command" spam in the notify
+// area over the live demo. `set`/`seta` (engine/common/cmd.c:4466: "Changes
+// the current value of the named cvar, creating it if it doesn't yet
+// exist.") creates silently and assigns known cvars normally either way.
+test('cvar writes go out `set`-prefixed; BARE_COMMANDS stay raw', async () => {
+	const fake = fakeEngine(oneElement);
+	const bridge = new Bridge(fake);
+	// A cvar FTE does register (hud_health_pos_x) and one it never has
+	// (scr_newhud, con_fragmessages): wireLine does not distinguish -- both go
+	// out `set`-prefixed, because the whole point is not needing to know FTE's
+	// registration table up front.
+	await bridge.send('hud_health_pos_x 12');
+	await bridge.send('scr_newhud 1');
+	await bridge.send('con_fragmessages 0');
+	// Every command in BARE_COMMANDS, bare.
+	await bridge.send('hud_recalculate');
+	await bridge.send('vid_restart');
+	await bridge.send('toggleconsole');
+	assert.deepEqual(fake.sent, [
+		'set hud_health_pos_x 12\n',
+		'set scr_newhud 1\n',
+		'set con_fragmessages 0\n',
+		'hud_recalculate\n',
+		'vid_restart\n',
+		'toggleconsole\n',
+	]);
 });
 
 test('send refuses chaining, expansion, newlines, hud_web and anything unlisted', async () => {
@@ -118,9 +152,9 @@ test('setCvar quotes values with spaces, and the empty value', async () => {
 	await bridge.setCvar('hud_clock_format', '%H:%M %p');
 	await bridge.setCvar('hud_clock_format', '');
 	assert.deepEqual(fake.sent, [
-		'hud_health_pos_x 12\n',
-		'hud_clock_format "%H:%M %p"\n',
-		'hud_clock_format ""\n',
+		'set hud_health_pos_x 12\n',
+		'set hud_clock_format "%H:%M %p"\n',
+		'set hud_clock_format ""\n',
 	]);
 });
 
@@ -266,15 +300,30 @@ test('the ledger synthesizes hud_modes and killfeed, flagged synthetic', async (
 	assert.equal(state.hud_modes.standard_bar, false);
 });
 
-test('the ledger seeds scr_newhud from the boot launch arguments, never a lie', async () => {
+test('the ledger seeds scr_newhud from the boot launch arguments\' `+set` triad, never a lie', async () => {
 	const fake = fakeEngine(oneElement);
-	// boot.js forces the new HUD for the preview; the switch must show it.
-	fake.engine.module.arguments = ['-manifest', 'default.fmf', '+plug_sbar', '3', '+scr_newhud', '1'];
+	// boot.js forces the new HUD for the preview via '+set scr_newhud 1' (not a
+	// bare '+scr_newhud 1' -- FTE does not register scr_newhud, so a bare pair
+	// would print "Unknown command" at boot); the switch must show it anyway.
+	fake.engine.module.arguments = ['-manifest', 'default.fmf', '+plug_sbar', '3', '+set', 'scr_newhud', '1'];
 	const bridge = new Bridge(fake);
 	const state = await bridge.state();
 	assert.equal(state.hud_modes.scr_newhud, 1);
 	assert.equal(state.hud_modes.classic_drawn, false);
 	assert.equal(state.hud_modes.new_drawn, true);
+});
+
+test('#seedFromBoot still reads a plain `+<name> <value>` pair for a ledger cvar', async () => {
+	// The triad is only for cvars FTE never registered; a cvar FTE does
+	// register natively (or any other ledger-tracked cvar passed as a plain
+	// pair) must still seed correctly -- the pair form is not being retired,
+	// only supplemented.
+	const fake = fakeEngine(oneElement);
+	fake.engine.module.arguments = ['-manifest', 'default.fmf', '+cl_sbar', '1', '+set', 'scr_newhud', '1'];
+	const bridge = new Bridge(fake);
+	const state = await bridge.state();
+	assert.equal(state.hud_modes.cl_sbar, 1);
+	assert.equal(state.hud_modes.scr_newhud, 1);
 });
 
 test('killfeed and classic-bar cvars pass the allowlist; the rest of r_ stays refused', async () => {
@@ -291,7 +340,7 @@ test('killfeed and classic-bar cvars pass the allowlist; the rest of r_ stays re
 	for (const line of accepted) {
 		await bridge.send(line);
 	}
-	assert.deepEqual(fake.sent, accepted.map((line) => `${line}\n`));
+	assert.deepEqual(fake.sent, accepted.map((line) => `set ${line}\n`));
 	for (const line of ['r_speeds 1', 'r_dynamic 0', 'exec autoexec.cfg']) {
 		await assert.rejects(() => bridge.send(line), (err) => {
 			assert.equal(err.status, 403);
@@ -326,7 +375,7 @@ test('volume passes exactly, and never leaks into the snapshot or an export', as
 
 	// Exact cvar, not a prefix: the page's sound knob, and only it.
 	await bridge.setCvar('volume', 0.4);
-	assert.deepEqual(fake.sent, ['volume 0.4\n']);
+	assert.deepEqual(fake.sent, ['set volume 0.4\n']);
 	for (const line of ['volumefoo 1', 'vol 1']) {
 		await assert.rejects(() => bridge.send(line), (err) => {
 			assert.equal(err.status, 403);
@@ -384,14 +433,21 @@ test('r_tracker on/off is mirrored onto FTE\'s r_tracker_frags 0/2', async () =>
 	const bridge = new Bridge(fake);
 	await bridge.send('r_tracker 1');
 	await bridge.send('r_tracker 0');
-	assert.deepEqual(fake.sent, ['r_tracker 1\n', 'r_tracker_frags 2\n', 'r_tracker 0\n', 'r_tracker_frags 0\n']);
+	// Both dialects go out `set`-prefixed: r_tracker is ezQuake-only (unknown
+	// to FTE) and r_tracker_frags, while FTE does register it, still goes
+	// through wireLine() the same as every other write -- set is harmless on
+	// an already-registered cvar.
+	assert.deepEqual(fake.sent, [
+		'set r_tracker 1\n', 'set r_tracker_frags 2\n',
+		'set r_tracker 0\n', 'set r_tracker_frags 0\n',
+	]);
 });
 
 test('r_tracker_messages is mirrored onto FTE\'s r_tracker_lines', async () => {
 	const fake = fakeEngine(oneElement);
 	const bridge = new Bridge(fake);
 	await bridge.setCvar('r_tracker_messages', 6);
-	assert.deepEqual(fake.sent, ['r_tracker_messages 6\n', 'r_tracker_lines 6\n']);
+	assert.deepEqual(fake.sent, ['set r_tracker_messages 6\n', 'set r_tracker_lines 6\n']);
 });
 
 test('r_tracker_time is routed through the translation table but emits nothing extra', async () => {
@@ -399,7 +455,7 @@ test('r_tracker_time is routed through the translation table but emits nothing e
 	const bridge = new Bridge(fake);
 	await bridge.setCvar('r_tracker_time', 4);
 	// Same name and unit in both dialects (fragstats.c:84): one write, not two.
-	assert.deepEqual(fake.sent, ['r_tracker_time 4\n']);
+	assert.deepEqual(fake.sent, ['set r_tracker_time 4\n']);
 });
 
 test('translated FTE-dialect writes never enter the ledger, snapshot or export', async () => {
@@ -461,9 +517,9 @@ test('the FTE-dialect names pass the allowlist under the shared r_tracker prefix
 	for (const line of ['r_tracker_lines 8', 'r_tracker_fadetime 1']) {
 		await bridge.send(line);
 	}
-	assert.deepEqual(fake.sent, ['r_tracker_lines 8\n', 'r_tracker_fadetime 1\n']);
+	assert.deepEqual(fake.sent, ['set r_tracker_lines 8\n', 'set r_tracker_fadetime 1\n']);
 	await bridge.send('r_tracker_frags 2'); // accepted (no throw), but silent
-	assert.deepEqual(fake.sent, ['r_tracker_lines 8\n', 'r_tracker_fadetime 1\n']);
+	assert.deepEqual(fake.sent, ['set r_tracker_lines 8\n', 'set r_tracker_fadetime 1\n']);
 });
 
 test('loadFace goes through send, so an unlisted face name is refused the same way', async () => {

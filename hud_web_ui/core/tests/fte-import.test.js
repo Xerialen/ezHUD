@@ -200,10 +200,13 @@ test('importing killfeed cvars also emits their FTE-dialect translation (#15 pha
 
 	await importCfg('r_tracker 0\nr_tracker_messages 6\n', 'kf.cfg', bridge);
 
-	assert.ok(sent.includes('r_tracker 0\n'));
-	assert.ok(sent.includes('r_tracker_frags 0\n'));
-	assert.ok(sent.includes('r_tracker_messages 6\n'));
-	assert.ok(sent.includes('r_tracker_lines 6\n'));
+	// `set`-prefixed on the wire (#15 follow-up: FTE registers none of these
+	// under their ezQuake spelling, and a bare write would spam "Unknown
+	// command"), same as an inspector edit.
+	assert.ok(sent.includes('set r_tracker 0\n'));
+	assert.ok(sent.includes('set r_tracker_frags 0\n'));
+	assert.ok(sent.includes('set r_tracker_messages 6\n'));
+	assert.ok(sent.includes('set r_tracker_lines 6\n'));
 });
 
 test('importing r_tracker_frags never touches FTE\'s tracker-mode cvar of the same name', async () => {
@@ -237,11 +240,13 @@ test('importing r_tracker_frags never touches FTE\'s tracker-mode cvar of the sa
 	assert.equal(report.applied, 2);
 	assert.deepEqual(report.refused, []);
 
-	// r_tracker's own translation (r_tracker_frags 2) did reach the engine...
-	assert.ok(sent.includes('r_tracker_frags 2\n'));
-	// ...but the raw ezQuake r_tracker_frags line never did: no cbufadd line is
-	// a bare "r_tracker_frags 1".
+	// r_tracker's own translation (r_tracker_frags 2) did reach the engine,
+	// `set`-prefixed like every other write...
+	assert.ok(sent.includes('set r_tracker_frags 2\n'));
+	// ...but the raw ezQuake r_tracker_frags line never did, in either wire
+	// form: no cbufadd line is "r_tracker_frags 1" or "set r_tracker_frags 1".
 	assert.ok(!sent.includes('r_tracker_frags 1\n'));
+	assert.ok(!sent.includes('set r_tracker_frags 1\n'));
 
 	// The import round-trips byte-identical regardless -- the ledger, not the
 	// engine, is what makes the line "applied".

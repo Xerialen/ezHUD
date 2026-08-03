@@ -162,13 +162,24 @@
 		// engine's own sbar and the editor has nothing to place.
 		arguments: [
 			'-manifest', 'default.fmf',
+			// plug_sbar is a real, registered FTE cvar (engine/common/plugin.c:31)
+			// -- a bare '+plug_sbar 3' assigns it normally, no `set` needed.
 			'+plug_sbar', '3',
-			'+scr_newhud', '1',
+			// scr_newhud is ezQuake-dialect only; FTE has never heard of it. A
+			// bare '+scr_newhud 1' hits Cvar_Command with nothing registered
+			// under that name and FTE prints "Unknown command" before the page
+			// has even finished booting. '+set' (engine/common/cmd.c:4466)
+			// creates the cvar instead of erroring, matching core/fte-adapter.js's
+			// wireLine() for every write made after boot.
+			'+set', 'scr_newhud', '1',
 			// Owner decision (#10): demos default quiet — a quarter of FTE's
 			// volume 0.7, not full blast under an editor. The value follows the
 			// fte-bar's stored slider/mute state, so a reload never blasts a
-			// volume the user already turned down.
+			// volume the user already turned down. volume is real and registered
+			// too, so it stays a bare pair like plug_sbar.
 			'+volume', initialVolume,
+			// playdemo is a command, not a cvar -- `set` does not apply to it at
+			// all, and it is already registered regardless.
 			'+playdemo', demoCmdPath(initialDemo)
 		],
 
