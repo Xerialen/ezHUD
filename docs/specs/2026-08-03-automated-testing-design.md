@@ -139,7 +139,7 @@ half already used for `docs/verification.md`. Never blocks small changes; failur
 findings, not auto-fixes (two-speed triage per the fidelity design).
 
 ### Tier 5 — LLM visual review gate — *mandatory, last, after all green*
-See §6.
+See §7.
 
 ## 4. Use-case spec format
 
@@ -226,7 +226,107 @@ for (const s of scenarios) {
 | element draw functions diverge from engine | T3V goldens (once correct) | **T4 per-element diff (the designed catcher)** |
 | "renders but looks wrong to a human" (composition, overlap, readability) | — (not machine-checkable) | **T5 LLM gate** |
 
-## 6. The LLM final gate and adjust loop
+## 6. Cvar coverage strategy — schema-driven, not per-cvar
+
+The surface is ~83 HUD elements × ~1132 `hud_*` cvars. Writing a test per cvar is the wrong
+unit of work: it doesn't scale, it rots, and it encodes today's expected values instead of the
+properties that make any value correct. This section generalizes §5 — six mechanisms, each
+covering the whole cvar surface at once. The **hand-written** tests stay scoped to the ~9 real
+user-facing use-cases (README/PRODUCT.md: boot into the "no HUD to edit" state, drag-edit over
+the live render, cfg import with apply/drift report, asset import (pk3/mvd), export
+byte-fidelity, save/overwrite safety, `hud_web 1` live-edit, scale-readout honesty, CLI/profile
+conversion) — those are the tier-3 scenarios of §4. Everything below is the machinery that
+extends that backbone to full cvar/element coverage without another hand-written case.
+
+### 6.1 Schema-driven generative tests
+
+ezQuake ships a machine-readable cvar schema — `help_variables.json` in the upstream repo root
+(type, default, bounds, enum values per cvar). Don't hand-write cases; **generate** them:
+
+```js
+const schema = load('fixtures/cvar-schema.json');          // extracted from the pinned engine clone
+for (const cvar of schema.filter(c => c.name.startsWith('hud_'))) {
+  for (const v of batteryFor(cvar))                        // min, max, min−1, max+1, default,
+    it(`${cvar.name} = ${v}`, async () => {                //  "", "abc" into numeric, "30%",
+      await engine.set(cvar.name, v);                      //  quote/newline injection
+      const state = await engine.state();                  // must never crash, never 500,
+      assertSane(state, cvar);                             //  value clamped or refused per schema
+      assertRoundTrip(await engine.get(cvar.name), cvar);  // default restore ⇒ default readback
+    });
+}
+```
+
+One generic battery, every cvar gets it, coverage follows the schema. **Schema provenance in
+CI:** do *not* vendor a copy that drifts — the CI job already clones `ezquake-source` at the
+pinned commit (the runbook is executable CI), so extract `help_variables.json` from that clone
+at build time and sha256 it into the fixture manifest. The element↔cvar mapping needs no
+extraction at all: the bridge's `/state` reports each element's registered parameters (PRODUCT.md
+— "driven generically from what the bridge reports"), so the mapping is always exactly the built
+engine's. This repo carries no schema copy today; the pinned clone is the source of truth.
+
+### 6.2 Metamorphic invariants over all elements
+
+Where 6.1 checks each cvar in isolation, invariants check *relations* that must hold for every
+element, with no per-cvar expected value:
+
+```js
+for (const el of state.elements) {                          // all 83, from /state
+  await engine.set(`hud_${el.name}_show`, 0);
+  assert((await engine.state())[el.name].rect === null);    // show 0 ⇒ no rect, ∀ el
+  await engine.set(`hud_${el.name}_show`, 1);
+  const before = rect(el); await editor.drag(el, dx, dy);
+  assertMoveSemantics(before, rect(el), dx, dy);            // drag Δ ⇒ engine move semantics, ∀ el
+}
+```
+
+Same shape for: `pos_x += n` ⇒ rect shifts by the engine's truncation of `n·scale`; `scale`
+doubled ⇒ rect grows per the element's grow rules; `place` change ⇒ rect re-anchors and nothing
+*else* moves. One loop, no per-element table.
+
+### 6.3 Round-trip as universal oracle
+
+cfg in → apply → export → **the byte diff touches only the intended lines** (README's
+export-byte-fidelity promise, mechanized). Import direction: dropped cfg → editor state ==
+engine `/state`. One assertion pair covers every cvar any cfg can contain, including ones no
+scenario ever names.
+
+### 6.4 Differential testing — the engine is the oracle
+
+The architecture's core property (PRODUCT.md "Positioning"): the editor never models placement.
+So after *every* generated command in 6.1–6.3, assert editor state against the engine's own
+`/state`. Divergence editor↔engine **is** the bug, by definition — no encoded right answers
+anywhere. This is tier 4's A-vs-B logic promoted into the cheap tiers: same oracle, state
+instead of pixels.
+
+### 6.5 One deep representative per behavior class
+
+The 1132 cvars collapse into a handful of behavior classes. Each class gets **one** hand-written
+deep scenario at its known edges; the rest of the class rides the 6.1 battery + 6.2 invariants:
+
+| Class | Deep representative (its known edges) |
+|---|---|
+| position (`pos_x/pos_y/align`) | negative offsets, right/bottom align, engine truncation of fractions |
+| scale | kx≠ky resolutions (the two-defect single-ratio class, README) |
+| style enums | full enum sweep from schema + one out-of-range |
+| colour | palette index bounds, named vs index forms |
+| place/anchor chains | place cycle group1→group2→group1 |
+| frame/alpha | 0, 1, fractional, stacked over frame |
+| percentage sizing | radar's `width "30%"`, corner-drag refusal |
+
+### 6.6 Mutation testing as coverage proof
+
+Extends §9's seeded-defect doctrine from phases to classes: seed one defect **per class of 6.5**
+(single-ratio shortcut, ignored `HUD_NO_GROW`, wrong truncation, off-by-one clamp, dropped
+export line) and require the net — battery, invariants, round-trip, differential — to catch each
+one in CI. Coverage is *measured* by kills, not hoped for.
+
+### 6.7 LLM role
+
+Unchanged from §7's doctrine: the LLM never reviews per-cvar. It reads the **aggregated**
+drift/anomaly reports and screenshots from the invariant runs and escalates what looks wrong —
+judgment on the residue the machines surfaced, not enumeration.
+
+## 7. The LLM final gate and adjust loop
 
 Runs only after tiers 1–3V are green (and 4, when scheduled). Input per scenario: the current
 screenshot, the scenario's `expect` summary, and `llm-review/rubric.md` (fixed categories: element
@@ -258,7 +358,7 @@ Adjust loop (per the agentic-loop research: hard caps, no-progress detection, es
 The LLM never overrides a deterministic failure, never edits baselines or expected rects to make
 itself pass, and warn-level findings are recorded but non-blocking.
 
-## 7. CI (GitHub Actions sketch)
+## 8. CI (GitHub Actions sketch)
 
 Every push/PR (`pr-tests.yml`, extend the existing one on main):
 
@@ -284,16 +384,20 @@ scenarios only (screenshots are already produced by the deterministic job as art
 the gate cheap; the full sweep is nightly. Job summaries print failing test names only, full logs
 as artifacts (ezHUD TESTING.md rule — keeps agent context small).
 
-## 8. Phased rollout
+## 9. Phased rollout
 
 1. **P1 — harness + first scenarios (lands first):** move `test/*.mjs` → `test/unit/`; commit the
    quake fixture (palette + minimal pak + sha256 manifest); scenario runner from the spike; 3
    scenarios (default cfg, xerial-1080 from `docs/verification.md` — its engine-measured table
    becomes the first `expect.elements` for free, hidden-elements case); interaction cases for
-   drag/keys/save; `pr-tests.yml`. *Exit: a seeded layout bug fails CI.*
-2. **P2 — tier 2 + 3V:** API-contract suite incl. save negatives; Docker-generated baselines;
-   `--record` mode with human-review rule. *Exit: a 1-px palette or charset change fails CI with a
-   visual diff artifact.*
+   drag/keys/save; `pr-tests.yml`. P1 is deliberately **use-case-first**: hand-written scenarios
+   only, drawn from the ~9 real use-cases (§6 preamble) — no generative machinery yet.
+   *Exit: a seeded layout bug fails CI.*
+2. **P2 — tier 2 + 3V + cvar coverage machinery (§6):** API-contract suite incl. save negatives;
+   Docker-generated baselines; `--record` mode with human-review rule; schema extraction from the
+   pinned engine clone, the generative battery (6.1), the invariant loops (6.2), round-trip
+   oracle (6.3). *Exit: a 1-px palette or charset change fails CI with a visual diff artifact,
+   **and** one seeded defect per behavior class of 6.5 is killed (6.6).*
 3. **P3 — LLM gate:** rubric, verdict schema, review runner (screenshots from CI artifacts),
    gate comment wiring, adjust-loop runbook. *Exit: a deliberately mis-positioned element passes
    tiers 1–3V (expectations doctored) and is caught and blocked by the LLM review.*
