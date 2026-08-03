@@ -29,7 +29,7 @@ env:
   # committed). fteqw.diff still applies the remaining files on top. Spelled
   # out in full: the patch is context-sensitive, so a branch name would let
   # the base move under it and turn a deploy into a merge conflict.
-  FTEQW_SHA: f895ba34f42bbe276a56134a6ef4fe162a17a12f
+  FTEQW_SHA: ae3c7a79df7425bf134f8e144ced93cb6744d611
   # The emscripten the spike built and debugged against. Two of our Makefile
   # flags exist purely because of how *this* emscripten dead-strips (NOTES.md);
   # an older one needs a different flag set, and a newer one is untested.
