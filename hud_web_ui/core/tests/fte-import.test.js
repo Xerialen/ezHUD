@@ -171,6 +171,90 @@ test('imported killfeed cvars seed the real adapter ledger and count as applied'
 	assert.equal(bridge.defaults.get('r_tracker'), '1');
 });
 
+test('importing killfeed cvars also emits their FTE-dialect translation (#15 phase 1)', async () => {
+	// Real Bridge again: the translation lives in fte-adapter.js's send(),
+	// which importCfg reaches through bridge.setCvar() -- so an import gets
+	// the same live preview an inspector edit does, with no import.js code
+	// of its own.
+	const state = {
+		protocol: 1,
+		screen: { vid_width: 512, vid_height: 288, scr_con_current: 0 },
+		elements: [{
+			name: 'health', shown: true, place: 'screen', parent: null,
+			align_x: 'left', align_y: 'top', pos_x: 0, pos_y: 0, order: 5, frame: 0,
+			rect: { x: 4, y: 4, w: 45, h: 20 },
+			cvars: { hud_health_scale: '1' },
+		}],
+	};
+	const sent = [];
+	const bridge = new FteBridge({
+		engine: {
+			module: {
+				canvas: { width: 1024, height: 576 },
+				_EZHud_StateJSON: () => 1,
+				UTF8ToString: (ptr) => (ptr ? JSON.stringify(state) : ''),
+			},
+			ftec: { cbufadd: (line) => sent.push(line) },
+		},
+	});
+
+	await importCfg('r_tracker 0\nr_tracker_messages 6\n', 'kf.cfg', bridge);
+
+	assert.ok(sent.includes('r_tracker 0\n'));
+	assert.ok(sent.includes('r_tracker_frags 0\n'));
+	assert.ok(sent.includes('r_tracker_messages 6\n'));
+	assert.ok(sent.includes('r_tracker_lines 6\n'));
+});
+
+test('importing r_tracker_frags never touches FTE\'s tracker-mode cvar of the same name', async () => {
+	// A real config commonly has `r_tracker_frags 1` (ezQuake's "show frags"
+	// toggle, on by default). If that raw line reached cbufadd it would flip
+	// FTE's own r_tracker_frags -- a different cvar sharing the name -- to
+	// "only your kills" regardless of what r_tracker/TRACKER_TRANSLATE said.
+	const state = {
+		protocol: 1,
+		screen: { vid_width: 512, vid_height: 288, scr_con_current: 0 },
+		elements: [{
+			name: 'health', shown: true, place: 'screen', parent: null,
+			align_x: 'left', align_y: 'top', pos_x: 0, pos_y: 0, order: 5, frame: 0,
+			rect: { x: 4, y: 4, w: 45, h: 20 },
+			cvars: { hud_health_scale: '1' },
+		}],
+	};
+	const sent = [];
+	const bridge = new FteBridge({
+		engine: {
+			module: {
+				canvas: { width: 1024, height: 576 },
+				_EZHud_StateJSON: () => 1,
+				UTF8ToString: (ptr) => (ptr ? JSON.stringify(state) : ''),
+			},
+			ftec: { cbufadd: (line) => sent.push(line) },
+		},
+	});
+
+	const report = await importCfg('r_tracker 1\nr_tracker_frags 1\n', 'kf2.cfg', bridge);
+	assert.equal(report.applied, 2);
+	assert.deepEqual(report.refused, []);
+
+	// r_tracker's own translation (r_tracker_frags 2) did reach the engine...
+	assert.ok(sent.includes('r_tracker_frags 2\n'));
+	// ...but the raw ezQuake r_tracker_frags line never did: no cbufadd line is
+	// a bare "r_tracker_frags 1".
+	assert.ok(!sent.includes('r_tracker_frags 1\n'));
+
+	// The import round-trips byte-identical regardless -- the ledger, not the
+	// engine, is what makes the line "applied".
+	// The ledger already holds exactly '1' for both -- an applied line whose
+	// value the engine (here, the ledger standing in for it) still holds
+	// survives byte-identical, same rule exportFullCfg applies everywhere else.
+	bridge.retainedLines = [
+		{ raw: 'r_tracker 1', cvar: 'r_tracker', value: '1', applied: true },
+		{ raw: 'r_tracker_frags 1', cvar: 'r_tracker_frags', value: '1', applied: true },
+	];
+	assert.equal(bridge.exportFullCfg(), 'r_tracker 1\nr_tracker_frags 1\n');
+});
+
 test('the drift report names elements FTE does not register and cvars it never reports back', async () => {
 	const bridge = fakeBridge();
 	bridge.state = async () => bridge.state_();
