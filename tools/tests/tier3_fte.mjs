@@ -132,12 +132,13 @@ const IMPORT_CFG = [
 	'hud_dogtag_pos_x 40',
 	'gl_consolefont povo5f',
 	'scr_newhud 1',
+	'r_tracker 0',
 	'bind SPACE +jump',
 	'',
 ].join('\n');
 const IMPORT_NAME = 'tier3f.cfg';
-const IMPORT_APPLIED = 5;   // everything but the comment and the bind
-const IMPORT_LINES = 7;
+const IMPORT_APPLIED = 6;   // everything but the comment and the bind
+const IMPORT_LINES = 8;
 
 // ---- static server ----------------------------------------------------------
 // hud_web_ui/ at the root, the way tools/fte-web/serve.sh serves it. Nothing is
@@ -473,14 +474,19 @@ try {
 	assert(note === `${IMPORT_NAME}: applied ${IMPORT_APPLIED} of ${IMPORT_LINES} lines.`,
 		`import note reads ${JSON.stringify(note)}`);
 
+	// Two things, not three: scr_newhud and r_tracker are in the adapter's
+	// ledger now, so the synthetic state does report them back — only
+	// gl_consolefont stays unpreviewed.
 	const summary = await page.locator('#fte-drift-summary').textContent();
-	assert(summary === `${IMPORT_NAME}: ${IMPORT_APPLIED} applied, 3 things this preview cannot show`,
+	assert(summary === `${IMPORT_NAME}: ${IMPORT_APPLIED} applied, 2 things this preview cannot show`,
 		`drift summary reads ${JSON.stringify(summary)}`);
 	const drift = await page.locator('#fte-drift-body').textContent();
 	assert(drift.includes('dogtag — 1 cvar'),
 		'the drift panel does not name the element FTE never registered');
-	assert(drift.includes('gl_consolefont, scr_newhud'),
-		'the drift panel does not list the cvars the state cannot report back');
+	assert(drift.includes('gl_consolefont'),
+		'the drift panel does not list the cvar the state cannot report back');
+	assert(!drift.includes('scr_newhud') && !drift.includes('r_tracker'),
+		'a ledger-tracked cvar is still reported as something the preview cannot show');
 	assert(drift.includes('gl_consolefont "povo5f" → gl_font'),
 		'the drift panel does not report the charset cvar translation');
 	assert(drift.includes('1 line carried verbatim'),
@@ -518,7 +524,61 @@ try {
 
 	console.log('  5 export: one edited line rewritten, the rest byte-identical');
 
-	// ---- 6. demo picker -----------------------------------------------------
+	// ---- 6. hud system + killfeed -------------------------------------------
+	// Both blocks are synthetic on this backend: the adapter's ledger answers
+	// for cvars the plugin ignores. The sections must render, start on what
+	// actually happened (+scr_newhud 1 from boot, r_tracker 0 from the import),
+	// carry the honesty note, and still land every edit in the export.
+	await page.waitForSelector('#hudmodes .seg__item');
+	assert(await page.locator('#hudmodes .seg__item', { hasText: 'New' })
+		.getAttribute('data-on') === 'true',
+	'the HUD system switch does not show "New" active after boot');
+	const modeNotes = await page.locator('#hudmodes .font-state').allTextContents();
+	assert(modeNotes.some((t) => t.includes("Preview can't mirror this on the FTE backend")),
+		'the HUD system section is missing the synthetic honesty note');
+
+	const sentBeforeModes = (await sentLines()).length;
+	await page.locator('#hudmodes .seg__item', { hasText: 'Classic' }).click();
+	await page.waitForFunction(() => [...document.querySelectorAll('#hudmodes .seg__item')]
+		.some((b) => b.textContent === 'Classic' && b.dataset.on === 'true'));
+	const modeLines = (await sentLines()).slice(sentBeforeModes);
+	assert(modeLines.includes('scr_newhud 0'),
+		`clicking Classic sent ${JSON.stringify(modeLines)} instead of scr_newhud 0`);
+
+	const killfeedNotes = await page.locator('#killfeed .font-state').allTextContents();
+	assert(killfeedNotes.some((t) => t.includes("Preview can't mirror this on the FTE backend")),
+		'the killfeed section is missing the synthetic honesty note');
+	// The imported r_tracker 0 seeded the ledger (con_fragmessages stays at its
+	// default 1), so the seg must start on Console messages.
+	assert(await page.locator('#killfeed .seg__item', { hasText: 'Console messages' })
+		.getAttribute('data-on') === 'true',
+	'the imported r_tracker 0 did not seed the killfeed seg');
+
+	const sentBeforeKillfeed = (await sentLines()).length;
+	await page.locator('#killfeed .seg__item', { hasText: 'Dedicated killfeed' }).click();
+	await page.waitForFunction(() => [...document.querySelectorAll('#killfeed .seg__item')]
+		.some((b) => b.textContent === 'Dedicated killfeed' && b.dataset.on === 'true'));
+	const killfeedLines = (await sentLines()).slice(sentBeforeKillfeed);
+	assert(killfeedLines.includes('r_tracker 1') && killfeedLines.includes('con_fragmessages 0'),
+		`the killfeed seg sent ${JSON.stringify(killfeedLines)} instead of the pair`);
+
+	// §D4's round trip: the imported r_tracker line is rewritten to the edit,
+	// scr_newhud likewise, con_fragmessages (never in the file) is appended,
+	// and everything else — including case 5's scale edit — stays put.
+	const exported2 = (await page.evaluate(async () =>
+		(await import('/core/bridge.js')).currentBridge().exportFullCfg())).split('\n');
+	const expected2 = IMPORT_CFG.split('\n').slice(0, -1).map((line) =>
+		line === 'hud_health_scale 2' ? 'hud_health_scale "3"'
+			: line === 'r_tracker 0' ? 'r_tracker "1"'
+				: line === 'scr_newhud 1' ? 'scr_newhud "0"'
+					: line);
+	expected2.push('', '// added in ez-hud', 'con_fragmessages "0"', '');
+	assert(JSON.stringify(exported2) === JSON.stringify(expected2),
+		`killfeed/newhud export mismatch:\n--- got ---\n${exported2.join('\n')}\n--- want ---\n${expected2.join('\n')}`);
+
+	console.log('  6 hud system + killfeed: synthetic blocks render, note shown, edits exported');
+
+	// ---- 7. demo picker -----------------------------------------------------
 	await page.waitForFunction(() => document.querySelector('#fte-demo')?.options.length >= 3);
 	const sentBeforeDemo = (await sentLines()).length;
 	await page.selectOption('#fte-demo', 'qw/demos/tb4gf_book_vs_s.mvd');
@@ -529,9 +589,9 @@ try {
 	assert(demoLines.length === 1 && demoLines[0] === 'playdemo demos/tb4gf_book_vs_s.mvd',
 		`the demo picker sent ${JSON.stringify(demoLines)}`);
 
-	console.log('  6 demo picker: playdemo through the host path, gamedir-relative');
+	console.log('  7 demo picker: playdemo through the host path, gamedir-relative');
 
-	// ---- 7. reload guard ----------------------------------------------------
+	// ---- 8. reload guard ----------------------------------------------------
 	// The contract the boot race fix bought, not its timing: whatever FTEC
 	// registered on document is gone once the engine is drawing, so the editor
 	// gets its own keystrokes and location.reload() is not blocked.
@@ -555,14 +615,14 @@ try {
 	assert(await page.evaluate(() => window.__fake.engineEvents.length) === eventsBefore,
 		'FTE\'s own keyboard listener is still on document after the engine came up');
 
-	console.log('  7 reload guard: engine key and beforeunload listeners released');
+	console.log('  8 reload guard: engine key and beforeunload listeners released');
 
 	// The whole suite ran against a page whose engine script never downloaded.
 	assert(engineScript.length && engineScript.every((status) => status === 404),
 		`ftewebglcl.js should 404 here, got ${JSON.stringify(engineScript)}`);
 	assert(crashes.length === 0, `uncaught page errors: ${crashes.join('; ')}`);
 
-	console.log('Tier 3 FTE: 7 cases passed with no wasm (ftewebglcl.js 404 throughout)');
+	console.log('Tier 3 FTE: 8 cases passed with no wasm (ftewebglcl.js 404 throughout)');
 } finally {
 	await page.close();
 	await browser.close();

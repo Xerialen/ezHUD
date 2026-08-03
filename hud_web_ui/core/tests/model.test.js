@@ -142,6 +142,48 @@ test('inline state covers fonts, view, hud modes, and registered defaults', () =
 	}]);
 });
 
+test('killfeed derivation: absence is unknown, and the three canonical combos read right', () => {
+	const model = new Model();
+	const base = {
+		protocol: 1,
+		screen: { vid_width: 320, vid_height: 200, scr_con_current: 0 },
+		elements: [],
+	};
+
+	// No block at all: the engine does not expose it, which is not "off".
+	model.applyState(structuredClone(base));
+	assert.equal(model.killfeed, null);
+	assert.equal(model.killfeedSummary, '');
+
+	const withFeed = (r_tracker, con_fragmessages, cl_useimagesinfraglog) => {
+		const state = structuredClone(base);
+		state.killfeed = {
+			r_tracker, con_fragmessages, cl_useimagesinfraglog,
+			r_tracker_time: '4', r_tracker_frags: '1',
+		};
+		model.applyState(state);
+		return model;
+	};
+
+	// Dedicated feed with weapon icons.
+	withFeed('1', '0', '1');
+	assert.equal(model.killfeed.r_tracker, '1');
+	assert.match(model.killfeedSummary, /dedicated tracker \(weapon icons\)\.$/);
+	assert.doesNotMatch(model.killfeedSummary, /console/);
+
+	// Console-only classic obituaries.
+	withFeed('0', '1', '0');
+	assert.match(model.killfeedSummary, /only among console messages \(classic text obituaries\)/);
+
+	// Both at once.
+	withFeed('1', '1', '1');
+	assert.match(model.killfeedSummary, /dedicated tracker \(weapon icons\), and also to the console/);
+
+	// Neither: still a sentence, not silence.
+	withFeed('0', '0', '0');
+	assert.match(model.killfeedSummary, /nowhere/);
+});
+
 test('save derivation checks the active directory listing and safe names', () => {
 	const model = new Model();
 	model.applyConfigs({

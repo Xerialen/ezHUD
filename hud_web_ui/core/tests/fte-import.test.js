@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { appliable, importCfg, parseCfgLine } from '../../fte/import.js';
+import { Bridge as FteBridge } from '../fte-adapter.js';
 
 test('parseCfgLine reads the three assignment forms', () => {
 	assert.deepEqual(parseCfgLine('hud_health_pos_x 12'), { cvar: 'hud_health_pos_x', value: '12' });
@@ -33,7 +34,9 @@ test('parseCfgLine drops a trailing comment but not a // inside quotes', () => {
 
 test('appliable covers hud_ and the con-size family, and never hud_web', () => {
 	for (const name of ['hud_health_pos_x', 'hud_recalculate', 'scr_newhud', 'cl_sbar',
-		'vid_conwidth', 'vid_conheight', 'vid_conautoscale']) {
+		'vid_conwidth', 'vid_conheight', 'vid_conautoscale', 'viewsize',
+		'r_tracker', 'r_tracker_time', 'r_tracker_align_right',
+		'con_fragmessages', 'cl_useimagesinfraglog']) {
 		assert.equal(appliable(name), true, name);
 	}
 	for (const name of ['hud_web', 'hud_web_port', 'bind', 'alias', 'cl_maxfps', 'name', '', null]) {
@@ -125,6 +128,47 @@ test('gl_consolefont applies and is translated to FTE\'s gl_font', async () => {
 	// original may be marked applied/retained.
 	assert.deepEqual(bridge.retainedLines.map((l) => [l.cvar, l.applied]),
 		[['gl_consolefont', true]]);
+});
+
+test('imported killfeed cvars seed the real adapter ledger and count as applied', async () => {
+	// The real Bridge this time, not the fake: the point is the ledger — the
+	// engine ignores these cvars, so only the adapter can report them back.
+	const state = {
+		protocol: 1,
+		screen: { vid_width: 512, vid_height: 288, scr_con_current: 0 },
+		elements: [{
+			name: 'health', shown: true, place: 'screen', parent: null,
+			align_x: 'left', align_y: 'top', pos_x: 0, pos_y: 0, order: 5, frame: 0,
+			rect: { x: 4, y: 4, w: 45, h: 20 },
+			cvars: { hud_health_scale: '1' },
+		}],
+	};
+	const sent = [];
+	const bridge = new FteBridge({
+		engine: {
+			module: {
+				canvas: { width: 1024, height: 576 },
+				_EZHud_StateJSON: () => 1,
+				UTF8ToString: (ptr) => (ptr ? JSON.stringify(state) : ''),
+			},
+			ftec: { cbufadd: (line) => sent.push(line) },
+		},
+	});
+
+	const report = await importCfg('r_tracker 0\ncon_fragmessages 1\nviewsize 110\n', 'kf.cfg', bridge);
+	assert.equal(report.applied, 3);
+	assert.equal(report.retained, 0);
+	assert.deepEqual(report.refused, []);
+	// Not "unpreviewed" either: the synthetic blocks report every one back.
+	assert.deepEqual(report.unpreviewed, []);
+
+	const next = await bridge.state();
+	assert.equal(next.killfeed.r_tracker, '0');
+	assert.equal(next.killfeed.con_fragmessages, '1');
+	assert.equal(next.hud_modes.viewsize, 110);
+	// Pre-import ledger seeds are the defaults, so only genuine edits would be
+	// appended by an export later.
+	assert.equal(bridge.defaults.get('r_tracker'), '1');
 });
 
 test('the drift report names elements FTE does not register and cvars it never reports back', async () => {

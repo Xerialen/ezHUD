@@ -762,7 +762,14 @@ qbool HUD_Web_CommandAllowed(const char *line)
 		 * shape also depends on these two, and viewsize alone can remove the bar
 		 * entirely by driving sb_lines to 0 (cl_screen.c:324). */
 		(name_length == 7 && !memcmp(start, "cl_sbar", 7)) ||
-		(name_length == 8 && !memcmp(start, "viewsize", 8));
+		(name_length == 8 && !memcmp(start, "viewsize", 8)) ||
+		/* The killfeed: r_tracker itself plus every r_tracker_* knob as a
+		 * prefix, and the two cvars that decide whether frags also (or only)
+		 * go through the console. The Cvar_Find below still refuses a made-up
+		 * r_tracker-prefixed name. */
+		(name_length >= 9 && !memcmp(start, "r_tracker", 9)) ||
+		(name_length == 16 && !memcmp(start, "con_fragmessages", 16)) ||
+		(name_length == 21 && !memcmp(start, "cl_useimagesinfraglog", 21));
 	if (!cvar_prefix) {
 		return false;
 	}

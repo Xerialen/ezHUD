@@ -37,7 +37,36 @@ const BARE_COMMANDS = new Set([
 	'hud_recalculate', 'vid_restart', 'cfg_save', 'move', 'align', 'place',
 	'toggleconsole', 'fontload', 'hud_export', 'hud_reset_layout',
 ]);
-const PREFIXES = ['hud_', 'vid_', 'scr_', 'cl_hud', 'font_'];
+const PREFIXES = ['hud_', 'vid_', 'scr_', 'cl_hud', 'font_', 'r_tracker'];
+// Exact cvar names outside those prefixes the editor legitimately writes:
+// the killfeed pair and the classic bar's shape, mirroring hud_web.c's
+// allowlist so the two backends accept the same things.
+const EXACT_CVARS = new Set([
+	'gl_consolefont', 'gl_font', 'con_fragmessages', 'cl_useimagesinfraglog',
+	'cl_sbar', 'viewsize',
+]);
+
+// Cvars the FTE plugin ignores but the editor edits anyway. The adapter keeps
+// their last written value in a ledger so state() can synthesize the
+// hud_modes and killfeed blocks the plugin's export lacks -- honestly flagged
+// `synthetic`, because the preview pixels will not follow them.
+// Seeds are ezQuake's registered defaults; scr_newhud is re-seeded from
+// boot.js's own launch arguments (it forces +scr_newhud 1 for the preview),
+// so the HUD-system switch never claims "Classic" while the page drew the new
+// HUD.
+const LEDGER_SEED = [
+	['scr_newhud', '0'], ['cl_sbar', '0'], ['viewsize', '100'],
+	['cl_hud', '1'], ['scr_compacthud', '0'],
+	['r_tracker', '1'], ['con_fragmessages', '1'], ['cl_useimagesinfraglog', '0'],
+	['r_tracker_inconsole', '0'], ['r_tracker_time', '4'], ['r_tracker_messages', '20'],
+	['r_tracker_frags', '1'], ['r_tracker_streaks', '0'], ['r_tracker_flags', '0'],
+	['r_tracker_pickups', '0'], ['r_tracker_scale', '1'], ['r_tracker_align_right', '1'],
+];
+const KILLFEED_CVARS = [
+	'r_tracker', 'con_fragmessages', 'cl_useimagesinfraglog', 'r_tracker_inconsole',
+	'r_tracker_time', 'r_tracker_messages', 'r_tracker_frags', 'r_tracker_streaks',
+	'r_tracker_flags', 'r_tracker_pickups', 'r_tracker_scale', 'r_tracker_align_right',
+];
 
 function commandAllowed(line) {
 	if (/[;\r\n$]/.test(line)) {
@@ -53,7 +82,7 @@ function commandAllowed(line) {
 	// gl_font is FTE's spelling of gl_consolefont — same file convention
 	// (textures/charsets/<name>.png), different cvar. The import pipeline
 	// translates one into the other; both go through this gate.
-	if (BARE_COMMANDS.has(name) || name === 'gl_consolefont' || name === 'gl_font') {
+	if (BARE_COMMANDS.has(name) || EXACT_CVARS.has(name)) {
 		return true;
 	}
 	return PREFIXES.some((p) => name.startsWith(p));
@@ -92,6 +121,11 @@ export class Bridge {
 		// never took one", which exportFullCfg() treats as "append nothing":
 		// without a baseline every cvar looks changed.
 		this.defaults = null;
+		// Last written value of every cvar the plugin ignores but the editor
+		// edits (see LEDGER_SEED). send() records writes into it; state() reads
+		// it back out as the synthetic hud_modes/killfeed blocks.
+		this.ledger = new Map(LEDGER_SEED);
+		this.seededFromBoot = false;
 	}
 
 	static fromLocation() {
@@ -115,6 +149,71 @@ export class Bridge {
 	ready() {
 		const m = this.#module();
 		return Boolean(m && m._EZHud_StateJSON && this.#ftec());
+	}
+
+	// boot.js launches the engine with +cvar value pairs (notably +scr_newhud 1
+	// for the preview), which the ledger's ezQuake-default seeds would
+	// contradict. Read the actual launch arguments once, so the HUD-system
+	// switch starts on what the page really booted with — never a lie.
+	#seedFromBoot() {
+		if (this.seededFromBoot) {
+			return;
+		}
+		const args = this.#module()?.arguments;
+		if (!Array.isArray(args)) {
+			return;
+		}
+		this.seededFromBoot = true;
+		for (let i = 0; i + 1 < args.length; i++) {
+			const name = String(args[i]);
+			if (name.startsWith('+') && this.ledger.has(name.slice(1))) {
+				this.ledger.set(name.slice(1), String(args[i + 1]));
+			}
+		}
+	}
+
+	// If `line` assigns a ledger-tracked cvar, remember the value. This is what
+	// stands in for the engine reporting it back: the plugin ignores the cvar,
+	// so without the ledger the next state() would quietly undo the control.
+	#recordWrite(line) {
+		// Boot's seed first, or an edit made before the first poll would be
+		// clobbered when state() applies the launch arguments over it.
+		this.#seedFromBoot();
+		const m = /^(\S+)\s+(?:"([^"]*)"|(.*?))\s*$/.exec(String(line).trim());
+		if (!m) {
+			return;
+		}
+		const name = m[1].toLowerCase();
+		if (this.ledger.has(name)) {
+			this.ledger.set(name, m[2] !== undefined ? m[2] : m[3]);
+		}
+	}
+
+	// Same field names and derivations as hud_web_state.c's hud_modes emission,
+	// so the model cannot tell the backends apart -- except for `synthetic`,
+	// which is the flag the view keys its honesty note on.
+	#syntheticModes() {
+		const n = (name) => Number(this.ledger.get(name)) || 0;
+		const newhud = n('scr_newhud');
+		return {
+			scr_newhud: newhud,
+			cl_hud: n('cl_hud'),
+			cl_sbar: n('cl_sbar'),
+			viewsize: n('viewsize'),
+			scr_compacthud: n('scr_compacthud'),
+			classic_drawn: newhud !== 1,
+			new_drawn: newhud !== 0,
+			standard_bar: Boolean(n('cl_sbar')) || n('viewsize') < 100,
+			synthetic: true,
+		};
+	}
+
+	#syntheticKillfeed() {
+		const out = { synthetic: true };
+		for (const name of KILLFEED_CVARS) {
+			out[name] = this.ledger.get(name);
+		}
+		return out;
 	}
 
 	// Thrown with status 0 rather than 403 on purpose: model.applyError maps
@@ -141,6 +240,12 @@ export class Bridge {
 		const canvas = m.canvas
 			?? (typeof document === 'undefined' ? null : document.getElementById('canvas'));
 		state.physical = [canvas?.width ?? 0, canvas?.height ?? 0];
+		// The plugin's export has no hud_modes and no killfeed cvars. Synthesize
+		// both from the ledger so the panels render on this backend too; the
+		// `synthetic` flags keep the view honest about pixels not following.
+		this.#seedFromBoot();
+		state.hud_modes = this.#syntheticModes();
+		state.killfeed = this.#syntheticKillfeed();
 		this.lastState = state;
 		return state;
 	}
@@ -214,6 +319,7 @@ export class Bridge {
 		if (!commandAllowed(line)) {
 			throw new BridgeError('command not permitted', { status: 403 });
 		}
+		this.#recordWrite(line);
 		ftec.cbufadd(line + '\n');
 		return { ok: true };
 	}
@@ -247,13 +353,23 @@ export class Bridge {
 			out.set(`hud_${e.name}_pos_y`, String(e.pos_y ?? 0));
 			out.set(`hud_${e.name}_order`, String(e.order ?? 0));
 		}
+		// The ledger too: these cvars never appear in the plugin's state, and
+		// without them here an editor-set scr_newhud or r_tracker would vanish
+		// from the export — the exact dishonesty the ledger exists to prevent.
+		for (const [cvar, value] of this.ledger) {
+			out.set(cvar, String(value));
+		}
 		return out;
 	}
 
 	/** Just the hud cvars, sorted, the way ezQuake's `hud_export` writes them. */
 	exportHudCfg() {
 		const lines = ['// HUD exported by ez-hud (FTE-web preview backend)', ''];
-		const snapshot = [...this.cvarSnapshot()].sort(([a], [b]) => a.localeCompare(b));
+		// hud_ only, matching ezQuake's hud_export: the ledger's scr_/r_tracker
+		// entries belong to a full config, not a HUD overlay.
+		const snapshot = [...this.cvarSnapshot()]
+			.filter(([cvar]) => cvar.startsWith('hud_'))
+			.sort(([a], [b]) => a.localeCompare(b));
 		for (const [cvar, value] of snapshot) {
 			lines.push(`${cvar} "${value}"`);
 		}

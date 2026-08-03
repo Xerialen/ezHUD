@@ -186,6 +186,28 @@ def main():
     if log_text(args.log).count("HUD_CONTRACT_ALIAS_RAN") != count:
         raise Failure("an allowlisted-prefix name that exists only as an alias executed")
 
+    # Killfeed controls: the r_tracker prefix and the two exact names are
+    # allowlisted, and what is set must come back in the state's killfeed block
+    # (values are the engine's own cvar strings).
+    for command in ("r_tracker 0", "con_fragmessages 0", "cl_useimagesinfraglog 1"):
+        expect_status(args.port, token, command, expected=200)
+
+    def killfeed_state():
+        _, _, body = request(args.port, "GET", "/state", token)
+        return json.loads(body).get("killfeed") or {}
+
+    wait_for(lambda: killfeed_state().get("r_tracker") == "0"
+             and killfeed_state().get("con_fragmessages") == "0"
+             and killfeed_state().get("cl_useimagesinfraglog") == "1",
+             "killfeed cvars reflected in /state")
+    expect_status(args.port, token, "r_tracker 1", expected=200)
+    wait_for(lambda: killfeed_state().get("r_tracker") == "1",
+             "r_tracker 1 reflected in /state")
+    # The prefix conjures no cvars: a made-up r_tracker-prefixed name fails the
+    # Cvar_Find guard, and names off the allowlist stay refused.
+    expect_status(args.port, token, "r_trackerfoo 1")
+    expect_status(args.port, token, "r_speeds 1")
+
     status, _, configs_body = request(args.port, "GET", "/configs", token)
     if status != 200:
         raise Failure(f"/configs failed: HTTP {status}")

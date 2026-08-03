@@ -465,6 +465,40 @@ export class Model {
 		return `Drawing ${parts.join(' and ')}.`;
 	}
 
+	// ---- killfeed -----------------------------------------------------------
+	// Where kills are announced is three cvars that read like one setting:
+	// r_tracker (the dedicated feed), con_fragmessages (frag lines among normal
+	// console messages) and cl_useimagesinfraglog (text obituaries vs weapon
+	// icons). Values arrive as the engine's own cvar strings; absence of the
+	// whole block means the engine does not expose it, which is different from
+	// "everything off" and is why null is returned rather than defaults.
+
+	get killfeed() {
+		return this.state?.killfeed ?? null;
+	}
+
+	// One sentence for what the current combination does, same spirit as
+	// modeSummary: only the editor sees all three cvars at once.
+	get killfeedSummary() {
+		const k = this.killfeed;
+		if (!k) {
+			return '';
+		}
+		const tracker = Number(k.r_tracker) !== 0;
+		const inConsole = Number(k.con_fragmessages) !== 0;
+		const style = Number(k.cl_useimagesinfraglog) !== 0 ? 'weapon icons' : 'classic text obituaries';
+		if (tracker && inConsole) {
+			return `Kills go to the dedicated tracker (${style}), and also to the console.`;
+		}
+		if (tracker) {
+			return `Kills go to the dedicated tracker (${style}).`;
+		}
+		if (inConsole) {
+			return `Kills appear only among console messages (${style}).`;
+		}
+		return 'Kills are announced nowhere — both the tracker and console frag messages are off.';
+	}
+
 	// cl_sbar cannot take effect below viewsize 100 (sbar.c:156). Saying so beats
 	// offering a control that silently does nothing.
 	get sbarInert() {

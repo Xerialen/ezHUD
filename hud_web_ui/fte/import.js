@@ -23,7 +23,15 @@ const CACHE_PREFIX = '/_/';
 // whole ezQuake config, most of which has nothing to do with the HUD and some
 // of which would be actively rude to run.
 const APPLY_EXACT = new Set([
-	'scr_newhud', 'cl_sbar',
+	'scr_newhud', 'cl_sbar', 'viewsize',
+	// The killfeed set. FTE's engine ignores them, but the adapter's ledger
+	// tracks each one, so applying seeds the synthetic killfeed/hud_modes
+	// blocks and keeps the export honest. Unknown cvars are simply created on
+	// the FTE side, so the engine-side set is harmless. No TRANSLATE entries:
+	// FTE has no equivalent feature to point them at.
+	'r_tracker', 'con_fragmessages', 'cl_useimagesinfraglog', 'r_tracker_inconsole',
+	'r_tracker_time', 'r_tracker_messages', 'r_tracker_frags', 'r_tracker_streaks',
+	'r_tracker_flags', 'r_tracker_pickups', 'r_tracker_scale', 'r_tracker_align_right',
 	// The con-size family: it decides what "console pixels" means, so the
 	// preview is laid out at the wrong size without it.
 	'vid_conwidth', 'vid_conheight', 'vid_conautoscale',
