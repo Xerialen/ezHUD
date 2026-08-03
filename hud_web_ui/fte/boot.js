@@ -153,7 +153,15 @@
 			// dm3 instead of untextured walls.
 			'id1/qrp-dm3.pk3': 'id1/qrp-dm3.pk3',
 			'qw/demos/hudtest_src.mvd': 'qw/demos/hudtest_src.mvd',
-			'qw/demos/tb4gf_book_vs_s.mvd': 'qw/demos/tb4gf_book_vs_s.mvd'
+			'qw/demos/tb4gf_book_vs_s.mvd': 'qw/demos/tb4gf_book_vs_s.mvd',
+			// Stats_NewMap auto-loads "fragfile" (engine/client/fragstats.c) with
+			// no fallback; without it Stats_Evaluate never classifies an
+			// obituary, so the killfeed tracker's FragEvent queue stays empty
+			// forever even though the rect renders (#15). The public dist ships
+			// it at qw/fragfile.dat; the dev server may not have staged a copy
+			// yet, and a 404 here is tolerated the same as any other listed
+			// file (prejs.js drops the run dependency and moves on).
+			'qw/fragfile.dat': 'qw/fragfile.dat'
 		},
 
 		// Explicit, so prejs.js does not build a command line out of the query
