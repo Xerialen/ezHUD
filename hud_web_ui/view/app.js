@@ -1192,13 +1192,17 @@ function renderModes() {
 
 // The FTE adapter synthesizes these blocks from its own ledger because the
 // plugin ignores the cvars; the pixels will not move, and saying so beats
-// letting the user conclude the control is broken (PARITY.md:93). Used
-// as-is by renderModes, which has no FTE equivalent for any of its cvars.
+// letting the user conclude the control is broken (PARITY.md:93). Since the
+// engine pin gained the plugin-side scr_newhud (#15 P1), the Classic/New/Both
+// switch itself drives the engine for real — the note now covers only what is
+// still ledger-backed: the QW262 overlay and the readback (the engine does not
+// report these cvars back yet, so the shown values are the editor's own ledger).
 function syntheticNote() {
 	const note = document.createElement('p');
 	note.className = 'font-state';
 	note.textContent =
-		"Preview can't mirror this on the FTE backend — the setting still lands in your exported config.";
+		'The Classic/New/Both switch drives the engine preview for real. ' +
+		"The QW262 overlay can't be previewed on the FTE backend; every setting still lands in your exported config.";
 	return note;
 }
 

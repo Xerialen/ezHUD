@@ -578,9 +578,14 @@ try {
 	assert(await page.locator('#hudmodes .seg__item', { hasText: 'New' })
 		.getAttribute('data-on') === 'true',
 	'the HUD system switch does not show "New" active after boot');
+	// The engine pin carries the plugin-side scr_newhud (#15 P1), so the note
+	// now claims the switch drives the preview for real and scopes the caveat
+	// to the QW262 overlay + ledger-backed readback.
 	const modeNotes = await page.locator('#hudmodes .font-state').allTextContents();
-	assert(modeNotes.some((t) => t.includes("Preview can't mirror this on the FTE backend")),
-		'the HUD system section is missing the synthetic honesty note');
+	assert(modeNotes.some((t) => t.includes('drives the engine preview for real')),
+		'the HUD system section is missing the updated P1 honesty note');
+	assert(!modeNotes.some((t) => t.includes("Preview can't mirror this on the FTE backend")),
+		'the HUD system section still shows the pre-P1 blanket note');
 
 	const sentBeforeModes = (await sentLines()).length;
 	await page.locator('#hudmodes .seg__item', { hasText: 'Classic' }).click();
