@@ -62,10 +62,65 @@ index bc04299..f1d3b58 100644
  		FTEC.evcb.jaxis = evjaxis;
  		FTEC.evcb.jorientation = evjorientation;
 diff --git a/plugins/ezhud/hud.c b/plugins/ezhud/hud.c
-index 89a8df4..b983c8d 100644
+index a8a117176..0a9134435 100644
 --- a/plugins/ezhud/hud.c
 +++ b/plugins/ezhud/hud.c
-@@ -1579,3 +1579,160 @@ void HUD_Sort(void)
+@@ -784,6 +784,46 @@ void HUD_Recalculate_f(void)
+     HUD_Recalculate();
+ }
+ 
++// Restore every element's position and visibility to what HUD_Register asked
++// for. Ported from ezQuake's engine-integration.diff (HUD_ResetLayout_f),
++// which the editor's 'Reset positions...' button has always targeted -- this
++// plugin never had the command, so on the FTE-web preview it silently did
++// nothing ("Unknown command") while the same button worked against the real
++// ezQuake bridge. `reset <name>` (HUD_Reset_f above) only centres one
++// element and is not a substitute. Deliberately limited to placement and
++// visibility -- colours, scales and per-element params are left alone.
++void HUD_ResetLayout_f(void)
++{
++	hud_t *hud;
++	int changed = 0;
++
++	for (hud = hud_huds; hud; hud = hud->next) {
++		cvar_t *vars[6];
++		int i;
++
++		vars[0] = hud->show;
++		vars[1] = hud->place;
++		vars[2] = hud->align_x;
++		vars[3] = hud->align_y;
++		vars[4] = hud->pos_x;
++		vars[5] = hud->pos_y;
++
++		for (i = 0; i < 6; i++) {
++			// Not every element registers every one of these: HUD_Register is
++			// given NULL for the ones that do not apply (see the pos_x/align_x
++			// and pos_y/align_y guards above).
++			if (vars[i] && vars[i]->defaultstr && strcmp(vars[i]->string, vars[i]->defaultstr)) {
++				Cvar_Set(vars[i], vars[i]->defaultstr);
++				changed++;
++			}
++		}
++	}
++
++	HUD_Recalculate();
++	Com_Printf("HUD layout reset: %d value%s restored to default\n", changed, changed == 1 ? "" : "s");
++}
++
++
+ void HUD_Export_f(void)
+ {
+ 	char line[8192];
+@@ -845,6 +885,7 @@ void HUD_Init(void)
+ 	Cmd_AddCommand ("togglehud", HUD_Toggle_f);
+ 	Cmd_AddCommand ("align", HUD_Align_f);
+ 	Cmd_AddCommand ("hud_recalculate", HUD_Recalculate_f);
++	Cmd_AddCommand ("hud_reset_layout", HUD_ResetLayout_f);
+ 	Cmd_AddCommand ("hud_export", HUD_Export_f);
+ 
+ 	// Register the hud items.
+@@ -1582,3 +1623,160 @@ void HUD_Sort(void)
      // Recalculate elements so vars are parsed.
      HUD_Recalculate();
  }
