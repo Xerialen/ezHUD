@@ -1206,16 +1206,16 @@ function syntheticNote() {
 	return note;
 }
 
-// Killfeed-specific: since core/fte-adapter.js's TRACKER_TRANSLATE mirrors
-// on/off, timing and line count onto FTE's own r_tracker_frags/_time/_lines,
-// those genuinely do preview here. Only the parts with no FTE-side feature at
-// all -- image style, ezQuake's console-integration cvars, and colours --
-// stay unpreviewable, so this note is narrower than syntheticNote() above.
+// Killfeed-specific: the plugin's vx_tracker.c registers the ezQuake-dialect
+// r_tracker* cvars natively now (#15 P2), so the preview follows every one of
+// them for real. Only pickups (r_tracker_pickups is a stub -- no event source
+// in the engine yet) and the weapon-icon style (best-effort image lookup)
+// stay honest exceptions, so this note is narrower than syntheticNote() above.
 function killfeedSyntheticNote() {
 	const note = document.createElement('p');
 	note.className = 'font-state';
 	note.textContent =
-		"Preview can't mirror style, console-integration or colours on the FTE backend — on/off, timing and line count do. All settings still land in your exported config.";
+		"Everything previews for real except pickups (no event source in the engine yet) and weapon-icon style (best-effort). All settings still land in your exported config.";
 	return note;
 }
 

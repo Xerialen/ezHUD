@@ -281,11 +281,7 @@ test('killfeed and classic-bar cvars pass the allowlist; the rest of r_ stays re
 	const fake = fakeEngine(oneElement);
 	const bridge = new Bridge(fake);
 	const accepted = [
-		// r_tracker itself is left out of this list on purpose: it is one of
-		// TRACKER_TRANSLATE's mappings (see the killfeed dialect translation
-		// tests above), so sending it also emits r_tracker_frags and would
-		// break the 1:1 line count this test checks.
-		'r_tracker_scale 1.5', 'r_tracker_align_right 0',
+		'r_tracker 1', 'r_tracker_scale 1.5', 'r_tracker_align_right 0',
 		'con_fragmessages 0', 'cl_useimagesinfraglog 1', 'cl_sbar 1', 'viewsize 110',
 	];
 	for (const line of accepted) {
@@ -372,98 +368,26 @@ test('the editor-facing surface app.js needs is all present', async () => {
 	assert.deepEqual(configs.available, []);
 });
 
-// ---- killfeed dialect translation (#15 phase 1) ----------------------------
-// Verified against fte-team/fteqw@f937b9d engine/client/fragstats.c: line 83
-// registers r_tracker_frags 0/1/2 (0=vanilla obituaries, 2=all kills), line 89
-// registers r_tracker_lines with "r_tracker_messages" only as CVARAFCD's
-// alt-name, and line 84 gives r_tracker_time the same name and unit (seconds)
-// in both dialects.
+// ---- killfeed cvars now speak the ezQuake dialect natively (#15 P2) --------
+// The plugin's vx_tracker.c registers r_tracker/r_tracker_frags/etc. itself,
+// so a plain write is a plain write: no dialect translation, no name
+// collision, nothing for the adapter to do beyond the ordinary allowlist and
+// ledger bookkeeping already covered above.
 
-test('r_tracker on/off is mirrored onto FTE\'s r_tracker_frags 0/2', async () => {
-	const fake = fakeEngine(oneElement);
-	const bridge = new Bridge(fake);
-	await bridge.send('r_tracker 1');
-	await bridge.send('r_tracker 0');
-	assert.deepEqual(fake.sent, ['r_tracker 1\n', 'r_tracker_frags 2\n', 'r_tracker 0\n', 'r_tracker_frags 0\n']);
-});
-
-test('r_tracker_messages is mirrored onto FTE\'s r_tracker_lines', async () => {
-	const fake = fakeEngine(oneElement);
-	const bridge = new Bridge(fake);
-	await bridge.setCvar('r_tracker_messages', 6);
-	assert.deepEqual(fake.sent, ['r_tracker_messages 6\n', 'r_tracker_lines 6\n']);
-});
-
-test('r_tracker_time is routed through the translation table but emits nothing extra', async () => {
-	const fake = fakeEngine(oneElement);
-	const bridge = new Bridge(fake);
-	await bridge.setCvar('r_tracker_time', 4);
-	// Same name and unit in both dialects (fragstats.c:84): one write, not two.
-	assert.deepEqual(fake.sent, ['r_tracker_time 4\n']);
-});
-
-test('translated FTE-dialect writes never enter the ledger, snapshot or export', async () => {
+test('r_tracker_frags writes pass straight through, no translation or suppression', async () => {
 	const fake = fakeEngine(oneElement);
 	const bridge = new Bridge(fake);
 	await bridge.state();
 	bridge.captureDefaults();
-	await bridge.send('r_tracker 1');
-	await bridge.state();
-	// r_tracker_frags is also an unrelated *ezQuake* cvar (the "show frags"
-	// content toggle, seeded '1' in LEDGER_SEED) -- the collision this test
-	// guards against. If the translated write clobbered the ledger, this
-	// would read '2' (FTE's tracker-mode value) instead of the untouched
-	// ezQuake seed.
-	assert.equal(bridge.cvarSnapshot().get('r_tracker_frags'), '1');
-	assert.equal(bridge.cvarSnapshot().has('r_tracker_lines'), false);
-	const out = bridge.exportFullCfg();
-	assert.doesNotMatch(out, /r_tracker_lines/);
-	// r_tracker itself changed (default '1' -> sent '1' is unchanged actually;
-	// use a genuine change to prove the *ezQuake* line, not the translation,
-	// is what shows up in the export).
-	await bridge.send('r_tracker 0');
-	await bridge.state();
-	const out2 = bridge.exportFullCfg();
-	assert.match(out2, /r_tracker "0"/);
-	assert.doesNotMatch(out2, /r_tracker_frags "[02]"/);
-});
-
-test('the ezQuake "show frags" toggle never reaches cbufadd, but still lands in ledger/export', async () => {
-	const fake = fakeEngine(oneElement);
-	const bridge = new Bridge(fake);
-	await bridge.state();
-	bridge.captureDefaults();
-
-	// r_tracker_frags here is ezQuake's *content* toggle (renderKillfeed's
-	// "Show frags" checkbox), not FTE's tracker-mode cvar of the same name.
-	// Sending it must be silent on the wire...
 	await bridge.send('r_tracker_frags 0');
-	assert.deepEqual(fake.sent, []);
+	assert.deepEqual(fake.sent, ['r_tracker_frags 0\n']);
 
-	// ...yet still readable back from the synthetic killfeed block...
 	const state = await bridge.state();
 	assert.equal(state.killfeed.r_tracker_frags, '0');
 
-	// ...and still exported, because the ledger recorded it even though the
-	// engine was never told.
 	bridge.retainedLines = [{ raw: 'bind SPACE +jump', cvar: null, applied: false }];
 	const out = bridge.exportFullCfg();
 	assert.match(out, /r_tracker_frags "0"/);
-});
-
-test('the FTE-dialect names pass the allowlist under the shared r_tracker prefix', async () => {
-	const fake = fakeEngine(oneElement);
-	const bridge = new Bridge(fake);
-	// r_tracker_frags is deliberately excluded here: SUPPRESS_RAW mutes it on
-	// the wire regardless of who sends it (see the dedicated suppression test
-	// above) -- this test is about the allowlist gate, which a muted write
-	// still has to clear (no 403), just with nothing to observe in fake.sent.
-	for (const line of ['r_tracker_lines 8', 'r_tracker_fadetime 1']) {
-		await bridge.send(line);
-	}
-	assert.deepEqual(fake.sent, ['r_tracker_lines 8\n', 'r_tracker_fadetime 1\n']);
-	await bridge.send('r_tracker_frags 2'); // accepted (no throw), but silent
-	assert.deepEqual(fake.sent, ['r_tracker_lines 8\n', 'r_tracker_fadetime 1\n']);
 });
 
 test('loadFace goes through send, so an unlisted face name is refused the same way', async () => {
