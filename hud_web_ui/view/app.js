@@ -1356,9 +1356,12 @@ function buildReset(changes) {
 	const body = document.createElement('p');
 	body.className = 'save__path';
 	const count = changes.reduce((n, e) => n + e.fields.length, 0);
+	const defaultsKnown = model.resetDefaultsKnown;
 	body.textContent = count
 		? `${count} value${count === 1 ? '' : 's'} across ${changes.length} element${changes.length === 1 ? '' : 's'} will go back to what ezQuake registered.`
-		: 'Everything already matches the defaults. Nothing would change.';
+		: defaultsKnown
+			? 'Everything already matches the defaults. Nothing would change.'
+			: 'This preview backend does not report registered defaults, so no per-element count is available -- Reset will still restore every element\'s placement and visibility.';
 	form.append(body);
 
 	if (count) {
@@ -1369,7 +1372,9 @@ function buildReset(changes) {
 		list.textContent = names.slice(0, 12).join(', ') +
 			(names.length > 12 ? `, and ${names.length - 12} more` : '');
 		form.append(list);
+	}
 
+	if (count || !defaultsKnown) {
 		const scope = document.createElement('div');
 		scope.className = 'save__warn';
 		const p = document.createElement('p');
@@ -1389,7 +1394,11 @@ function buildReset(changes) {
 	go.type = 'button';
 	go.className = 'btn btn--primary';
 	go.textContent = 'Reset';
-	go.disabled = !count;
+	// Disabled only when this backend both knows the defaults AND confirms
+	// nothing differs from them. When it cannot report defaults at all (the
+	// FTE-web preview -- see model.resetDefaultsKnown), the button stays live:
+	// hud_reset_layout is a safe, idempotent restore either way.
+	go.disabled = count === 0 && defaultsKnown;
 	go.addEventListener('click', async () => {
 		go.disabled = true;
 		go.textContent = 'Resetting…';
