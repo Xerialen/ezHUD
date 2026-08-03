@@ -531,6 +531,18 @@ export class Model {
 		return String(current).toLowerCase() !== String(fallback).toLowerCase();
 	}
 
+	// The FTE-web backend's EZHud_StateJSON() has no `defaults` block per element
+	// (unlike the ezQuake bridge's /state) -- see tools/tests/tier3_fte.mjs's
+	// fixture comment. Without it every element's resetChanges is unconditionally
+	// empty, which used to disable the Reset button outright: hud_reset_layout
+	// (the command the button sends) still works and is idempotent, but the UI
+	// made it unreachable on the one backend that most needed the fix (#15
+	// tracker-cvar-wiring). This flag lets the view tell "nothing to reset" from
+	// "this backend cannot say" and keep the button enabled either way.
+	get resetDefaultsKnown() {
+		return this.elements.some((e) => e.defaults);
+	}
+
 	get resetChanges() {
 		const out = [];
 		for (const element of this.elements) {

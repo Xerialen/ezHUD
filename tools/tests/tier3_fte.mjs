@@ -259,11 +259,35 @@ try {
 			return best;
 		}
 
+		// Registered defaults, snapshotted before any write -- what
+		// HUD_ResetLayout_f (plugins/ezhud/hud.c) restores placement/visibility
+		// to. Ported to the FTE plugin because the editor's "Reset positions..."
+		// button always sent `hud_reset_layout`, but the plugin had no such
+		// command; the fake engine needs the same behaviour to keep this suite
+		// honest about the fix.
+		const resetDefaults = new Map(fake.state.elements.map((e) => [e.name, structuredClone(e)]));
+
 		// What the engine would do with the line, not what it was told: a cvar
 		// the plugin never registered is set in the engine but absent from the
 		// next state export, so folding it in would hide the drift report's whole
 		// reason to exist.
 		function fold(line) {
+			if (line.trim().toLowerCase() === 'hud_reset_layout') {
+				for (const element of fake.state.elements) {
+					const base = resetDefaults.get(element.name);
+					if (!base) {
+						continue;
+					}
+					for (const field of ['place', 'align_x', 'align_y', 'pos_x', 'pos_y']) {
+						element[field] = base[field];
+					}
+					element.shown = base.shown;
+					if (element.rect && base.rect) {
+						element.rect = { ...base.rect };
+					}
+				}
+				return;
+			}
 			// core/fte-adapter.js's wireLine() now prefixes every cvar write
 			// with `set` (v2 of #15's set-prefix fix); strip it here the same
 			// way FTE's own Cmd_Set does, case-insensitively, so folding sees
@@ -679,7 +703,39 @@ try {
 
 	console.log('  8 reload guard: engine key and beforeunload listeners released');
 
-	// ---- 9. volume ----------------------------------------------------------
+	// ---- 9. reset positions --------------------------------------------------
+	// The tracker cvar-wiring fix (fix/tracker-cvar-wiring): plugins/ezhud/hud.c
+	// gained HUD_ResetLayout_f, ported from ezQuake's engine-integration.diff, so
+	// the FTE-web preview's "Reset positions..." button (which has always sent
+	// `hud_reset_layout`) actually does something instead of hitting "Unknown
+	// command". Move an element, then prove the button reverts it. Run before
+	// the volume case below, which ends in a page reload that kills the fake.
+	await page.locator('.tree__row[data-name="health"]').click();
+	await page.evaluate(async () => {
+		const bridge = (await import('/core/bridge.js')).currentBridge();
+		await bridge.setCvar('hud_health_pos_x', 250);
+		await bridge.setCvar('hud_health_pos_y', 260);
+	});
+	await page.waitForFunction(() => window.__fake.state.elements
+		.find((e) => e.name === 'health').pos_x === '250');
+
+	const sentBeforeReset = (await sentLines()).length;
+	await page.locator('button', { hasText: 'Reset positions' }).first().click();
+	await page.waitForSelector('#reset-dialog[open]');
+	await page.locator('#reset-dialog button', { hasText: 'Reset' }).click();
+	await page.waitForFunction((n) => window.__fake.sent.length > n, sentBeforeReset);
+	const resetLines = (await sentLines()).slice(sentBeforeReset);
+	assert(resetLines.includes('hud_reset_layout'),
+		`the reset button sent ${JSON.stringify(resetLines)} instead of the bare hud_reset_layout command`);
+	await page.waitForFunction(() => window.__fake.state.elements
+		.find((e) => e.name === 'health').pos_x === '16');
+	const healthAfterReset = named(await engineState(), 'health');
+	assert(healthAfterReset.pos_x === '16' && healthAfterReset.pos_y === '24',
+		`reset did not restore health's registered pos_x/pos_y, got ${JSON.stringify(healthAfterReset)}`);
+
+	console.log('  9 reset positions: hud_reset_layout reverts a moved element to its registered default');
+
+	// ---- 10. volume -----------------------------------------------------------
 	// The page's own sound knob (#10). The engine side is a plain cvar write, so
 	// the assertions are about the contract around it: the quiet boot default,
 	// the mute/unmute round trip, the imported line that must never apply, and
@@ -737,14 +793,14 @@ try {
 	assert(await page.locator('#fte-mute').getAttribute('aria-pressed') === 'false',
 		'the unmuted state did not survive the reload');
 
-	console.log('  9 volume: quiet boot default, mute round trip, import refusal, persistence');
+	console.log('  10 volume: quiet boot default, mute round trip, import refusal, persistence');
 
 	// The whole suite ran against a page whose engine script never downloaded.
 	assert(engineScript.length && engineScript.every((status) => status === 404),
 		`ftewebglcl.js should 404 here, got ${JSON.stringify(engineScript)}`);
 	assert(crashes.length === 0, `uncaught page errors: ${crashes.join('; ')}`);
 
-	console.log('Tier 3 FTE: 9 cases passed with no wasm (ftewebglcl.js 404 throughout)');
+	console.log('Tier 3 FTE: 10 cases passed with no wasm (ftewebglcl.js 404 throughout)');
 } catch (err) {
 	// A CI-only failure is undiagnosable from a TimeoutError alone; dump what
 	// the editor actually did before dying. Temporary debug aid — cheap enough
