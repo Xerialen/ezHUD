@@ -701,6 +701,14 @@ function beginDrag(ev, item) {
 }
 
 function renderInspector() {
+	// Never rebuild under the user's caret. A state tick that arrives mid-edit
+	// (an import just changed this element, another client moved it) would
+	// replace the focused input and silently discard what was typed — the edit
+	// looks accepted and never lands. Deferring is safe: the tick after blur
+	// still sees the changed fingerprint below and rebuilds then.
+	if (el.inspector.contains(document.activeElement)) {
+		return;
+	}
 	// The inspector is full of inputs the user is mid-edit in. Rebuilding it on a
 	// frame tick loses focus and caret position for no benefit.
 	if (!stale('inspector', model.elementFingerprint(model.selected), '|', model.selected,
