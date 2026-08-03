@@ -23,11 +23,13 @@ concurrency:
 
 env:
   # Xerialen/fteqw@ezhud-base: fte-team master f937b9d + our own plugin work
-  # (#15 — d01ffbc0 scr_newhud 0/1/2, incl. fteqw.diff's ezquakeisms.c hunk
+  # (#15 — d01ffbc0 scr_newhud 0/1/2, plus f895ba34f's plugins/ezhud/vx_tracker.c,
+  # a ported ezQuake tracker registering the ezQuake-dialect r_tracker* cvars
+  # NATIVELY (killfeed, #15 P2), incl. fteqw.diff's ezquakeisms.c hunk
   # committed). fteqw.diff still applies the remaining files on top. Spelled
   # out in full: the patch is context-sensitive, so a branch name would let
   # the base move under it and turn a deploy into a merge conflict.
-  FTEQW_SHA: d01ffbc0f64302fc7ea48b4dd8893aea94dc4694
+  FTEQW_SHA: f895ba34f42bbe276a56134a6ef4fe162a17a12f
   # The emscripten the spike built and debugged against. Two of our Makefile
   # flags exist purely because of how *this* emscripten dead-strips (NOTES.md);
   # an older one needs a different flag set, and a newer one is untested.

@@ -73,66 +73,13 @@ const KILLFEED_CVARS = [
 	'r_tracker_flags', 'r_tracker_pickups', 'r_tracker_scale', 'r_tracker_align_right',
 ];
 
-// Value-transforming dialect translation for the killfeed, keyed by the
-// ezQuake cvar name send() just wrote. Each entry returns the FTE-dialect
-// writes (name/value pairs) that make the vanilla FTE tracker (verified
-// against fte-team/fteqw@f937b9d engine/client/fragstats.c) do the same
-// thing, so the preview follows an inspector edit or an imported line
-// exactly the way it follows a native FTE cvar.
-//
-// IMPORTANT COLLISION: ezQuake's own `r_tracker_frags` (in KILLFEED_CVARS
-// above, the "show frags" content toggle -- see renderKillfeed's
-// toggle('Show frags', 'r_tracker_frags') in view/app.js) is a *different
-// cvar that happens to share a name* with FTE's `r_tracker_frags`
-// (fragstats.c:83, the tracker's 0/1/2 mode switch that `r_tracker`
-// translates to). Writing the FTE side must never touch the ledger entry
-// for the ezQuake cvar of the same name -- see #emitTranslation(), which
-// writes straight to cbufadd and deliberately skips #recordWrite.
-const TRACKER_TRANSLATE = new Map([
-	// ezQuake: 0/1 on/off. FTE: 0 = vanilla obituaries only, 2 = all kills in
-	// the tracker (fragstats.c:83). ezQuake's "on" means "show everyone's
-	// kills", i.e. FTE's 2, not its unused middle value 1.
-	['r_tracker', (value) => [['r_tracker_frags', Number(value) ? '2' : '0']]],
-	// Identical name and unit (seconds, fragstats.c:84) in both dialects, so
-	// there is nothing to transform today -- but FTE also has
-	// r_tracker_fadetime (fragstats.c:85, how long a line takes to fully fade
-	// once fading starts) with no ezQuake equivalent yet. Kept as a mapping
-	// entry (that emits nothing) so a future fadetime pairing has exactly one
-	// place to add it, per the issue's phase 1 notes.
-	['r_tracker_time', () => []],
-	// FTE's cvar is named r_tracker_lines; fragstats.c:89 registers
-	// "r_tracker_messages" only as CVARAFCD's alt-name for its own console
-	// alias resolution, which this wasm build's ezhud plugin does not expose
-	// to the JS side -- write the primary name explicitly rather than assume
-	// the alias resolves through the embind boundary.
-	['r_tracker_messages', (value) => [['r_tracker_lines', String(value)]]],
-]);
-
-// ezQuake-dialect cvars whose raw write must never reach cbufadd, because
-// FTE registers a cvar under the identical name with different semantics.
-// Audited against fragstats.c's full registration list (Cvar_Register calls,
-// fragstats.c:632-638: r_tracker_frags, r_tracker_time, r_tracker_fadetime,
-// r_tracker_x/y/w, r_tracker_lines) versus every entry in KILLFEED_CVARS
-// above:
-//   - r_tracker_frags: collision (see TRACKER_TRANSLATE's comment) -> here.
-//   - r_tracker_time: same name, same unit (seconds) -> safe to forward.
-//   - everything else in KILLFEED_CVARS (con_fragmessages,
-//     cl_useimagesinfraglog, r_tracker_inconsole, r_tracker_messages,
-//     r_tracker_streaks, r_tracker_flags, r_tracker_pickups, r_tracker_scale,
-//     r_tracker_align_right) has no FTE registration at all -> forwarding
-//     just creates an inert cvar FTE never reads, which is harmless.
-// The value still reaches the ledger (#recordWrite runs first in send()), so
-// export and the synthetic killfeed block stay honest; only the engine write
-// that would otherwise stomp FTE's real tracker-mode cvar is skipped.
-const SUPPRESS_RAW = new Set(['r_tracker_frags']);
-
 function formatCvarLine(name, value) {
 	const text = String(value);
 	return /\s/.test(text) || text === '' ? `${name} "${text}"` : `${name} ${text}`;
 }
 
-// Parses "<cvar> <value>" / "<cvar> \"value\"" the same way #recordWrite does,
-// shared so translation reads exactly what was just sent.
+// Parses "<cvar> <value>" / "<cvar> \"value\"", shared by #recordWrite so the
+// ledger records exactly what was just sent.
 function parseAssignment(line) {
 	const m = /^(\S+)\s+(?:"([^"]*)"|(.*?))\s*$/.exec(String(line).trim());
 	if (!m) {
@@ -258,31 +205,6 @@ export class Bridge {
 		}
 		if (this.ledger.has(parsed.name)) {
 			this.ledger.set(parsed.name, parsed.value);
-		}
-	}
-
-	// Writes the FTE-dialect side of a killfeed cvar straight to cbufadd,
-	// deliberately bypassing #recordWrite: the ledger holds ezQuake-dialect
-	// values keyed by ezQuake names, and (per TRACKER_TRANSLATE's collision
-	// note above) an FTE-dialect name can be identical to an unrelated
-	// ezQuake cvar's name. Recording this write into the ledger would
-	// silently overwrite that ezQuake cvar's value and corrupt every export
-	// from here on -- exactly the dishonesty the ledger exists to prevent.
-	#emitTranslation(line) {
-		const parsed = parseAssignment(line);
-		const translate = parsed && TRACKER_TRANSLATE.get(parsed.name);
-		if (!translate) {
-			return;
-		}
-		const ftec = this.#ftec();
-		if (!ftec) {
-			return; // send() already required this for the primary write
-		}
-		for (const [name, value] of translate(parsed.value)) {
-			const translated = formatCvarLine(name, value);
-			if (commandAllowed(translated)) {
-				ftec.cbufadd(translated + '\n');
-			}
 		}
 	}
 
@@ -417,21 +339,9 @@ export class Bridge {
 			throw new BridgeError('command not permitted', { status: 403 });
 		}
 		this.#recordWrite(line);
-		// SUPPRESS_RAW: the ledger write above already made this value honest for
-		// export/synthetic state; forwarding it here as well would hand FTE's
-		// real, differently-meaning cvar of the same name a value it was never
-		// meant to receive (see SUPPRESS_RAW's comment for the audit).
-		const parsedForSuppress = parseAssignment(line);
-		if (!parsedForSuppress || !SUPPRESS_RAW.has(parsedForSuppress.name)) {
-			ftec.cbufadd(line + '\n');
-		}
-		// Value-transforming killfeed translation, on every write regardless of
-		// origin (inspector or import.js's importCfg, since both call send()/
-		// setCvar() -- see fte-adapter.js's module comment and TRACKER_TRANSLATE
-		// above). Export is untouched: #emitTranslation never records into the
-		// ledger, and cvarSnapshot() only ever reads the ledger and the plugin's
-		// own state.
-		this.#emitTranslation(line);
+		// The plugin now registers this ezQuake-dialect cvar itself (#15 P2), so
+		// a plain write is correct — no dialect translation needed.
+		ftec.cbufadd(line + '\n');
 		return { ok: true };
 	}
 

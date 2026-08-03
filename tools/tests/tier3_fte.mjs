@@ -230,12 +230,7 @@ try {
 	await page.waitForFunction(() => Boolean(window.Module && window.EZHUD_FTE));
 
 	await page.evaluate(({ state, canvas }) => {
-		// tracker holds the FTE-dialect cvars core/fte-adapter.js's
-		// TRACKER_TRANSLATE writes (r_tracker_frags/_lines/_fadetime): they name
-		// no element, so `owner()` below never matches them, and without this a
-		// translated write would silently vanish rather than prove it reached
-		// the fake engine (#15 phase 1).
-		const fake = { state, sent: [], engineEvents: [], tracker: {} };
+		const fake = { state, sent: [], engineEvents: [] };
 		window.__fake = fake;
 
 		// The adapter reads `physical` off the canvas backing store, so this is
@@ -275,13 +270,6 @@ try {
 			}
 			const cvar = m[1].toLowerCase();
 			const value = m[2] !== undefined ? m[2] : m[3];
-			// FTE's own tracker cvars (fragstats.c), the translation's target
-			// names -- not owned by any element, so they must be folded here
-			// rather than falling through owner()'s hud_<element>_ matching.
-			if (cvar === 'r_tracker_frags' || cvar === 'r_tracker_lines' || cvar === 'r_tracker_fadetime') {
-				fake.tracker[cvar] = value;
-				return;
-			}
 			const hit = owner(cvar);
 			if (!hit) {
 				return;
@@ -595,19 +583,15 @@ try {
 	assert(modeLines.includes('scr_newhud 0'),
 		`clicking Classic sent ${JSON.stringify(modeLines)} instead of scr_newhud 0`);
 
-	// Narrower than the HUD-system note (#15 phase 1): on/off, timing and line
-	// count now preview via TRACKER_TRANSLATE, so only style/console-integration/
-	// colours are called out as unpreviewable.
+	// The plugin's vx_tracker.c registers the ezQuake-dialect r_tracker* cvars
+	// natively now (#15 P2), so the note narrows to the two remaining honest
+	// exceptions: pickups (stubbed, no event source) and weapon-icon style.
 	const killfeedNotes = await page.locator('#killfeed .font-state').allTextContents();
-	assert(killfeedNotes.some((t) => t.includes("style, console-integration or colours")),
-		'the killfeed section is missing the narrowed dialect-translation honesty note');
+	assert(killfeedNotes.some((t) => t.includes('pickups') && t.includes('weapon-icon style')),
+		'the killfeed section is missing the narrowed #15 P2 honesty note');
 	assert(!killfeedNotes.some((t) => t.includes("Preview can't mirror this on the FTE backend")),
 		'the killfeed section still shows the old blanket honesty note');
 
-	// The imported r_tracker 0 also wrote FTE's own r_tracker_frags 0
-	// (fragstats.c:83), folded here by the fake engine above.
-	assert((await page.evaluate(() => window.__fake.tracker.r_tracker_frags)) === '0',
-		'importing r_tracker 0 did not translate onto FTE\'s r_tracker_frags');
 	// The imported r_tracker 0 seeded the ledger (con_fragmessages stays at its
 	// default 1), so the seg must start on Console messages.
 	assert(await page.locator('#killfeed .seg__item', { hasText: 'Console messages' })
@@ -619,15 +603,14 @@ try {
 	await page.waitForFunction(() => [...document.querySelectorAll('#killfeed .seg__item')]
 		.some((b) => b.textContent === 'Dedicated killfeed' && b.dataset.on === 'true'));
 	const killfeedLines = (await sentLines()).slice(sentBeforeKillfeed);
+	// This branch does not carry PR #17's `set`-prefix wiring (fix/fte-set-prefix
+	// is a separate branch) -- the wire format here is still bare lines.
 	assert(killfeedLines.includes('r_tracker 1') && killfeedLines.includes('con_fragmessages 0'),
 		`the killfeed seg sent ${JSON.stringify(killfeedLines)} instead of the pair`);
-	// Flipping "Where kills appear" to Dedicated must send BOTH dialects: the
-	// ezQuake pair above, and FTE's own r_tracker_frags 2 (fragstats.c:83, "all
-	// kills") so the live preview actually follows.
-	assert(killfeedLines.includes('r_tracker_frags 2'),
-		`the killfeed seg sent ${JSON.stringify(killfeedLines)}, missing the FTE-dialect r_tracker_frags 2`);
-	assert((await page.evaluate(() => window.__fake.tracker.r_tracker_frags)) === '2',
-		'the FTE-dialect write did not reach the fake engine');
+	// No more FTE-dialect side-write: the plugin's own r_tracker IS the cvar
+	// the tracker reads, so the ezQuake pair above is the whole story now.
+	assert(!killfeedLines.includes('r_tracker_frags 2'),
+		`the killfeed seg sent ${JSON.stringify(killfeedLines)}, but the translation layer is retired -- no r_tracker_frags side-write should appear`);
 
 	// §D4's round trip: the imported r_tracker line is rewritten to the edit,
 	// scr_newhud likewise, con_fragmessages (never in the file) is appended,
