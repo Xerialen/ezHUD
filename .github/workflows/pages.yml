@@ -22,11 +22,12 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # fte-team/fteqw f937b9d, the base commit spikes/fte-web/fteqw.diff was cut
-  # against (NOTES.md, "The five engine patches"). Spelled out in full: the
-  # patch is context-sensitive, so a branch name would let upstream move the
-  # ground under it and turn a deploy into a merge conflict.
-  FTEQW_SHA: f937b9d88f71fc4429db5fe56c6a98d922711b2e
+  # Xerialen/fteqw@ezhud-base: fte-team master f937b9d + our own plugin work
+  # (#15 — d01ffbc0 scr_newhud 0/1/2, incl. fteqw.diff's ezquakeisms.c hunk
+  # committed). fteqw.diff still applies the remaining files on top. Spelled
+  # out in full: the patch is context-sensitive, so a branch name would let
+  # the base move under it and turn a deploy into a merge conflict.
+  FTEQW_SHA: d01ffbc0f64302fc7ea48b4dd8893aea94dc4694
   # The emscripten the spike built and debugged against. Two of our Makefile
   # flags exist purely because of how *this* emscripten dead-strips (NOTES.md);
   # an older one needs a different flag set, and a newer one is untested.
@@ -61,7 +62,7 @@ jobs:
       - name: Check out fteqw at the pinned commit
         uses: actions/checkout@v4
         with:
-          repository: fte-team/fteqw
+          repository: Xerialen/fteqw
           ref: ${{ env.FTEQW_SHA }}
           path: fteqw
 
