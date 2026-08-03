@@ -85,7 +85,9 @@ test('send passes allowlisted commands through to cbufadd, newline included', as
 	const bridge = new Bridge(fake);
 	await bridge.send('hud_recalculate');
 	await bridge.send('hud_health_pos_x 12');
-	assert.deepEqual(fake.sent, ['hud_recalculate\n', 'hud_health_pos_x 12\n']);
+	// hud_recalculate is a bare command; the cvar write gets wireLine()'s
+	// `set` prefix (see the dedicated wire-format tests below).
+	assert.deepEqual(fake.sent, ['hud_recalculate\n', 'set hud_health_pos_x 12\n']);
 });
 
 test('send refuses chaining, expansion, newlines, hud_web and anything unlisted', async () => {
@@ -118,9 +120,9 @@ test('setCvar quotes values with spaces, and the empty value', async () => {
 	await bridge.setCvar('hud_clock_format', '%H:%M %p');
 	await bridge.setCvar('hud_clock_format', '');
 	assert.deepEqual(fake.sent, [
-		'hud_health_pos_x 12\n',
-		'hud_clock_format "%H:%M %p"\n',
-		'hud_clock_format ""\n',
+		'set hud_health_pos_x 12\n',
+		'set hud_clock_format "%H:%M %p"\n',
+		'set hud_clock_format ""\n',
 	]);
 });
 
@@ -287,7 +289,7 @@ test('killfeed and classic-bar cvars pass the allowlist; the rest of r_ stays re
 	for (const line of accepted) {
 		await bridge.send(line);
 	}
-	assert.deepEqual(fake.sent, accepted.map((line) => `${line}\n`));
+	assert.deepEqual(fake.sent, accepted.map((line) => `set ${line}\n`));
 	for (const line of ['r_speeds 1', 'r_dynamic 0', 'exec autoexec.cfg']) {
 		await assert.rejects(() => bridge.send(line), (err) => {
 			assert.equal(err.status, 403);
@@ -322,7 +324,7 @@ test('volume passes exactly, and never leaks into the snapshot or an export', as
 
 	// Exact cvar, not a prefix: the page's sound knob, and only it.
 	await bridge.setCvar('volume', 0.4);
-	assert.deepEqual(fake.sent, ['volume 0.4\n']);
+	assert.deepEqual(fake.sent, ['set volume 0.4\n']);
 	for (const line of ['volumefoo 1', 'vol 1']) {
 		await assert.rejects(() => bridge.send(line), (err) => {
 			assert.equal(err.status, 403);
@@ -380,7 +382,7 @@ test('r_tracker_frags writes pass straight through, no translation or suppressio
 	await bridge.state();
 	bridge.captureDefaults();
 	await bridge.send('r_tracker_frags 0');
-	assert.deepEqual(fake.sent, ['r_tracker_frags 0\n']);
+	assert.deepEqual(fake.sent, ['set r_tracker_frags 0\n']);
 
 	const state = await bridge.state();
 	assert.equal(state.killfeed.r_tracker_frags, '0');
@@ -388,6 +390,68 @@ test('r_tracker_frags writes pass straight through, no translation or suppressio
 	bridge.retainedLines = [{ raw: 'bind SPACE +jump', cvar: null, applied: false }];
 	const out = bridge.exportFullCfg();
 	assert.match(out, /r_tracker_frags "0"/);
+});
+
+// ---- wire format: `set` for cvars, bare for commands (v2 of #15's set-prefix
+// fix, re-implemented on the P2 adapter after the translation layer that
+// blocked it was retired) ----------------------------------------------------
+// FTE's `set` (cmd.c:4466) assigns a registered cvar exactly like a bare
+// write and creates an unregistered one silently instead of logging "Unknown
+// command"; the plugin does not register every GUI cvar (cl_hud,
+// scr_compacthud), so every write goes out uniformly `set`-prefixed and only
+// the bare-command allowlist (hud_recalculate, fontload, ...) stays bare.
+
+test('cvar writes are prefixed with `set`; bare commands are not', async () => {
+	const fake = fakeEngine(oneElement);
+	const bridge = new Bridge(fake);
+	await bridge.send('hud_recalculate');
+	await bridge.send('vid_restart');
+	await bridge.send('cl_hud 0');          // no plugin registration at all
+	await bridge.send('scr_compacthud 1');  // ditto
+	await bridge.send('r_tracker 1');       // plugin-registered (#15 P2), same treatment
+	assert.deepEqual(fake.sent, [
+		'hud_recalculate\n',
+		'vid_restart\n',
+		'set cl_hud 0\n',
+		'set scr_compacthud 1\n',
+		'set r_tracker 1\n',
+	]);
+});
+
+test('loadFace\'s fontload stays bare — it is a command, not a cvar', async () => {
+	const fake = fakeEngine(oneElement);
+	const bridge = new Bridge(fake);
+	await bridge.loadFace('qw-font3.otf');
+	assert.deepEqual(fake.sent, ['fontload qw-font3.otf\n']);
+});
+
+test('the ledger seeds scr_newhud from a +set triad, not just a bare +pair', async () => {
+	const fake = fakeEngine(oneElement);
+	// boot.js now launches scr_newhud via `+set scr_newhud 1` (wireLine's
+	// uniform `set` format); the triad must consume both its tokens or the
+	// scan would misread `scr_newhud` itself as a bare +arg with no value.
+	fake.engine.module.arguments = [
+		'-manifest', 'default.fmf', '+plug_sbar', '3', '+set', 'scr_newhud', '1',
+	];
+	const bridge = new Bridge(fake);
+	const state = await bridge.state();
+	assert.equal(state.hud_modes.scr_newhud, 1);
+	assert.equal(state.hud_modes.classic_drawn, false);
+	assert.equal(state.hud_modes.new_drawn, true);
+});
+
+test('a +set triad and a bare +pair in the same argument list both seed the ledger', async () => {
+	const fake = fakeEngine(oneElement);
+	fake.engine.module.arguments = [
+		'-manifest', 'default.fmf',
+		'+plug_sbar', '3',           // bare pair, not ledger-tracked: ignored
+		'+set', 'scr_newhud', '1',   // triad
+		'+cl_sbar', '1',             // bare pair, ledger-tracked
+	];
+	const bridge = new Bridge(fake);
+	const state = await bridge.state();
+	assert.equal(state.hud_modes.scr_newhud, 1);
+	assert.equal(state.hud_modes.cl_sbar, 1);
 });
 
 test('loadFace goes through send, so an unlisted face name is refused the same way', async () => {
