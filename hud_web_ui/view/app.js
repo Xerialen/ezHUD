@@ -1208,14 +1208,20 @@ function syntheticNote() {
 
 // Killfeed-specific: the plugin's vx_tracker.c registers the ezQuake-dialect
 // r_tracker* cvars natively now (#15 P2), so the preview follows every one of
-// them for real. Only pickups (r_tracker_pickups is a stub -- no event source
-// in the engine yet) and the weapon-icon style (best-effort image lookup)
-// stay honest exceptions, so this note is narrower than syntheticNote() above.
+// them for real. Three honest exceptions remain, so this note is narrower
+// than syntheticNote() above but not empty: pickups (r_tracker_pickups is a
+// stub -- no event source in the engine yet), the weapon-icon style
+// (best-effort image lookup, verified live against the real dist -- #15
+// fragfile proof: cl_useimagesinfraglog 1 produced no visible icon and the
+// engine held to the text row instead), and silencing the console echo
+// (con_fragmessages 0 does not stop the engine's own obituary prints --
+// verified live, same proof run -- a passthrough gap in the engine, not this
+// editor).
 function killfeedSyntheticNote() {
 	const note = document.createElement('p');
 	note.className = 'font-state';
 	note.textContent =
-		"Everything previews for real except pickups (no event source in the engine yet) and weapon-icon style (best-effort). All settings still land in your exported config.";
+		"Everything previews for real except pickups (no event source in the engine yet), weapon-icon style (best-effort) and silencing the console echo. All settings still land in your exported config.";
 	return note;
 }
 

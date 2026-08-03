@@ -48,6 +48,7 @@ id1/qrp-dm3.pk3
 index.html
 qw/demos/hudtest_src.mvd
 qw/demos/tb4gf_book_vs_s.mvd
+qw/fragfile.dat
 ui.css
 view/app.js"
 

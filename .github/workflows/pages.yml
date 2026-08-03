@@ -214,7 +214,7 @@ jobs:
           for f in index.html ui.css favicon.svg default.fmf \
                    ftewebglcl.js ftewebglcl.wasm \
                    id1/pak0.pak id1/nquake.pk3 id1/gpl_maps.pk3 id1/qrp-dm3.pk3 \
-                   qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd; do
+                   qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd qw/fragfile.dat; do
             if [ ! -s "$f" ]; then
               echo "dist: missing or empty $f" >&2
               exit 1
@@ -232,6 +232,7 @@ jobs:
               ./ftewebglcl.js|./ftewebglcl.wasm) ;;
               ./id1/pak0.pak|./id1/nquake.pk3|./id1/gpl_maps.pk3|./id1/qrp-dm3.pk3) ;;
               ./qw/demos/hudtest_src.mvd|./qw/demos/tb4gf_book_vs_s.mvd) ;;
+              ./qw/fragfile.dat) ;;
               # core/ is flat; a nested path means core/tests/ came along.
               ./core/*/*) bad="$bad $f" ;;
               ./core/*.js) ;;

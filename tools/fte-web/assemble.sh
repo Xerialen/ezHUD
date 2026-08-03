@@ -23,7 +23,10 @@ ui_dir=$repo_dir/hud_web_ui
 if [ ! -d "$site_dir" ]; then
 	echo "assemble.sh: no site directory at $site_dir" >&2
 	echo "  It holds the game data the engine loads: default.fmf, id1/pak0.pak," >&2
-	echo "  id1/pak1.pak and qw/demos/*.mvd. Create it and put those there first." >&2
+	echo "  id1/pak1.pak, qw/demos/*.mvd and qw/fragfile.dat (killfeed" >&2
+	echo "  classification, tools/fte-web/fragfile.dat -- copy it in; without it" >&2
+	echo "  the tracker never renders a row, #15). Create it and put those there" >&2
+	echo "  first." >&2
 	exit 1
 fi
 

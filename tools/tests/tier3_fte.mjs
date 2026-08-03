@@ -592,11 +592,14 @@ try {
 		`clicking Classic sent ${JSON.stringify(modeLines)} instead of set scr_newhud 0`);
 
 	// The plugin's vx_tracker.c registers the ezQuake-dialect r_tracker* cvars
-	// natively now (#15 P2), so the note narrows to the two remaining honest
-	// exceptions: pickups (stubbed, no event source) and weapon-icon style.
+	// natively now (#15 P2), so the note narrows to three remaining honest
+	// exceptions: pickups (stubbed, no event source), weapon-icon style, and
+	// silencing the console echo (con_fragmessages does not stop the engine's
+	// own print -- verified live against the real dist, #15 fragfile proof).
 	const killfeedNotes = await page.locator('#killfeed .font-state').allTextContents();
-	assert(killfeedNotes.some((t) => t.includes('pickups') && t.includes('weapon-icon style')),
-		'the killfeed section is missing the narrowed #15 P2 honesty note');
+	assert(killfeedNotes.some((t) => t.includes('pickups') && t.includes('weapon-icon style')
+		&& t.includes('console echo')),
+		'the killfeed section is missing the narrowed #15 P2/P3 honesty note');
 	assert(!killfeedNotes.some((t) => t.includes("Preview can't mirror this on the FTE backend")),
 		'the killfeed section still shows the old blanket honesty note');
 

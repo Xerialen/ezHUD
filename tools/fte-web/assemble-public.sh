@@ -109,6 +109,14 @@ done
 # gamedirs mount.
 copy "$repo_dir/tools/fte-web/default.fmf" default.fmf
 
+# fragfile.dat drives Stats_Evaluate's obituary classification
+# (engine/client/fragstats.c); Stats_NewMap auto-loads it by the bare name
+# "fragfile" and there is no fallback, so without it in qw/ the killfeed
+# tracker's FragEvent queue never fills (#15). ezQuake-sourced, GPLv2 --
+# see the file's own header. Repo-owned like default.fmf, not game data:
+# it ships with us regardless of GAME_DATA_DIR.
+copy "$repo_dir/tools/fte-web/fragfile.dat" qw/fragfile.dat
+
 # gpl_maps.pk3 is load-bearing: both bundled demos are on dm3, which the
 # shareware pak0 does not contain and FTE cannot download at runtime from a
 # Pages origin (no id maps and no CORS on the community map repo). The GPL
