@@ -202,6 +202,8 @@ page.setDefaultTimeout(10000);
 
 const crashes = [];
 page.on('pageerror', (err) => crashes.push(String(err)));
+const conlog = [];
+page.on('console', (m) => conlog.push(`${m.type()}: ${m.text()}`));
 const engineScript = [];
 page.on('response', (res) => {
 	if (res.url().endsWith('/ftewebglcl.js')) {
@@ -322,7 +324,16 @@ try {
 		fake.registered = fake.engineEvents.length;
 
 		window.Module._EZHud_StateJSON = () => 1;
-		window.Module.UTF8ToString = (ptr) => (ptr ? JSON.stringify(fake.state) : '');
+		// stateReads counts poll ticks, so a case can wait for "the app has
+		// seen this state" instead of sleeping (case 5's mid-edit tick).
+		fake.stateReads = 0;
+		window.Module.UTF8ToString = (ptr) => {
+			if (!ptr) {
+				return '';
+			}
+			fake.stateReads += 1;
+			return JSON.stringify(fake.state);
+		};
 	}, { state: FIXTURE, canvas: CANVAS });
 
 	assert(await page.evaluate(() => window.__fake.registered) === 1,
@@ -506,6 +517,26 @@ try {
 	// One deliberate edit through the inspector, the way a user would make it.
 	const scaleField = page.locator('#inspector .field', { has: page.locator('label', { hasText: /^scale$/ }) }).locator('input');
 	await scaleField.fill('3');
+	// A state tick lands mid-edit, on purpose: mutate the selected element's
+	// fingerprint and let the poll loop see it before Enter. Without the
+	// focus-guard in renderInspector this rebuilds the section, the focused
+	// input is replaced, and the typed value silently never reaches the engine
+	// — which is exactly how this case failed on a slow CI runner while
+	// passing on fast machines. Deterministic here, timing-free.
+	// rect is in the fingerprint but not in any export path, so the tick is
+	// provoked without disturbing the byte-identity assertions below.
+	const [ticksBefore, savedRect] = await page.evaluate(() => {
+		const health = window.__fake.state.elements.find((e) => e.name === 'health');
+		const saved = health.rect;
+		health.rect = null;
+		return [window.__fake.stateReads, saved];
+	});
+	await page.waitForFunction((n) => window.__fake.stateReads > n + 1, ticksBefore);
+	assert(await scaleField.inputValue() === '3',
+		'the mid-edit state tick rebuilt the inspector and discarded the typed value');
+	await page.evaluate((rect) => {
+		window.__fake.state.elements.find((e) => e.name === 'health').rect = rect;
+	}, savedRect);
 	await scaleField.press('Enter');   // app.js blurs on Enter, which fires change
 	await page.waitForFunction(() => window.__fake.state.elements
 		.find((e) => e.name === 'health').cvars.hud_health_scale === '3');
@@ -623,6 +654,26 @@ try {
 	assert(crashes.length === 0, `uncaught page errors: ${crashes.join('; ')}`);
 
 	console.log('Tier 3 FTE: 8 cases passed with no wasm (ftewebglcl.js 404 throughout)');
+} catch (err) {
+	// A CI-only failure is undiagnosable from a TimeoutError alone; dump what
+	// the editor actually did before dying. Temporary debug aid — cheap enough
+	// to keep.
+	console.error('--- failure diagnostics ---');
+	try {
+		console.error('console:', JSON.stringify(conlog.slice(-40), null, 1));
+		console.error('crashes:', JSON.stringify(crashes));
+		console.error('sent:', JSON.stringify(await sentLines()));
+		console.error('probe:', JSON.stringify(await page.evaluate(() => ({
+			inspector: [...document.querySelectorAll('#inspector .field label')].map((l) => l.textContent),
+			active: document.activeElement?.tagName,
+			note: document.querySelector('#fte-note')?.textContent,
+			status: document.querySelector('#status')?.textContent,
+			health: window.__fake?.state?.elements?.find((e) => e.name === 'health')?.cvars,
+		}))));
+	} catch (probeErr) {
+		console.error('diagnostics failed:', String(probeErr));
+	}
+	throw err;
 } finally {
 	await page.close();
 	await browser.close();
