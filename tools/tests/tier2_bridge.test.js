@@ -4,6 +4,7 @@ import http from 'node:http';
 import test from 'node:test';
 
 import { Bridge, BridgeError } from '../../hud_web_ui/core/bridge.js';
+import * as syslog from '../../hud_web_ui/core/log.js';
 
 const fixture = JSON.parse(await readFile(
 	new URL('../../hud_web_ui/fixtures/state.json', import.meta.url), 'utf8'));
@@ -17,6 +18,7 @@ async function stub(handler) {
 		const record = {
 			method: request.method,
 			url: new URL(request.url, 'http://stub.invalid'),
+			headers: request.headers,
 			body: Buffer.concat(chunks).toString('utf8'),
 		};
 		requests.push(record);
@@ -143,6 +145,61 @@ test('hud_export never reads or mutates cfg_backup', async (t) => {
 	await s.bridge.save({ name: 'minimal.cfg', hudOnly: true, keepBackup: true });
 	assert.deepEqual(s.requests.map((r) => r.url.pathname), ['/cmd']);
 	assert.equal(JSON.parse(s.requests[0].body).cmd, 'hud_export minimal.cfg');
+});
+
+test('every bridge request carries a unique X-HUD-Req correlation id', async (t) => {
+	const s = await localStub(t, (_request, response) => json(response, 200, fixture));
+	if (!s) return;
+	t.after(s.close);
+	await s.bridge.state();
+	await s.bridge.state();
+	const ids = s.requests.map((r) => r.headers['x-hud-req']);
+	assert.ok(ids[0] && ids[1]);
+	assert.notEqual(ids[0], ids[1]);
+});
+
+test('logText returns the engine log and degrades to empty on failure', async (t) => {
+	const s = await localStub(t, (request, response) => {
+		if (request.url.pathname === '/log') {
+			response.writeHead(200, { 'content-type': 'text/plain' });
+			response.end('[hud_web] GET /state 200');
+		} else {
+			json(response, 200, fixture);
+		}
+	});
+	if (!s) return;
+	assert.equal(await s.bridge.logText(), '[hud_web] GET /state 200');
+	assert.equal(s.requests.at(-1).url.searchParams.get('t'), 'stub token');
+	await s.close();
+	assert.equal(await s.bridge.logText(), '');
+});
+
+test('an outage logs one lost-contact error and one reconnect, not one per poll', async (t) => {
+	syslog._reset();
+	const s = await localStub(t, (_request, response) => json(response, 200, fixture));
+	if (!s) return;
+	await s.bridge.state();
+	await s.close();
+	await assert.rejects(s.bridge.state());
+	await assert.rejects(s.bridge.state());
+	await assert.rejects(s.bridge.state());
+	const errors = syslog.snapshot({ level: 'error' });
+	assert.equal(errors.length, 1);
+	assert.match(errors[0].msg, /Lost contact/);
+
+	// Engine comes back on the same port: exactly one reconnect transition.
+	const port = Number(new URL(s.bridge.origin).port);
+	const revived = http.createServer((_request, response) => json(response, 200, fixture));
+	await new Promise((resolve, reject) => {
+		revived.once('error', reject);
+		revived.listen(port, '127.0.0.1', resolve);
+	});
+	t.after(() => new Promise((resolve) => revived.close(resolve)));
+	await s.bridge.state();
+	await s.bridge.state();
+	const reconnects = syslog.snapshot({ area: 'bridge' }).filter((e) => /reconnected/.test(e.msg));
+	assert.equal(reconnects.length, 1);
+	syslog._reset();
 });
 
 test('frameUrl changes its nonce while retaining token authentication', () => {

@@ -289,7 +289,20 @@ try {
 	assert(identities.groups === 'groups', 'renderGroups rebuilt its DOM on a frame-only tick');
 	assert(identities.fonts === 'fonts', 'renderFonts rebuilt its DOM on a frame-only tick');
 
-	console.log('Tier 3: geometry, killfeed pair-write, percentage resize refusal, and stale DOM guards passed');
+	// Logging (spec Cases 4-5): debug entries are absent without ?debug=1, every
+	// mutation above left an audit line, and the copy-log blob carries both
+	// sections without the token ever appearing.
+	const logDump = await page.evaluate(() => window.__ezhudLogDump());
+	assert(!/ debug \[/.test(logDump),
+		'debug-level entries were recorded without ?debug=1');
+	assert(/ info \[model\] set r_tracker \{"from":/.test(logDump),
+		'the killfeed cvar write left no model audit line');
+	assert(/--- ui ---/.test(logDump) && /--- engine ---/.test(logDump),
+		'the log dump is missing a section');
+	assert(!logDump.includes('fixture-token'),
+		'the log dump leaked the bridge token');
+
+	console.log('Tier 3: geometry, killfeed pair-write, percentage resize refusal, stale DOM guards, and log audit passed');
 } finally {
 	await page.close();
 	await browser.close();

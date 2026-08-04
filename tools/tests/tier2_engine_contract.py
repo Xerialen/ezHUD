@@ -48,11 +48,11 @@ def tokens(path, port):
             if int(found_port) == port]
 
 
-def request(port, method, path, token=None, body=None):
+def request(port, method, path, token=None, body=None, headers=None):
     query = urllib.parse.urlencode({"t": token}) if token is not None else ""
     target = path + (("&" if "?" in path else "?") + query if query else "")
     encoded = None
-    headers = {}
+    headers = dict(headers or {})
     if body is not None:
         encoded = json.dumps({"cmd": body}).encode("utf-8")
         headers["content-type"] = "application/json"
@@ -223,6 +223,27 @@ def main():
     finally:
         if inside.exists():
             inside.unlink()
+
+    # The request log: token-gated like every stateful route, and the token must
+    # never appear in its own audit trail (targets are logged path-only).
+    status, _, _ = request(args.port, "GET", "/log")
+    if status != 403:
+        raise Failure(f"/log without token was not refused: HTTP {status}")
+    status, log_headers, log_body = request(args.port, "GET", "/log", token)
+    if status != 200:
+        raise Failure(f"authorised /log failed: HTTP {status}")
+    if "text/plain" not in log_headers.get("content-type", ""):
+        raise Failure(f"/log content-type is {log_headers.get('content-type')!r}, not text/plain")
+    log_text = log_body.decode("utf-8", "replace")
+    if token in log_text:
+        raise Failure("/log leaks the bridge token into its own output")
+    if "GET /state" not in log_text:
+        raise Failure("/log ring is missing the request lines this test already caused")
+    # The correlation id round-trip: a request tagged X-HUD-Req comes back in the ring.
+    request(args.port, "GET", "/state", token, headers={"X-HUD-Req": "contract-42"})
+    _, _, log_body = request(args.port, "GET", "/log", token)
+    if "req=contract-42" not in log_body.decode("utf-8", "replace"):
+        raise Failure("X-HUD-Req was not echoed into the request log")
 
     # hud_web 0 closes the socket and clears its token. Re-enable over the engine's
     # local IPC channel, then prove that the old URL cannot authorize the new listener.
