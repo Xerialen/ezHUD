@@ -336,6 +336,87 @@ function controlLocator(target) {
 	return locator;
 }
 
+// One DOM snapshot, classified with Sets: a control matched by several rows is
+// still one control. Text/index constraints are resolved exactly as
+// controlLocator resolves the table, so deleting one segmented option makes
+// that row stale instead of another row's broad base selector hiding it.
+async function auditInteractiveControls(coverage, exemptions) {
+	return page.evaluate(({ covered, exempt }) => {
+		const resolve = (entry) => {
+			let nodes = [...document.querySelectorAll(entry.selector)];
+			if (entry.text) {
+				nodes = nodes.filter((node) => node.textContent.trim() === entry.text);
+			}
+			if (entry.index != null) {
+				nodes = nodes[entry.index] ? [nodes[entry.index]] : [];
+			}
+			return nodes;
+		};
+		const visibleAndEnabled = (node) => {
+			const style = getComputedStyle(node);
+			return node.getClientRects().length > 0
+				&& style.display !== 'none'
+				&& style.visibility !== 'hidden'
+				&& style.visibility !== 'collapse'
+				&& !node.matches(':disabled')
+				&& node.getAttribute('aria-disabled') !== 'true';
+		};
+		const quoteAttribute = (value) => `"${String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+		const identifier = (node) => {
+			if (node.id) {
+				return `#${CSS.escape(node.id)}`;
+			}
+			if (node.title) {
+				return `${node.localName}[title=${quoteAttribute(node.title)}]`;
+			}
+			const titled = node.closest('[title]');
+			if (titled && titled !== node) {
+				return `${titled.localName}[title=${quoteAttribute(titled.title)}] ${node.localName}`;
+			}
+			const parts = [];
+			let cursor = node;
+			while (cursor?.nodeType === Node.ELEMENT_NODE && parts.length < 4) {
+				if (cursor.id) {
+					parts.unshift(`#${CSS.escape(cursor.id)}`);
+					break;
+				}
+				let part = cursor.localName;
+				const stableClass = [...cursor.classList].find((name) => !name.startsWith('is-'));
+				if (stableClass) {
+					part += `.${CSS.escape(stableClass)}`;
+				}
+				const peers = cursor.parentElement
+					? [...cursor.parentElement.children].filter((child) => child.localName === cursor.localName)
+					: [];
+				if (peers.length > 1) {
+					part += `:nth-of-type(${peers.indexOf(cursor) + 1})`;
+				}
+				parts.unshift(part);
+				cursor = cursor.parentElement;
+			}
+			return parts.join(' > ');
+		};
+
+		const controls = new Set(
+			[...document.querySelectorAll('input, select, button, [role="button"], .seg__item')]
+				.filter(visibleAndEnabled),
+		);
+		const coveredNodes = new Set(covered.flatMap(resolve));
+		const exemptNodes = new Set(exempt.flatMap(resolve));
+		const unmatched = [...controls]
+			.filter((node) => !coveredNodes.has(node) && !exemptNodes.has(node))
+			.map(identifier)
+			.sort();
+		const staleCovered = covered
+			.filter((entry) => !entry.transient && resolve(entry).length === 0)
+			.map((entry) => entry.label);
+		const staleExempt = exempt
+			.filter((entry) => resolve(entry).length === 0)
+			.map((entry) => entry.selector);
+		return { controls: controls.size, unmatched, staleCovered, staleExempt };
+	}, { covered: coverage, exempt: exemptions });
+}
+
 async function operateControl(row) {
 	if (row.prepare?.selectElement) {
 		await page.locator(`.tree__row[data-name="${row.prepare.selectElement}"]`).click();
@@ -811,6 +892,24 @@ try {
 			operation: { kind: 'reset' }, expect: { [`hud_${candidate.name}_pos_x`]: String(candidate.pos_x) },
 		},
 	];
+	// Explicit non-engine controls and repeated/generated controls. Keeping these
+	// beside the table makes every omission reviewable; the coverage case below
+	// also rejects an exemption whose selector has gone stale.
+	const controlExemptions = [
+		{ selector: '#chrome', reason: 'editor view filter, no engine/export effect' },
+		{ selector: '#filter', reason: 'editor view filter, no engine/export effect' },
+		{ selector: '#show-hidden', reason: 'editor view filter, no engine/export effect' },
+		{ selector: '#show-spectator', reason: 'editor view filter, no engine/export effect' },
+		{ selector: '#save-open', reason: 'export workflow proven by case 5' },
+		{ selector: '#tree .tree__vis', reason: 'generated visibility buttons share the table visibility path' },
+		{ selector: '#groups .grouplist__item', reason: 'generated group selectors, editor placement path' },
+		{ selector: '#groups .grouplist__detach', reason: 'editor group placement shortcut' },
+		{ selector: '#fonts #face', reason: 'FTE font view has no engine/export setting to apply' },
+		{ selector: '#inspector select', reason: 'generated placement selectors share the numeric inspector apply path' },
+		{ selector: '#inspector input:not(#f-tracker-scale)', reason: 'generated inspector fields share the table apply path' },
+		{ selector: '#inspector button.swatch', reason: 'generated colour picker shares the inspector apply path' },
+		{ selector: '#reset-dialog button', reason: 'operated inside the reset operation' },
+	];
 
 	let nextCase = 8;
 	for (const row of controlCases) {
@@ -819,6 +918,64 @@ try {
 			? Object.entries(row.expect).map(([name, value]) => `${name}=${value}`).join(', ')
 			: `${row.exportOnly.line}; ${row.exportOnly.unchangedCvar} unchanged`;
 		pass(nextCase++, `${row.label} — ${effect}`);
+	}
+
+	// ---- anti-stale control coverage ---------------------------------------
+	// Cases 1-7 cover host/editor gestures outside the declarative table. A
+	// prepare target is coverage too: selecting its tree row is an operation the
+	// corresponding table case must successfully perform before its target can
+	// exist. Inspector targets are transient because only one selected element's
+	// controls can be in the DOM at a time; proveControl already waited for each.
+	const priorCoverage = [
+		{ label: 'case 6 demo picker', selector: '#fte-demo' },
+		{ label: 'case 4 cfg drop zone', selector: '#fte-drop' },
+		{ label: 'case 2 tree rows', selector: '.tree__row' },
+		{ label: 'case 3 overlay drag', selector: '#overlay .box' },
+	];
+	const tableCoverage = controlCases.flatMap((row) => [
+		{
+			label: `table row: ${row.label}`,
+			...row.target,
+			transient: Boolean(row.prepare),
+		},
+		...(row.prepare?.selectElement ? [{
+			label: `prepare target: ${row.prepare.selectElement}`,
+			selector: `.tree__row[data-name="${row.prepare.selectElement}"]`,
+		}] : []),
+	]);
+	const coverage = [...priorCoverage, ...tableCoverage];
+
+	// Open the reset confirmation so its inner controls are honestly present in
+	// the live snapshot and the exemption can itself be stale-checked.
+	await page.locator('#hudmodes button.btn', { hasText: /^Reset positions…$/ }).click();
+	await page.locator('#reset-dialog[open]').waitFor({ timeout: UI_WAIT });
+	try {
+		await page.evaluate(() => {
+			const fake = document.createElement('button');
+			fake.id = 'tier4-fte-uncovered-self-test';
+			fake.type = 'button';
+			fake.textContent = 'Coverage self-test';
+			document.querySelector('.panel--inspect').append(fake);
+		});
+		try {
+			const broken = await auditInteractiveControls(coverage, controlExemptions);
+			assert(broken.unmatched.includes('#tier4-fte-uncovered-self-test'),
+				`coverage self-test did not name its fake control: ${broken.unmatched.join(', ')}`);
+		} finally {
+			await page.evaluate(() => document.querySelector('#tier4-fte-uncovered-self-test')?.remove());
+		}
+
+		const audit = await auditInteractiveControls(coverage, controlExemptions);
+		assert(audit.unmatched.length === 0,
+			`new control without a 4F row or exemption: ${audit.unmatched.join(', ')}`);
+		assert(audit.staleCovered.length === 0,
+			`stale row/covered selector: ${audit.staleCovered.join(', ')}`);
+		assert(audit.staleExempt.length === 0,
+			`stale row/exemption: ${audit.staleExempt.join(', ')}`);
+		pass(nextCase++, `${audit.controls} live controls covered or exempt; fake-button self-test was detected`);
+	} finally {
+		await page.locator('#reset-dialog button', { hasText: /^Cancel$/ }).click().catch(() => {});
+		await page.locator('#reset-dialog[open]').waitFor({ state: 'hidden', timeout: UI_WAIT }).catch(() => {});
 	}
 
 	// ---- visual truth: the real tracker pixels -----------------------------

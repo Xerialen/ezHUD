@@ -1,0 +1,25 @@
+name: Cases gate
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, labeled, unlabeled]
+
+permissions: read-all
+
+jobs:
+  cases:
+    name: issue Cases and PR mapping
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Enforce test-plan convention
+        run: node tools/ci/cases_gate.mjs
+        env:
+          PR_BODY: ${{ github.event.pull_request.body || '' }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_TOKEN: ${{ github.token }}
