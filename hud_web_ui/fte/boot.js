@@ -13,6 +13,18 @@
 (function () {
 	'use strict';
 
+	window.__ezhudEarlyLog = [];
+	function engineSay(level, msg) {
+		if (window.__ezhudLog) {
+			window.__ezhudLog(level, 'fte', String(msg));
+		} else {
+			if (window.__ezhudEarlyLog.length < 200) {
+				window.__ezhudEarlyLog.push([level, String(msg)]);
+			}
+			(level === 'warn' ? console.warn : console.log)(msg);
+		}
+	}
+
 	// Shipped with the site by tools/fte-web/assemble.sh. `label` is what the
 	// picker shows; `path` is the engine-side name, which is also the key the
 	// file arrives under in Module.files.
@@ -203,8 +215,14 @@
 		// the shell's job, so it is ours, and this is what ours honours.
 		autostart: true,
 
-		print: function (msg) { console.log(msg); },
-		printErr: function (msg) { console.warn(msg); },
+		// Engine output goes to the session log (area "fte") so it is filterable
+		// and lands in the copy-log blob. This file runs before the modules, so
+		// lines queue in __ezhudEarlyLog until core/log.js is up and app.js
+		// installs the live __ezhudLog hook and drains the queue.
+		// stdout is debug-level: the engine is chatty enough to evict every
+		// useful entry from the ring otherwise. stderr is always kept.
+		print: function (msg) { engineSay('debug', msg); },
+		printErr: function (msg) { engineSay('warn', msg); },
 
 		setStatus: function (text) {
 			// Emscripten spams this during startup, with a "(n/m)" progress

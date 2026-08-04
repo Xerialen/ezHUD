@@ -31,6 +31,7 @@ fail() {
 expected="core/bridge.js
 core/fte-adapter.js
 core/geometry.js
+core/log.js
 core/model.js
 core/quake-palette.js
 default.fmf
@@ -50,7 +51,8 @@ qw/demos/hudtest_src.mvd
 qw/demos/tb4gf_book_vs_s.mvd
 qw/fragfile.dat
 ui.css
-view/app.js"
+view/app.js
+view/debug.js"
 
 # ---- fixtures -------------------------------------------------------------
 

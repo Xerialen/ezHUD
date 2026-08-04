@@ -11,6 +11,8 @@ import {
 import {
 	consoleToFrame, displayDeltaToConsole, elementAt, quantize, scaleFactors,
 } from '../core/geometry.js';
+import * as syslog from '../core/log.js';
+import { initDebugPanel } from './debug.js';
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -27,6 +29,47 @@ const el = {
 
 const bridge = Bridge.fromLocation(location.search);
 const model = new Model();
+
+// Logging: debug is opt-in without a rebuild (spec: docs/specs/2026-08-04-logging.md).
+syslog.setDebug(
+	new URLSearchParams(location.search).get('debug') === '1'
+	|| localStorage.getItem('ezhud_debug') === '1',
+);
+// The console is a sink of the session log, not a destination of its own.
+syslog.addSink((e) => {
+	const fn = e.level === 'error' ? 'error' : e.level === 'warn' ? 'warn' : 'log';
+	console[fn](`[${e.area}] ${e.msg}`, 'data' in e ? e.data : '');
+});
+// The FTE wasm boot script runs before modules exist; adopt its queued output
+// and take over its print stream (see fte/boot.js engineSay).
+for (const [level, msg] of window.__ezhudEarlyLog ?? []) {
+	syslog.log(level, 'fte', msg);
+}
+window.__ezhudEarlyLog = [];
+window.__ezhudLog = (level, area, msg) => syslog.log(level, area, msg);
+
+// Harnesses (tier-3/4, QA runner) pull the same blob the Copy button produces.
+window.__ezhudLogDump = async () =>
+	syslog.dump({ meta: logMeta(), engineLog: await bridge.logText() });
+
+const debugPanel = initDebugPanel({
+	fetchEngineLog: () => bridge.logText(),
+	meta: logMeta,
+});
+// The status line is where errors surface, so it is also the way to the story
+// behind them.
+el.status.title = 'Session log (F9)';
+el.status.addEventListener('click', () => debugPanel.toggle());
+
+function logMeta() {
+	return {
+		protocol: model.state?.protocol,
+		engine: model.state?.engine,
+		screen: model.screen,
+		physical: model.physical,
+		elements: model.elements.length,
+	};
+}
 
 let frameNonce = 0;
 let poll = null;
@@ -93,6 +136,8 @@ function stopPolling() {
 // end, or the intermediate states render and a frame capture is paid for each.
 async function applyAll(changes) {
 	for (const [cvar, value] of changes) {
+		// The audit trail for "my cfg changed and I don't know why".
+		syslog.info('model', `set ${cvar}`, { from: currentCvar(cvar) ?? null, to: String(value) });
 		pending.set(cvar, String(value));
 	}
 	render();
@@ -115,6 +160,15 @@ async function applyAll(changes) {
 }
 
 const apply = (cvar, value) => applyAll([[cvar, value]]);
+
+function currentCvar(cvar) {
+	for (const element of model.elements) {
+		if (element.cvars && cvar in element.cvars) {
+			return element.cvars[cvar];
+		}
+	}
+	return undefined;
+}
 
 // ---- rendering ------------------------------------------------------------
 
@@ -173,6 +227,7 @@ function render() {
 		renderInspector();
 		syncSave();
 	} catch (err) {
+		syslog.error('view', `render failed: ${err.message}`);
 		console.error(err);
 		el.status.textContent = 'Interface error';
 		el.status.dataset.status = 'lost';
@@ -530,6 +585,9 @@ function beginResize(ev, name, handle) {
 	const item = model.element(name);
 	const control = model.sizeControl(item);
 	if (!item?.rect || !control) {
+		if (item && !item.rect) {
+			syslog.warn('geometry', `resize on undrawn element ${name} (rect null)`);
+		}
 		return;
 	}
 
@@ -567,7 +625,7 @@ function beginResize(ev, name, handle) {
 		try {
 			move(e);
 		} catch (err) {
-			console.error('resize', err);
+			syslog.error('view', `resize gesture failed: ${err.message}`);
 			up();
 		}
 	};
@@ -1546,7 +1604,7 @@ async function loadPalette() {
 	} catch (err) {
 		// A missing palette costs the swatch grid, not the editor — but swallowing
 		// it silently is how an empty grid became impossible to explain.
-		console.warn('palette unavailable', err);
+		syslog.warn('view', 'palette unavailable', { error: String(err) });
 	}
 }
 
