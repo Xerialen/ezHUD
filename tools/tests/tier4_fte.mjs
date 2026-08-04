@@ -213,6 +213,7 @@ const readState = (name) => page.evaluate(async ([spec, wanted]) => {
 		drawn: drawn.length,
 		screen: state.screen,
 		physical: state.physical,
+		demo: state.demo ?? null,
 		element: target
 			? {
 				name: target.name, place: target.place, align_x: target.align_x, align_y: target.align_y,
@@ -479,6 +480,26 @@ async function proveControl(row) {
 	}
 }
 
+async function elementClip(name, timeout = UI_WAIT) {
+	const state = await eventually(async () => {
+		const next = await readState(name);
+		const rect = next.element?.rect;
+		return rect && rect.w > 0 && rect.h > 0 ? next : null;
+	}, `the ${name} element to expose a non-empty engine rect`, timeout);
+	const canvasBox = await page.locator('#canvas').boundingBox();
+	assert(canvasBox, 'the live engine canvas has no screen bounds');
+	const sx = canvasBox.width / state.screen.vid_width;
+	const sy = canvasBox.height / state.screen.vid_height;
+	const viewport = page.viewportSize();
+	const x = Math.max(0, canvasBox.x + state.element.rect.x * sx);
+	const y = Math.max(0, canvasBox.y + state.element.rect.y * sy);
+	return {
+		x, y,
+		width: Math.min(Math.max(1, state.element.rect.w * sx), viewport.width - x),
+		height: Math.min(Math.max(1, state.element.rect.h * sy), viewport.height - y),
+	};
+}
+
 async function trackerClip(messageRows, timeout = 90000) {
 	const state = await eventually(async () => {
 		const next = await readState('tracker');
@@ -733,11 +754,117 @@ try {
 	const successShot = await shot('tier4-fte-pass');
 	pass(7, `success screenshot at ${successShot}`);
 
+	let demoPausePassText;
+	let demoReadbackPassText;
+
+	// ---- new case: real demo-time pause/resume ------------------------------
+	// cl.time keeps advancing at cl_demospeed 0 in this FTE build, so gameclock
+	// cannot prove demo pause. democlock is driven by consumed demo time. Put it
+	// over viewsize 30's static border, hide editor outlines and compare its
+	// actual pixels: running changes, paused is byte-stable, resume changes.
+	const pauseButton = page.locator('#fte-pause');
+	await pauseButton.waitFor({ state: 'visible', timeout: UI_WAIT });
+	await eventually(async () => (await pauseButton.isEnabled()) ? true : null,
+		'the demo pause control to receive engine state', UI_WAIT);
+	const originalDemoClockShow = await readCvar('hud_democlock_show');
+	const originalViewsize = await readCvar('viewsize');
+	const originalNotify = await readCvar('con_notifylines');
+	const overlayWasOn = await page.locator('#chrome').isChecked();
+	let pausePrepared = false;
+	try {
+		await page.evaluate(() => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) throw new Error('the live FTE command channel is unavailable');
+			channel.cbufadd('con_notifylines 0\nviewsize 30\n'
+				+ 'set hud_democlock_show 1\nset hud_democlock_place screen\n'
+				+ 'set hud_democlock_align_x left\nset hud_democlock_align_y top\n'
+				+ 'set hud_democlock_pos_x 8\nset hud_democlock_pos_y 8\n'
+				+ 'set hud_democlock_scale 2\nset hud_democlock_blink 0\nhud_recalculate\n');
+		});
+		pausePrepared = true;
+		await eventually(async () => {
+			const state = await readState('democlock');
+			return state.demo?.cl_demospeed === '1' && state.element?.rect ? state : null;
+		}, 'democlock pixels and normal demo speed', UI_WAIT);
+		if (overlayWasOn) await page.locator('#chrome').click();
+		const clip = await elementClip('democlock');
+
+		const runningBefore = await captureRegion('democlock-running-before', clip);
+		await sleep(1300);
+		const runningAfter = await captureRegion('democlock-running-after', clip);
+		assert(runningAfter.signature !== runningBefore.signature,
+			'the demo-time democlock did not change during normal playback');
+
+		await pauseButton.click();
+		await eventually(async () => {
+			const state = await readState();
+			return state.demo?.cl_demospeed === '0'
+				&& await pauseButton.getAttribute('aria-pressed') === 'true' ? true : null;
+		}, 'the GUI pause to read back cl_demospeed=0', UI_WAIT);
+		await sleep(400);
+		const pausedBefore = await captureRegion('democlock-paused-before', clip);
+		await sleep(1300);
+		const pausedAfter = await captureRegion('democlock-paused-after', clip);
+		assert(pausedAfter.signature === pausedBefore.signature,
+			`demo-time pixels changed while paused (${pausedBefore.signature} -> ${pausedAfter.signature})`);
+
+		await pauseButton.click();
+		await eventually(async () => {
+			const state = await readState();
+			return state.demo?.cl_demospeed === '1'
+				&& await pauseButton.getAttribute('aria-pressed') === 'false' ? true : null;
+		}, 'the GUI resume to read back cl_demospeed=1', UI_WAIT);
+		await sleep(400);
+		const resumedBefore = await captureRegion('democlock-resumed-before', clip);
+		await sleep(1300);
+		const resumedAfter = await captureRegion('democlock-resumed-after', clip);
+		assert(resumedAfter.signature !== resumedBefore.signature,
+			'the demo-time democlock did not change after resume');
+		await writeFile(path.join(artifactDir, 'demo-pause-evidence.json'), JSON.stringify({
+			observable: 'hud_democlock pixels over viewsize 30 static border',
+			reason: 'democlock follows consumed demo time; cl.time/gameclock continues while frozen',
+			commands: { pause: 'demo_setspeed 0', resume: 'demo_setspeed 100' },
+			signatures: {
+				running: [runningBefore.signature, runningAfter.signature],
+				paused: [pausedBefore.signature, pausedAfter.signature],
+				resumed: [resumedBefore.signature, resumedAfter.signature],
+			},
+		}, null, 2));
+		demoPausePassText = 'democlock pixels changed running, froze at 0%, and changed after 100% resume';
+
+		// ---- new case: out-of-band engine state -------------------------------
+		await page.evaluate(() => window.EZHUD_FTE.engine().ftec.cbufadd('demo_setspeed 0\n'));
+		await eventually(async () => {
+			const state = await readState();
+			return state.demo?.cl_demospeed === '0'
+				&& await pauseButton.getAttribute('aria-pressed') === 'true' ? true : null;
+		}, 'an out-of-band console pause to update the toggle on poll', UI_WAIT);
+		await page.evaluate(() => window.EZHUD_FTE.engine().ftec.cbufadd('demo_setspeed 100\n'));
+		await eventually(async () => {
+			const state = await readState();
+			return state.demo?.cl_demospeed === '1'
+				&& await pauseButton.getAttribute('aria-pressed') === 'false' ? true : null;
+		}, 'an out-of-band console resume to update the toggle on poll', UI_WAIT);
+		demoReadbackPassText = 'console demo_setspeed 0/100 drove the toggle from polled engine state';
+	} finally {
+		// Always leave playback and the existing visual case in their original
+		// state, even if a pixel assertion fails halfway through.
+		await page.evaluate(([show, viewsize, notify]) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) return;
+			channel.cbufadd(`demo_setspeed 100\nset hud_democlock_show ${show}\n`
+				+ `viewsize ${viewsize}\ncon_notifylines ${notify}\nhud_recalculate\n`);
+		}, [originalDemoClockShow, originalViewsize, originalNotify]).catch(() => {});
+		if (pausePrepared && overlayWasOn && !(await page.locator('#chrome').isChecked())) {
+			await page.locator('#chrome').click().catch(() => {});
+		}
+	}
+
 	// ---- per-control deploy gate -------------------------------------------
 	// Interactive engine/export controls rendered by the public FTE page:
 	//
-	//   FTE chrome: demo picker (case 6), cfg drop target (case 4), volume
-	//   range, mute and unmute. The Overlay/filter/Hidden/Spectator controls are
+	//   FTE chrome: demo picker (case 6), cfg drop target (case 4), demo pause
+	//   and resume, volume range, mute and unmute. The Overlay/filter/Hidden/Spectator controls are
 	//   editor-view filters only; Save is an export workflow (case 5), not an
 	//   engine setting.
 	//
@@ -764,6 +891,16 @@ try {
 	// place that operates controls and checks console cvar/export readback, so a
 	// future authored control is covered by adding one declarative row here.
 	const controlCases = [
+		{
+			issue: 43,
+			label: 'pause demo button', target: { selector: '#fte-pause' },
+			operation: { kind: 'click' }, expect: { cl_demospeed: '0' },
+		},
+		{
+			issue: 43,
+			label: 'resume demo button', target: { selector: '#fte-pause' },
+			operation: { kind: 'click' }, expect: { cl_demospeed: '1' },
+		},
 		{
 			label: 'volume slider', target: { selector: '#fte-volume' },
 			operation: { kind: 'fill', value: '0.35' }, expect: { volume: '0.35' },
@@ -916,7 +1053,7 @@ try {
 	];
 
 	let nextCase = 8;
-	for (const row of controlCases) {
+	for (const row of controlCases.filter((entry) => entry.issue !== 43)) {
 		await proveControl(row);
 		const effect = row.expect
 			? Object.entries(row.expect).map(([name, value]) => `${name}=${value}`).join(', ')
@@ -1152,6 +1289,27 @@ try {
 		}
 	}
 	pass(nextCase++, visualPassText);
+
+	// Preserve the historical 1–36 numbering (especially the anti-stale audit
+	// at case 35), then append #43's functional cases and mandatory control rows.
+	pass(nextCase++, demoPausePassText);
+	pass(nextCase++, demoReadbackPassText);
+	// Case 36 resumes through the raw channel in its finally block. Wait for
+	// that engine state to reach the visible toggle before asking the toggle for
+	// its opposite; otherwise a deliberately stale aria-pressed=true would
+	// correctly request another resume rather than the pause this row expects.
+	await eventually(async () => {
+		const state = await readState();
+		return state.demo?.cl_demospeed === '1'
+			&& await pauseButton.getAttribute('aria-pressed') === 'false'
+			&& await pauseButton.isEnabled() ? true : null;
+	}, 'case 36 resume state to reach the pause toggle', UI_WAIT);
+	for (const row of controlCases.filter((entry) => entry.issue === 43)) {
+		await proveControl(row);
+		const effect = Object.entries(row.expect)
+			.map(([name, value]) => `${name}=${value}`).join(', ');
+		pass(nextCase++, `${row.label} — ${effect}`);
+	}
 } catch (err) {
 	failure = err;
 	const file = await shot('tier4-fte-failure');

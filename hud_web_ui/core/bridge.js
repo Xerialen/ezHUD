@@ -79,6 +79,16 @@ export class Bridge {
 			ms: Math.round(performance.now() - started),
 		});
 		if (response.status === 403) {
+			let refusal = null;
+			try {
+				refusal = await response.clone().json();
+			} catch { /* a non-JSON 403 is still an authentication failure */ }
+			if (path === '/cmd' && refusal?.error === 'command not permitted') {
+				let command = '';
+				try { command = JSON.parse(init.body ?? '{}').cmd ?? ''; } catch { /* diagnostic only */ }
+				syslog.warn('bridge', '[hud_web] cmd rejected', { reqId, command });
+				throw new BridgeError('Engine rejected command: command not permitted', { status: 403 });
+			}
 			syslog.error('bridge', 'token rejected (403)', { reqId, path });
 			throw new BridgeError('This link is no longer valid', { status: 403 });
 		}

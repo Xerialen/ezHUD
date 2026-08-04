@@ -96,6 +96,7 @@ const FIXTURE = {
 	engine: 'fteqw ezhud (web)',
 	screen: SCREEN,
 	view: { spectator: true, tracking: true },
+	demo: { cl_demospeed: '1' },
 	elements: [
 		element('health', {
 			pos_x: '16', pos_y: '24',
@@ -230,8 +231,16 @@ try {
 	await page.waitForFunction(() => Boolean(window.Module && window.EZHUD_FTE));
 
 	await page.evaluate(({ state, canvas }) => {
-		const fake = { state, sent: [], engineEvents: [] };
+		const fake = { state, sent: [], engineEvents: [], demoCursor: 0, refuseDemo: false };
 		window.__fake = fake;
+		// A deterministic stand-in for the demo packet cursor. Unlike cl.time,
+		// this advances only while cl_demospeed is non-zero, matching the engine
+		// fact case 1 needs to prove rather than a wall/game clock.
+		fake.demoTimer = setInterval(() => {
+			if (Number(fake.state.demo?.cl_demospeed) > 0) {
+				fake.demoCursor += 1;
+			}
+		}, 100);
 
 		// The adapter reads `physical` off the canvas backing store, so this is
 		// where the 2.00/1.80 axis split is set. index-fte.html ships 1920x1080
@@ -272,6 +281,11 @@ try {
 		// next state export, so folding it in would hide the drift report's whole
 		// reason to exist.
 		function fold(line) {
+			const demoSpeed = /^demo_setspeed\s+(0|100)$/i.exec(line.trim());
+			if (demoSpeed) {
+				fake.state.demo.cl_demospeed = demoSpeed[1] === '0' ? '0' : '1';
+				return;
+			}
 			if (line.trim().toLowerCase() === 'hud_reset_layout') {
 				for (const element of fake.state.elements) {
 					const base = resetDefaults.get(element.name);
@@ -338,6 +352,9 @@ try {
 			cbufadd(line) {
 				const text = String(line).replace(/\n+$/, '');
 				fake.sent.push(text);
+				if (fake.refuseDemo && /^demo_setspeed\b/i.test(text)) {
+					throw new Error('demo_setspeed refused by fake backend');
+				}
 				fold(text);
 			},
 		};
@@ -677,7 +694,68 @@ try {
 
 	console.log('  7 demo picker: playdemo through the host path, gamedir-relative');
 
-	// ---- 8. reload guard ----------------------------------------------------
+	// ---- 8. demo pause/resume -----------------------------------------------
+	// The fake cursor represents consumed demo packets, not cl.time: FTE keeps
+	// cl.time advancing while frozen, so a wall/game clock would prove the wrong
+	// thing. The visible button must follow state.demo.cl_demospeed as app.js
+	// polls it, and the cursor must stop and restart around the GUI gestures.
+	const pause = page.locator('#fte-pause');
+	await pause.waitFor();
+	await page.waitForFunction(() => !document.querySelector('#fte-pause')?.disabled);
+	const runningFrom = await page.evaluate(() => window.__fake.demoCursor);
+	await page.waitForTimeout(300);
+	assert(await page.evaluate(() => window.__fake.demoCursor) > runningFrom,
+		'the fake demo cursor did not advance before pausing');
+
+	const sentBeforePause = (await sentLines()).length;
+	await pause.click();
+	await page.waitForFunction((n) => window.__fake.sent.length > n, sentBeforePause);
+	assert((await sentLines()).slice(sentBeforePause).includes('demo_setspeed 0'),
+		'the pause toggle did not send demo_setspeed 0');
+	await page.waitForFunction(() => document.querySelector('#fte-pause')?.getAttribute('aria-pressed') === 'true');
+	const frozenAt = await page.evaluate(() => window.__fake.demoCursor);
+	await page.waitForTimeout(1100);
+	assert(await page.evaluate(() => window.__fake.demoCursor) === frozenAt,
+		'the fake demo packet cursor advanced while paused');
+
+	await pause.click();
+	await page.waitForFunction(() => document.querySelector('#fte-pause')?.getAttribute('aria-pressed') === 'false');
+	const resumedAt = await page.evaluate(() => window.__fake.demoCursor);
+	await page.waitForTimeout(300);
+	assert(await page.evaluate(() => window.__fake.demoCursor) > resumedAt,
+		'the fake demo packet cursor did not advance after resume');
+	assert((await sentLines()).includes('demo_setspeed 100'),
+		'the pause toggle did not send the percent-form resume command demo_setspeed 100');
+	console.log('  8 demo pause: fake packet cursor stops on 0 and resumes on percent-form 100');
+
+	// ---- 9. external engine-state readback ----------------------------------
+	const readsBeforeConsolePause = await page.evaluate(() => window.__fake.stateReads);
+	await page.evaluate(() => window.FTEC.cbufadd('demo_setspeed 0\n'));
+	await page.waitForFunction(() => document.querySelector('#fte-pause')?.getAttribute('aria-pressed') === 'true');
+	assert(await page.evaluate(() => window.__fake.stateReads) > readsBeforeConsolePause,
+		'the pause toggle changed without a subsequent engine-state poll');
+	await page.evaluate(() => window.FTEC.cbufadd('demo_setspeed 100\n'));
+	await page.waitForFunction(() => document.querySelector('#fte-pause')?.getAttribute('aria-pressed') === 'false');
+	console.log('  9 demo pause readback: out-of-band engine commands drive the toggle on poll');
+
+	// ---- 10. disabled/refused backend ---------------------------------------
+	await page.evaluate(() => { window.__fake.refuseDemo = true; });
+	await pause.click();
+	await page.waitForFunction(() => document.querySelector('#fte-pause')?.disabled
+		&& !document.querySelector('#fte-pause-reason')?.hidden);
+	assert(/unavailable|refused/i.test(await page.locator('#fte-pause-reason').textContent()),
+		'the refused command path did not show an honest reason');
+	await page.waitForTimeout(1100);
+	const pauseWarnings = await page.evaluate(async () => {
+		const log = await import('/core/log.js');
+		return log.snapshot().filter((entry) => entry.level === 'warn'
+			&& /demo pause unavailable/i.test(entry.msg));
+	});
+	assert(pauseWarnings.length === 1,
+		`the refused backend produced ${pauseWarnings.length} demo-pause warnings instead of one`);
+	console.log('  10 demo pause refusal: disabled reason shown and exactly one warn logged');
+
+	// ---- 11. reload guard ----------------------------------------------------
 	// The contract the boot race fix bought, not its timing: whatever FTEC
 	// registered on document is gone once the engine is drawing, so the editor
 	// gets its own keystrokes and location.reload() is not blocked.
@@ -701,9 +779,9 @@ try {
 	assert(await page.evaluate(() => window.__fake.engineEvents.length) === eventsBefore,
 		'FTE\'s own keyboard listener is still on document after the engine came up');
 
-	console.log('  8 reload guard: engine key and beforeunload listeners released');
+	console.log('  11 reload guard: engine key and beforeunload listeners released');
 
-	// ---- 9. reset positions --------------------------------------------------
+	// ---- 12. reset positions -------------------------------------------------
 	// The tracker cvar-wiring fix (fix/tracker-cvar-wiring): plugins/ezhud/hud.c
 	// gained HUD_ResetLayout_f, ported from ezQuake's engine-integration.diff, so
 	// the FTE-web preview's "Reset positions..." button (which has always sent
@@ -733,9 +811,9 @@ try {
 	assert(healthAfterReset.pos_x === '16' && healthAfterReset.pos_y === '24',
 		`reset did not restore health's registered pos_x/pos_y, got ${JSON.stringify(healthAfterReset)}`);
 
-	console.log('  9 reset positions: hud_reset_layout reverts a moved element to its registered default');
+	console.log('  12 reset positions: hud_reset_layout reverts a moved element to its registered default');
 
-	// ---- 10. volume -----------------------------------------------------------
+	// ---- 13. volume ----------------------------------------------------------
 	// The page's own sound knob (#10). The engine side is a plain cvar write, so
 	// the assertions are about the contract around it: the quiet boot default,
 	// the mute/unmute round trip, the imported line that must never apply, and
@@ -793,14 +871,14 @@ try {
 	assert(await page.locator('#fte-mute').getAttribute('aria-pressed') === 'false',
 		'the unmuted state did not survive the reload');
 
-	console.log('  10 volume: quiet boot default, mute round trip, import refusal, persistence');
+	console.log('  13 volume: quiet boot default, mute round trip, import refusal, persistence');
 
 	// The whole suite ran against a page whose engine script never downloaded.
 	assert(engineScript.length && engineScript.every((status) => status === 404),
 		`ftewebglcl.js should 404 here, got ${JSON.stringify(engineScript)}`);
 	assert(crashes.length === 0, `uncaught page errors: ${crashes.join('; ')}`);
 
-	console.log('Tier 3 FTE: 10 cases passed with no wasm (ftewebglcl.js 404 throughout)');
+	console.log('Tier 3 FTE: 13 cases passed with no wasm (ftewebglcl.js 404 throughout)');
 } catch (err) {
 	// A CI-only failure is undiagnosable from a TimeoutError alone; dump what
 	// the editor actually did before dying. Temporary debug aid — cheap enough

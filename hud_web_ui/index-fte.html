@@ -111,6 +111,11 @@
         <span>Demo</span>
         <select id="fte-demo"></select>
       </label>
+      <button class="fte-pause" type="button" id="fte-pause" aria-pressed="false"
+              aria-label="Pause demo playback" title="Waiting for engine demo state" disabled>
+        <span id="fte-pause-label">Pause</span>
+      </button>
+      <span class="fte-control-reason" id="fte-pause-reason">Waiting for engine demo state…</span>
       <!-- Demo sound (#10). The default is quiet — fte/boot.js launches with
            +volume 0.25 — and this pair is the page's knob over it. The cvar is
            editor chrome, not HUD state: the adapter allows it exactly but keeps

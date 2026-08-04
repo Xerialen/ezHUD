@@ -262,6 +262,17 @@ char *HUD_Web_StateJSON(size_t *out_len)
 	sb_printf(&b, ",\"screen\":{\"vid_width\":%d,\"vid_height\":%d,\"scr_con_current\":%d}",
 	          (int)vid.width, (int)vid.height, (int)scr_con_current);
 
+	/* Demo speed is engine state, not button state. Omit the capability only on
+	 * a build that genuinely has no cl_demospeed cvar. */
+	{
+		cvar_t *demo_speed = Cvar_Find("cl_demospeed");
+		if (demo_speed) {
+			sb_puts(&b, ",\"demo\":{\"cl_demospeed\":");
+			sb_json_string(&b, demo_speed->string);
+			sb_puts(&b, "}");
+		}
+	}
+
 	/* Which HUD systems are drawing, as separate axes rather than one setting,
 	 * because that is what the engine actually has:
 	 *   scr_newhud 0/1/2   classic only / new only / both (hud.c:1539, sbar.c:2412)

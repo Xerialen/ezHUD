@@ -19,15 +19,15 @@
    "parent": null,
    "align_x": "center",
    "align_y": "top",
-   "pos_x": "-8",
+   "pos_x": "0",
    "pos_y": "0",
    "order": -4,
    "frame": 0,
    "rect": {
-    "x": 768,
+    "x": 1463,
     "y": 0,
-    "w": 1792,
-    "h": 346
+    "w": 896,
+    "h": 173
    },
    "cvars": {
     "hud_gameclock_frame": "0",
@@ -35,25 +35,26 @@
     "hud_gameclock_item_opacity": "1",
     "hud_gameclock_big": "1",
     "hud_gameclock_style": "1",
-    "hud_gameclock_scale": "2",
+    "hud_gameclock_scale": "1",
     "hud_gameclock_blink": "1",
     "hud_gameclock_countdown": "0",
     "hud_gameclock_offset": "0",
     "hud_gameclock_proportional": "1",
-    "hud_gameclock_align_x": "left",
-    "hud_gameclock_align_y": "top"
+    "hud_gameclock_place": "screen",
+    "hud_gameclock_align_x": "center",
+    "hud_gameclock_align_y": "center"
    }
   },
   {
    "name": "qtv_buffer",
    "description": "QTV buffering status.",
-   "shown": true,
+   "shown": false,
    "place": "screen",
    "parent": null,
    "align_x": "left",
    "align_y": "top",
-   "pos_x": "13",
-   "pos_y": "29",
+   "pos_x": 0,
+   "pos_y": 0,
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -62,9 +63,7 @@
     "hud_qtv_buffer_frame_color": "0 0 0",
     "hud_qtv_buffer_item_opacity": "1",
     "hud_qtv_buffer_scale": "1",
-    "hud_qtv_buffer_proportional": "0",
-    "hud_qtv_buffer_align_x": "center",
-    "hud_qtv_buffer_align_y": "top"
+    "hud_qtv_buffer_proportional": "0"
    }
   },
   {
@@ -75,25 +74,23 @@
    "parent": null,
    "align_x": "center",
    "align_y": "center",
-   "pos_x": "26",
-   "pos_y": "58",
+   "pos_x": 3.30551,
+   "pos_y": -19.2001,
    "order": 0,
    "frame": 0,
    "rect": {
-    "x": 0,
-    "y": 408,
-    "w": 2560,
-    "h": 699
+    "x": 408,
+    "y": 331,
+    "w": 1792,
+    "h": 490
    },
    "cvars": {
     "hud_centerprint_frame": "0",
     "hud_centerprint_frame_color": "0 0 0",
     "hud_centerprint_item_opacity": "1",
-    "hud_centerprint_scale": "1",
+    "hud_centerprint_scale": "0.7",
     "hud_centerprint_proportional": "1",
-    "hud_centerprint_speed": "8",
-    "hud_centerprint_align_x": "right",
-    "hud_centerprint_align_y": "top"
+    "hud_centerprint_speed": "8"
    }
   },
   {
@@ -104,8 +101,8 @@
    "parent": null,
    "align_x": "right",
    "align_y": "bottom",
-   "pos_x": "39",
-   "pos_y": "87",
+   "pos_x": "8",
+   "pos_y": "8",
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -136,10 +133,11 @@
     "hud_frags_maxname": "3",
     "hud_frags_notintp": "0",
     "hud_frags_fixedwidth": "0",
-    "hud_frags_scale": "2",
+    "hud_frags_scale": "1",
     "hud_frags_proportional": "0",
+    "hud_frags_place": "screen",
     "hud_frags_align_x": "left",
-    "hud_frags_align_y": "center"
+    "hud_frags_align_y": "top"
    }
   },
   {
@@ -150,13 +148,13 @@
    "parent": null,
    "align_x": "right",
    "align_y": "center",
-   "pos_x": "52",
-   "pos_y": "116",
+   "pos_x": "0",
+   "pos_y": "-16",
    "order": 0,
    "frame": 0,
    "rect": {
-    "x": 1356,
-    "y": 1020,
+    "x": 1304,
+    "y": 888,
     "w": 223,
     "h": 87
    },
@@ -181,8 +179,9 @@
     "hud_teaminfo_flag_style": "1",
     "hud_teaminfo_proportional": "1",
     "hud_teaminfo_header_spacing": "1",
+    "hud_teaminfo_place": "screen",
     "hud_teaminfo_align_x": "center",
-    "hud_teaminfo_align_y": "center"
+    "hud_teaminfo_align_y": "bottom"
    }
   },
   {
@@ -193,8 +192,8 @@
    "parent": null,
    "align_x": "center",
    "align_y": "bottom",
-   "pos_x": "65",
-   "pos_y": "25",
+   "pos_x": "0",
+   "pos_y": "16",
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -206,20 +205,21 @@
     "hud_weaponstats_textalign": "center",
     "hud_weaponstats_scale": "1",
     "hud_weaponstats_proportional": "0",
-    "hud_weaponstats_align_x": "right",
-    "hud_weaponstats_align_y": "center"
+    "hud_weaponstats_place": "screen",
+    "hud_weaponstats_align_x": "center",
+    "hud_weaponstats_align_y": "top"
    }
   },
   {
    "name": "radar",
    "description": "Plots the players on a picture of the map. (Only when watching MVD's or QTV).",
-   "shown": true,
+   "shown": false,
    "place": "top",
    "parent": null,
    "align_x": "left",
    "align_y": "bottom",
-   "pos_x": "78",
-   "pos_y": "54",
+   "pos_x": 0,
+   "pos_y": 0,
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -244,12 +244,10 @@
     "hud_radar_itemfilter": "backpack quad pent suit ring health armor shells cells rockets nails mega",
     "hud_radar_otherfilter": "projectiles gibs explosions shotgun",
     "hud_radar_onlytp": "0",
-    "hud_radar_scale": "2",
+    "hud_radar_scale": "1",
     "hud_radar_simpleitems": "1",
     "hud_radar_colornames": "0",
-    "hud_radar_proportional": "0",
-    "hud_radar_align_x": "left",
-    "hud_radar_align_y": "bottom"
+    "hud_radar_proportional": "0"
    }
   },
   {
@@ -260,8 +258,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "top",
-   "pos_x": "-16",
-   "pos_y": "83",
+   "pos_x": "0",
+   "pos_y": "0",
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -270,20 +268,21 @@
     "hud_netproblem_frame_color": "0 0 0",
     "hud_netproblem_item_opacity": "0.99",
     "hud_netproblem_scale": "1",
+    "hud_netproblem_place": "screen",
     "hud_netproblem_align_x": "center",
-    "hud_netproblem_align_y": "bottom"
+    "hud_netproblem_align_y": "center"
    }
   },
   {
    "name": "gamesummary",
    "description": "Shows total pickups & current weapons.",
-   "shown": true,
+   "shown": false,
    "place": "top",
    "parent": null,
    "align_x": "left",
    "align_y": "top",
-   "pos_x": "104",
-   "pos_y": "112",
+   "pos_x": 0,
+   "pos_y": 0,
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -298,9 +297,7 @@
     "hud_gamesummary_circles": "0",
     "hud_gamesummary_ratio": "4",
     "hud_gamesummary_flash": "1",
-    "hud_gamesummary_proportional": "0",
-    "hud_gamesummary_align_x": "right",
-    "hud_gamesummary_align_y": "bottom"
+    "hud_gamesummary_proportional": "0"
    }
   },
   {
@@ -311,8 +308,8 @@
    "parent": null,
    "align_x": "center",
    "align_y": "bottom",
-   "pos_x": "117",
-   "pos_y": "21",
+   "pos_x": "-24",
+   "pos_y": "24",
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -321,14 +318,15 @@
     "hud_score_bar_frame_color": "0 0 0",
     "hud_score_bar_item_opacity": "0.99",
     "hud_score_bar_style": "0",
-    "hud_score_bar_scale": "2",
+    "hud_score_bar_scale": "1",
     "hud_score_bar_format_small": "%T      %E",
     "hud_score_bar_format_big": "%t       %e",
     "hud_score_bar_format_reversed_big": "",
     "hud_score_bar_format_reversed_small": "",
     "hud_score_bar_frag_length": "0",
     "hud_score_bar_proportional": "0",
-    "hud_score_bar_align_x": "left",
+    "hud_score_bar_place": "screen",
+    "hud_score_bar_align_x": "right",
     "hud_score_bar_align_y": "top"
    }
   },
@@ -340,8 +338,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "top",
-   "pos_x": "130",
-   "pos_y": "50",
+   "pos_x": "8",
+   "pos_y": "0",
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -352,8 +350,9 @@
     "hud_sigil1_style": "0",
     "hud_sigil1_scale": "1",
     "hud_sigil1_proportional": "0",
-    "hud_sigil1_align_x": "center",
-    "hud_sigil1_align_y": "top"
+    "hud_sigil1_place": "screen",
+    "hud_sigil1_align_x": "left",
+    "hud_sigil1_align_y": "center"
    }
   },
   {
@@ -364,8 +363,8 @@
    "parent": null,
    "align_x": "top",
    "align_y": "left",
-   "pos_x": "143",
-   "pos_y": "79",
+   "pos_x": "-24",
+   "pos_y": "24",
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -376,6 +375,7 @@
     "hud_key1_style": "0",
     "hud_key1_scale": "1",
     "hud_key1_proportional": "0",
+    "hud_key1_place": "screen",
     "hud_key1_align_x": "right",
     "hud_key1_align_y": "top"
    }
@@ -388,8 +388,8 @@
    "parent": null,
    "align_x": "center",
    "align_y": "center",
-   "pos_x": "156",
-   "pos_y": "108",
+   "pos_x": "0",
+   "pos_y": "-16",
    "order": 0,
    "frame": 0.5,
    "rect": null,
@@ -403,8 +403,9 @@
     "hud_group5_picture": "",
     "hud_group5_pic_alpha": "1.0",
     "hud_group5_pic_scalemode": "0",
-    "hud_group5_align_x": "left",
-    "hud_group5_align_y": "center"
+    "hud_group5_place": "screen",
+    "hud_group5_align_x": "center",
+    "hud_group5_align_y": "bottom"
    }
   },
   {
@@ -415,8 +416,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "top",
-   "pos_x": "9",
-   "pos_y": "17",
+   "pos_x": "0",
+   "pos_y": "16",
    "order": 0,
    "frame": 0.5,
    "rect": null,
@@ -430,8 +431,9 @@
     "hud_group2_picture": "",
     "hud_group2_pic_alpha": "1.0",
     "hud_group2_pic_scalemode": "0",
+    "hud_group2_place": "screen",
     "hud_group2_align_x": "center",
-    "hud_group2_align_y": "center"
+    "hud_group2_align_y": "top"
    }
   },
   {
@@ -443,7 +445,7 @@
    "align_x": "left",
    "align_y": "top",
    "pos_x": "-24",
-   "pos_y": "46",
+   "pos_y": "24",
    "order": 0,
    "frame": 0.5,
    "rect": null,
@@ -457,8 +459,9 @@
     "hud_group1_picture": "",
     "hud_group1_pic_alpha": "1.0",
     "hud_group1_pic_scalemode": "0",
+    "hud_group1_place": "screen",
     "hud_group1_align_x": "right",
-    "hud_group1_align_y": "center"
+    "hud_group1_align_y": "top"
    }
   },
   {
@@ -469,8 +472,8 @@
    "parent": null,
    "align_x": "center",
    "align_y": "bottom",
-   "pos_x": "35",
-   "pos_y": "75",
+   "pos_x": "-24",
+   "pos_y": "0",
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -480,23 +483,24 @@
     "hud_gun_item_opacity": "0.99",
     "hud_gun_wide": "0",
     "hud_gun_style": "0",
-    "hud_gun_scale": "2",
+    "hud_gun_scale": "1",
     "hud_gun_proportional": "0",
     "hud_gun_frame_hide": "0",
-    "hud_gun_align_x": "left",
-    "hud_gun_align_y": "bottom"
+    "hud_gun_place": "screen",
+    "hud_gun_align_x": "right",
+    "hud_gun_align_y": "center"
    }
   },
   {
    "name": "framestats",
    "description": "Shows information about the renderer's status & workload.",
-   "shown": true,
+   "shown": false,
    "place": "top",
    "parent": null,
    "align_x": "left",
    "align_y": "bottom",
-   "pos_x": "48",
-   "pos_y": "104",
+   "pos_x": 0,
+   "pos_y": 0,
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -506,21 +510,19 @@
     "hud_framestats_item_opacity": "1",
     "hud_framestats_scale": "1",
     "hud_framestats_proportional": "0",
-    "hud_framestats_amfstats": "0",
-    "hud_framestats_align_x": "center",
-    "hud_framestats_align_y": "bottom"
+    "hud_framestats_amfstats": "0"
    }
   },
   {
    "name": "teamstackbar",
    "description": "Shows relative stacks of each team.",
-   "shown": true,
+   "shown": false,
    "place": "top",
    "parent": null,
    "align_x": "left",
    "align_y": "bottom",
-   "pos_x": "61",
-   "pos_y": "13",
+   "pos_x": 0,
+   "pos_y": 0,
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -537,21 +539,19 @@
     "hud_teamstackbar_onlytp": "0",
     "hud_teamstackbar_scale": "1",
     "hud_teamstackbar_simpleitems": "1",
-    "hud_teamstackbar_proportional": "0",
-    "hud_teamstackbar_align_x": "right",
-    "hud_teamstackbar_align_y": "bottom"
+    "hud_teamstackbar_proportional": "0"
    }
   },
   {
    "name": "static_text",
    "description": "Static text (demos only).",
-   "shown": true,
+   "shown": false,
    "place": "screen",
    "parent": null,
    "align_x": "left",
    "align_y": "top",
-   "pos_x": "74",
-   "pos_y": "42",
+   "pos_x": 5.5,
+   "pos_y": 509,
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -561,12 +561,10 @@
     "hud_static_text_item_opacity": "0.99",
     "hud_static_text_big": "0",
     "hud_static_text_style": "0",
-    "hud_static_text_scale": "2",
+    "hud_static_text_scale": "1",
     "hud_static_text_text": " t  3 : 0 POL",
     "hud_static_text_textalign": "left",
-    "hud_static_text_proportional": "0",
-    "hud_static_text_align_x": "left",
-    "hud_static_text_align_y": "top"
+    "hud_static_text_proportional": "0"
    }
   },
   {
@@ -577,8 +575,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "top",
-   "pos_x": "87",
-   "pos_y": "71",
+   "pos_x": "8",
+   "pos_y": "0",
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -591,20 +589,21 @@
     "hud_tracker_name_width": "3",
     "hud_tracker_align_right": "0",
     "hud_tracker_image_scale": "1.5",
-    "hud_tracker_align_x": "center",
-    "hud_tracker_align_y": "top"
+    "hud_tracker_place": "screen",
+    "hud_tracker_align_x": "left",
+    "hud_tracker_align_y": "center"
    }
   },
   {
    "name": "netgraph",
    "description": "Shows your network conditions in graph-form. With netgraph you can monitor your latency (ping), packet loss and network errors.",
-   "shown": true,
+   "shown": false,
    "place": "top",
    "parent": null,
    "align_x": "left",
    "align_y": "bottom",
-   "pos_x": "100",
-   "pos_y": "100",
+   "pos_x": -2.5,
+   "pos_y": 52.5,
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -615,14 +614,12 @@
     "hud_netgraph_swap_x": "0",
     "hud_netgraph_swap_y": "0",
     "hud_netgraph_inframes": "0",
-    "hud_netgraph_scale": "1",
+    "hud_netgraph_scale": "540",
     "hud_netgraph_ploss": "1",
     "hud_netgraph_width": "333",
     "hud_netgraph_height": "32",
     "hud_netgraph_lostscale": "1",
-    "hud_netgraph_alpha": "1",
-    "hud_netgraph_align_x": "right",
-    "hud_netgraph_align_y": "top"
+    "hud_netgraph_alpha": "1"
    }
   },
   {
@@ -633,8 +630,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "bottom",
-   "pos_x": "-8",
-   "pos_y": "9",
+   "pos_x": "8",
+   "pos_y": "8",
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -649,10 +646,11 @@
     "hud_teamholdbar_vertical_text": "0",
     "hud_teamholdbar_show_text": "0",
     "hud_teamholdbar_onlytp": "0",
-    "hud_teamholdbar_scale": "2",
+    "hud_teamholdbar_scale": "1",
     "hud_teamholdbar_proportional": "0",
+    "hud_teamholdbar_place": "screen",
     "hud_teamholdbar_align_x": "left",
-    "hud_teamholdbar_align_y": "center"
+    "hud_teamholdbar_align_y": "top"
    }
   },
   {
@@ -663,8 +661,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "bottom",
-   "pos_x": "126",
-   "pos_y": "38",
+   "pos_x": "8",
+   "pos_y": "0",
    "order": 0,
    "frame": 0,
    "rect": null,
@@ -680,7 +678,8 @@
     "hud_teamholdinfo_itemfilter": "quad ra ya ga mega pent rl quad",
     "hud_teamholdinfo_scale": "1",
     "hud_teamholdinfo_proportional": "0",
-    "hud_teamholdinfo_align_x": "center",
+    "hud_teamholdinfo_place": "screen",
+    "hud_teamholdinfo_align_x": "left",
     "hud_teamholdinfo_align_y": "center"
    }
   },
@@ -692,13 +691,13 @@
    "parent": null,
    "align_x": "right",
    "align_y": "center",
-   "pos_x": "139",
-   "pos_y": "67",
+   "pos_x": "8",
+   "pos_y": "8",
    "order": 0,
    "frame": 0,
    "rect": {
-    "x": 927,
-    "y": 1255,
+    "x": 796,
+    "y": 1196,
     "w": 400,
     "h": 144
    },
@@ -714,8 +713,9 @@
     "hud_bar_health_color_mega": "0 100 100 200",
     "hud_bar_health_color_twomega": "0 255 255 255",
     "hud_bar_health_color_unnatural": "255 255 255 0",
-    "hud_bar_health_align_x": "right",
-    "hud_bar_health_align_y": "center"
+    "hud_bar_health_place": "screen",
+    "hud_bar_health_align_x": "left",
+    "hud_bar_health_align_y": "top"
    }
   },
   {
@@ -726,8 +726,8 @@
    "parent": null,
    "align_x": "center",
    "align_y": "top",
-   "pos_x": "152",
-   "pos_y": "96",
+   "pos_x": "0",
+   "pos_y": "-16",
    "order": 1,
    "frame": 0,
    "rect": null,
@@ -736,9 +736,10 @@
     "hud_ownfrags_frame_color": "0 0 100",
     "hud_ownfrags_item_opacity": "0.99",
     "hud_ownfrags_timeout": "3",
-    "hud_ownfrags_scale": "2",
+    "hud_ownfrags_scale": "1",
     "hud_ownfrags_proportional": "1",
-    "hud_ownfrags_align_x": "left",
+    "hud_ownfrags_place": "screen",
+    "hud_ownfrags_align_x": "center",
     "hud_ownfrags_align_y": "bottom"
    }
   },
@@ -750,8 +751,8 @@
    "parent": "sigil1",
    "align_x": "after",
    "align_y": "top",
-   "pos_x": "5",
-   "pos_y": "5",
+   "pos_x": "-24",
+   "pos_y": "24",
    "order": 1,
    "frame": 0,
    "rect": null,
@@ -762,8 +763,9 @@
     "hud_sigil2_style": "0",
     "hud_sigil2_scale": "1",
     "hud_sigil2_proportional": "0",
-    "hud_sigil2_align_x": "center",
-    "hud_sigil2_align_y": "bottom"
+    "hud_sigil2_place": "screen",
+    "hud_sigil2_align_x": "right",
+    "hud_sigil2_align_y": "top"
    }
   },
   {
@@ -774,8 +776,8 @@
    "parent": "key1",
    "align_x": "left",
    "align_y": "after",
-   "pos_x": "18",
-   "pos_y": "34",
+   "pos_x": "8",
+   "pos_y": "8",
    "order": 1,
    "frame": 0,
    "rect": null,
@@ -786,8 +788,9 @@
     "hud_key2_style": "0",
     "hud_key2_scale": "1",
     "hud_key2_proportional": "0",
-    "hud_key2_align_x": "right",
-    "hud_key2_align_y": "bottom"
+    "hud_key2_place": "screen",
+    "hud_key2_align_x": "left",
+    "hud_key2_align_y": "top"
    }
   },
   {
@@ -798,8 +801,8 @@
    "parent": null,
    "align_x": "center",
    "align_y": "center",
-   "pos_x": "31",
-   "pos_y": "63",
+   "pos_x": "0",
+   "pos_y": "0",
    "order": 1,
    "frame": 0.01,
    "rect": null,
@@ -813,8 +816,9 @@
     "hud_group8_picture": "",
     "hud_group8_pic_alpha": "0",
     "hud_group8_pic_scalemode": "0",
-    "hud_group8_align_x": "left",
-    "hud_group8_align_y": "top"
+    "hud_group8_place": "screen",
+    "hud_group8_align_x": "center",
+    "hud_group8_align_y": "center"
    }
   },
   {
@@ -825,8 +829,8 @@
    "parent": null,
    "align_x": "right",
    "align_y": "center",
-   "pos_x": "-16",
-   "pos_y": "92",
+   "pos_x": "8",
+   "pos_y": "-8",
    "order": 1,
    "frame": 0,
    "rect": null,
@@ -840,8 +844,9 @@
     "hud_itemsclock_filter": "",
     "hud_itemsclock_proportional": "1",
     "hud_itemsclock_backpacks": "0",
-    "hud_itemsclock_align_x": "center",
-    "hud_itemsclock_align_y": "top"
+    "hud_itemsclock_place": "screen",
+    "hud_itemsclock_align_x": "left",
+    "hud_itemsclock_align_y": "bottom"
    }
   },
   {
@@ -852,8 +857,8 @@
    "parent": null,
    "align_x": "right",
    "align_y": "center",
-   "pos_x": "57",
-   "pos_y": "1",
+   "pos_x": "-24",
+   "pos_y": "0",
    "order": 1,
    "frame": 0.5,
    "rect": null,
@@ -863,8 +868,9 @@
     "hud_keys_item_opacity": "0.99",
     "hud_keys_scale": "1",
     "hud_keys_player": "",
+    "hud_keys_place": "screen",
     "hud_keys_align_x": "right",
-    "hud_keys_align_y": "top"
+    "hud_keys_align_y": "center"
    }
   },
   {
@@ -875,13 +881,13 @@
    "parent": null,
    "align_x": "right",
    "align_y": "top",
-   "pos_x": "70",
-   "pos_y": "30",
+   "pos_x": "8",
+   "pos_y": "-8",
    "order": 1,
    "frame": 0,
    "rect": {
     "x": 0,
-    "y": 594,
+    "y": 556,
     "w": 2560,
     "h": 0
    },
@@ -891,11 +897,12 @@
     "hud_notify_item_opacity": "1",
     "hud_notify_rows": "6",
     "hud_notify_cols": "60",
-    "hud_notify_scale": "2",
+    "hud_notify_scale": "1",
     "hud_notify_time": "10",
     "hud_notify_proportional": "1",
+    "hud_notify_place": "screen",
     "hud_notify_align_x": "left",
-    "hud_notify_align_y": "center"
+    "hud_notify_align_y": "bottom"
    }
   },
   {
@@ -906,13 +913,13 @@
    "parent": null,
    "align_x": "",
    "align_y": "",
-   "pos_x": "83",
-   "pos_y": "59",
+   "pos_x": "-24",
+   "pos_y": "-24",
    "order": 2,
    "frame": 0,
    "rect": {
-    "x": 1921,
-    "y": 747,
+    "x": 1814,
+    "y": 664,
     "w": 192,
     "h": 173
    },
@@ -921,8 +928,9 @@
     "hud_face_frame_color": "0 0 0",
     "hud_face_item_opacity": "0.5",
     "hud_face_scale": "1",
-    "hud_face_align_x": "center",
-    "hud_face_align_y": "center"
+    "hud_face_place": "screen",
+    "hud_face_align_x": "right",
+    "hud_face_align_y": "bottom"
    }
   },
   {
@@ -933,8 +941,8 @@
    "parent": "sigil2",
    "align_x": "after",
    "align_y": "top",
-   "pos_x": "96",
-   "pos_y": "88",
+   "pos_x": "0",
+   "pos_y": "16",
    "order": 2,
    "frame": 0,
    "rect": null,
@@ -945,8 +953,9 @@
     "hud_sigil3_style": "0",
     "hud_sigil3_scale": "1",
     "hud_sigil3_proportional": "0",
-    "hud_sigil3_align_x": "right",
-    "hud_sigil3_align_y": "center"
+    "hud_sigil3_place": "screen",
+    "hud_sigil3_align_x": "center",
+    "hud_sigil3_align_y": "top"
    }
   },
   {
@@ -957,8 +966,8 @@
    "parent": "key2",
    "align_x": "left",
    "align_y": "after",
-   "pos_x": "109",
-   "pos_y": "117",
+   "pos_x": "-24",
+   "pos_y": "-24",
    "order": 2,
    "frame": 0,
    "rect": null,
@@ -967,9 +976,10 @@
     "hud_ring_frame_color": "0 0 0",
     "hud_ring_item_opacity": "0.99",
     "hud_ring_style": "0",
-    "hud_ring_scale": "2",
+    "hud_ring_scale": "1",
     "hud_ring_proportional": "0",
-    "hud_ring_align_x": "left",
+    "hud_ring_place": "screen",
+    "hud_ring_align_x": "right",
     "hud_ring_align_y": "bottom"
    }
   },
@@ -981,8 +991,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "top",
-   "pos_x": "122",
-   "pos_y": "26",
+   "pos_x": "8",
+   "pos_y": "0",
    "order": 2,
    "frame": 1,
    "rect": null,
@@ -996,8 +1006,9 @@
     "hud_group9_picture": "",
     "hud_group9_pic_alpha": "1",
     "hud_group9_pic_scalemode": "2",
-    "hud_group9_align_x": "center",
-    "hud_group9_align_y": "bottom"
+    "hud_group9_place": "screen",
+    "hud_group9_align_x": "left",
+    "hud_group9_align_y": "center"
    }
   },
   {
@@ -1008,13 +1019,13 @@
    "parent": null,
    "align_x": "left",
    "align_y": "top",
-   "pos_x": "-24",
-   "pos_y": "55",
+   "pos_x": "8",
+   "pos_y": "8",
    "order": 3,
    "frame": 0,
    "rect": {
-    "x": 1340,
-    "y": 1230,
+    "x": 1372,
+    "y": 1183,
     "w": 160,
     "h": 144
    },
@@ -1024,8 +1035,9 @@
     "hud_iammo1_item_opacity": "1",
     "hud_iammo1_style": "0",
     "hud_iammo1_scale": "1",
-    "hud_iammo1_align_x": "right",
-    "hud_iammo1_align_y": "bottom"
+    "hud_iammo1_place": "screen",
+    "hud_iammo1_align_x": "left",
+    "hud_iammo1_align_y": "top"
    }
   },
   {
@@ -1036,29 +1048,30 @@
    "parent": null,
    "align_x": "left",
    "align_y": "top",
-   "pos_x": "148",
-   "pos_y": "84",
+   "pos_x": "-24",
+   "pos_y": "0",
    "order": 3,
    "frame": 0,
    "rect": {
-    "x": 1548,
-    "y": 1259,
-    "w": 378,
-    "h": 105
+    "x": 1376,
+    "y": 1175,
+    "w": 189,
+    "h": 52
    },
    "cvars": {
     "hud_ammo1_frame": "0",
     "hud_ammo1_frame_color": "0 0 0",
     "hud_ammo1_item_opacity": "0.2",
     "hud_ammo1_style": "1",
-    "hud_ammo1_scale": "2",
+    "hud_ammo1_scale": "1",
     "hud_ammo1_align": "left",
     "hud_ammo1_digits": "3",
     "hud_ammo1_proportional": "1",
     "hud_ammo1_text_color_low": "",
     "hud_ammo1_text_color_normal": "",
-    "hud_ammo1_align_x": "left",
-    "hud_ammo1_align_y": "top"
+    "hud_ammo1_place": "screen",
+    "hud_ammo1_align_x": "right",
+    "hud_ammo1_align_y": "center"
    }
   },
   {
@@ -1069,8 +1082,8 @@
    "parent": "sigil3",
    "align_x": "after",
    "align_y": "top",
-   "pos_x": "1",
-   "pos_y": "113",
+   "pos_x": "8",
+   "pos_y": "8",
    "order": 3,
    "frame": 0,
    "rect": null,
@@ -1081,7 +1094,8 @@
     "hud_sigil4_style": "0",
     "hud_sigil4_scale": "1",
     "hud_sigil4_proportional": "0",
-    "hud_sigil4_align_x": "center",
+    "hud_sigil4_place": "screen",
+    "hud_sigil4_align_x": "left",
     "hud_sigil4_align_y": "top"
    }
   },
@@ -1093,8 +1107,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "bottom",
-   "pos_x": "14",
-   "pos_y": "22",
+   "pos_x": "0",
+   "pos_y": "0",
    "order": 3,
    "frame": 0,
    "rect": null,
@@ -1106,8 +1120,9 @@
     "hud_gun2_scale": "1",
     "hud_gun2_proportional": "0",
     "hud_gun2_frame_hide": "0",
-    "hud_gun2_align_x": "right",
-    "hud_gun2_align_y": "top"
+    "hud_gun2_place": "screen",
+    "hud_gun2_align_x": "center",
+    "hud_gun2_align_y": "center"
    }
   },
   {
@@ -1118,26 +1133,27 @@
    "parent": null,
    "align_x": "center",
    "align_y": "center",
-   "pos_x": "27",
-   "pos_y": "51",
+   "pos_x": "8",
+   "pos_y": "-8",
    "order": 4,
    "frame": 0,
    "rect": {
-    "x": 893,
-    "y": 1224,
-    "w": 373,
-    "h": 216
+    "x": 874,
+    "y": 1228,
+    "w": 187,
+    "h": 108
    },
    "cvars": {
     "hud_gun3_frame": "0",
     "hud_gun3_frame_color": "0 0 0",
     "hud_gun3_item_opacity": ".8",
     "hud_gun3_style": "9",
-    "hud_gun3_scale": "2",
+    "hud_gun3_scale": "1",
     "hud_gun3_proportional": "0",
     "hud_gun3_frame_hide": "0",
+    "hud_gun3_place": "screen",
     "hud_gun3_align_x": "left",
-    "hud_gun3_align_y": "center"
+    "hud_gun3_align_y": "bottom"
    }
   },
   {
@@ -1148,13 +1164,13 @@
    "parent": null,
    "align_x": "220",
    "align_y": "top",
-   "pos_x": "40",
-   "pos_y": "80",
+   "pos_x": "-24",
+   "pos_y": "-24",
    "order": 4,
    "frame": 0,
    "rect": {
-    "x": 1530,
-    "y": 1254,
+    "x": 1466,
+    "y": 1150,
     "w": 160,
     "h": 144
    },
@@ -1164,8 +1180,9 @@
     "hud_iammo2_item_opacity": "0.99",
     "hud_iammo2_style": "0",
     "hud_iammo2_scale": "1",
-    "hud_iammo2_align_x": "center",
-    "hud_iammo2_align_y": "center"
+    "hud_iammo2_place": "screen",
+    "hud_iammo2_align_x": "right",
+    "hud_iammo2_align_y": "bottom"
    }
   },
   {
@@ -1176,13 +1193,13 @@
    "parent": null,
    "align_x": "center",
    "align_y": "center",
-   "pos_x": "53",
-   "pos_y": "109",
+   "pos_x": "8",
+   "pos_y": "0",
    "order": 4,
    "frame": 0,
    "rect": {
-    "x": 1059,
-    "y": 1388,
+    "x": 1014,
+    "y": 1288,
     "w": 189,
     "h": 52
    },
@@ -1197,7 +1214,8 @@
     "hud_ammo2_proportional": "1",
     "hud_ammo2_text_color_low": "",
     "hud_ammo2_text_color_normal": "",
-    "hud_ammo2_align_x": "right",
+    "hud_ammo2_place": "screen",
+    "hud_ammo2_align_x": "left",
     "hud_ammo2_align_y": "center"
    }
   },
@@ -1209,23 +1227,24 @@
    "parent": null,
    "align_x": "after",
    "align_y": "top",
-   "pos_x": "-8",
-   "pos_y": "18",
+   "pos_x": "0",
+   "pos_y": "-16",
    "order": 5,
    "frame": 0,
    "rect": {
-    "x": 592,
-    "y": 1094,
-    "w": 384,
-    "h": 346
+    "x": 600,
+    "y": 1125,
+    "w": 192,
+    "h": 173
    },
    "cvars": {
     "hud_iammo3_frame": "0",
     "hud_iammo3_frame_color": "0 0 0",
     "hud_iammo3_item_opacity": "0.7",
     "hud_iammo3_style": "0",
-    "hud_iammo3_scale": "2",
-    "hud_iammo3_align_x": "left",
+    "hud_iammo3_scale": "1",
+    "hud_iammo3_place": "screen",
+    "hud_iammo3_align_x": "center",
     "hud_iammo3_align_y": "bottom"
    }
   },
@@ -1237,13 +1256,13 @@
    "parent": null,
    "align_x": "center",
    "align_y": "center",
-   "pos_x": "79",
-   "pos_y": "47",
+   "pos_x": "8",
+   "pos_y": "-8",
    "order": 5,
    "frame": 0,
    "rect": {
-    "x": 1252,
-    "y": 1161,
+    "x": 1181,
+    "y": 1106,
     "w": 128,
     "h": 58
    },
@@ -1258,7 +1277,8 @@
     "hud_ammo3_proportional": "0",
     "hud_ammo3_text_color_low": "",
     "hud_ammo3_text_color_normal": "",
-    "hud_ammo3_align_x": "center",
+    "hud_ammo3_place": "screen",
+    "hud_ammo3_align_x": "left",
     "hud_ammo3_align_y": "bottom"
    }
   },
@@ -1270,8 +1290,8 @@
    "parent": null,
    "align_x": "center",
    "align_y": "center",
-   "pos_x": "92",
-   "pos_y": "76",
+   "pos_x": "0",
+   "pos_y": "0",
    "order": 5,
    "frame": 0,
    "rect": null,
@@ -1283,8 +1303,9 @@
     "hud_gun4_scale": "1",
     "hud_gun4_proportional": "0",
     "hud_gun4_frame_hide": "0",
-    "hud_gun4_align_x": "right",
-    "hud_gun4_align_y": "bottom"
+    "hud_gun4_place": "screen",
+    "hud_gun4_align_x": "center",
+    "hud_gun4_align_y": "center"
    }
   },
   {
@@ -1295,24 +1316,25 @@
    "parent": null,
    "align_x": "center",
    "align_y": "top",
-   "pos_x": "105",
-   "pos_y": "105",
+   "pos_x": "-24",
+   "pos_y": "0",
    "order": 6,
    "frame": 0,
    "rect": {
-    "x": 1474,
-    "y": 1152,
-    "w": 320,
-    "h": 288
+    "x": 1345,
+    "y": 1174,
+    "w": 160,
+    "h": 144
    },
    "cvars": {
     "hud_iammo4_frame": "0",
     "hud_iammo4_frame_color": "0 0 0",
     "hud_iammo4_item_opacity": "1",
     "hud_iammo4_style": "0",
-    "hud_iammo4_scale": "2",
-    "hud_iammo4_align_x": "left",
-    "hud_iammo4_align_y": "top"
+    "hud_iammo4_scale": "1",
+    "hud_iammo4_place": "screen",
+    "hud_iammo4_align_x": "right",
+    "hud_iammo4_align_y": "center"
    }
   },
   {
@@ -1323,13 +1345,13 @@
    "parent": null,
    "align_x": "center",
    "align_y": "center",
-   "pos_x": "118",
-   "pos_y": "14",
+   "pos_x": "-24",
+   "pos_y": "24",
    "order": 6,
    "frame": 0,
    "rect": {
-    "x": 1534,
-    "y": 1308,
+    "x": 1392,
+    "y": 1318,
     "w": 116,
     "h": 52
    },
@@ -1344,7 +1366,8 @@
     "hud_ammo4_proportional": "1",
     "hud_ammo4_text_color_low": "",
     "hud_ammo4_text_color_normal": "",
-    "hud_ammo4_align_x": "center",
+    "hud_ammo4_place": "screen",
+    "hud_ammo4_align_x": "right",
     "hud_ammo4_align_y": "top"
    }
   },
@@ -1356,13 +1379,13 @@
    "parent": null,
    "align_x": "center",
    "align_y": "center",
-   "pos_x": "131",
-   "pos_y": "43",
+   "pos_x": "0",
+   "pos_y": "0",
    "order": 6,
    "frame": 0,
    "rect": {
-    "x": 1116,
-    "y": 1278,
+    "x": 985,
+    "y": 1235,
     "w": 187,
     "h": 108
    },
@@ -1374,8 +1397,9 @@
     "hud_gun5_scale": "1",
     "hud_gun5_proportional": "0",
     "hud_gun5_frame_hide": "0",
-    "hud_gun5_align_x": "right",
-    "hud_gun5_align_y": "top"
+    "hud_gun5_place": "screen",
+    "hud_gun5_align_x": "center",
+    "hud_gun5_align_y": "center"
    }
   },
   {
@@ -1386,8 +1410,8 @@
    "parent": null,
    "align_x": "center",
    "align_y": "bottom",
-   "pos_x": "144",
-   "pos_y": "72",
+   "pos_x": "0",
+   "pos_y": "16",
    "order": 7,
    "frame": 0,
    "rect": null,
@@ -1405,10 +1429,11 @@
     "hud_speed2_radius": "50.0",
     "hud_speed2_wrapspeed": "500",
     "hud_speed2_orientation": "0",
-    "hud_speed2_scale": "2",
+    "hud_speed2_scale": "1",
     "hud_speed2_proportional": "0",
-    "hud_speed2_align_x": "left",
-    "hud_speed2_align_y": "center"
+    "hud_speed2_place": "screen",
+    "hud_speed2_align_x": "center",
+    "hud_speed2_align_y": "top"
    }
   },
   {
@@ -1419,8 +1444,8 @@
    "parent": null,
    "align_x": "center",
    "align_y": "bottom",
-   "pos_x": "-16",
-   "pos_y": "101",
+   "pos_x": "-24",
+   "pos_y": "24",
    "order": 7,
    "frame": 0,
    "rect": null,
@@ -1444,8 +1469,9 @@
     "hud_speed_style": "0",
     "hud_speed_scale": "1",
     "hud_speed_proportional": "0",
-    "hud_speed_align_x": "center",
-    "hud_speed_align_y": "center"
+    "hud_speed_place": "screen",
+    "hud_speed_align_x": "right",
+    "hud_speed_align_y": "top"
    }
   },
   {
@@ -1456,8 +1482,8 @@
    "parent": null,
    "align_x": "right",
    "align_y": "console",
-   "pos_x": "10",
-   "pos_y": "10",
+   "pos_x": "8",
+   "pos_y": "8",
    "order": 7,
    "frame": 0,
    "rect": null,
@@ -1470,8 +1496,9 @@
     "hud_democlock_scale": "1",
     "hud_democlock_blink": "0",
     "hud_democlock_proportional": "0",
-    "hud_democlock_align_x": "right",
-    "hud_democlock_align_y": "center"
+    "hud_democlock_place": "screen",
+    "hud_democlock_align_x": "left",
+    "hud_democlock_align_y": "top"
    }
   },
   {
@@ -1482,8 +1509,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "center",
-   "pos_x": "23",
-   "pos_y": "39",
+   "pos_x": "-24",
+   "pos_y": "-24",
    "order": 7,
    "frame": 0.2,
    "rect": null,
@@ -1492,9 +1519,10 @@
     "hud_net_frame_color": "0 0 0",
     "hud_net_item_opacity": "0.99",
     "hud_net_period": "1",
-    "hud_net_scale": "2",
+    "hud_net_scale": "1",
     "hud_net_proportional": "0",
-    "hud_net_align_x": "left",
+    "hud_net_place": "screen",
+    "hud_net_align_x": "right",
     "hud_net_align_y": "bottom"
    }
   },
@@ -1506,13 +1534,13 @@
    "parent": null,
    "align_x": "center",
    "align_y": "center",
-   "pos_x": "36",
-   "pos_y": "68",
+   "pos_x": "0",
+   "pos_y": "16",
    "order": 7,
    "frame": 0,
    "rect": {
-    "x": 1139,
-    "y": 1302,
+    "x": 1103,
+    "y": 1250,
     "w": 183,
     "h": 113
    },
@@ -1524,8 +1552,9 @@
     "hud_gun6_scale": "1",
     "hud_gun6_proportional": "0",
     "hud_gun6_frame_hide": "0",
+    "hud_gun6_place": "screen",
     "hud_gun6_align_x": "center",
-    "hud_gun6_align_y": "bottom"
+    "hud_gun6_align_y": "top"
    }
   },
   {
@@ -1536,8 +1565,8 @@
    "parent": null,
    "align_x": "center",
    "align_y": "bottom",
-   "pos_x": "49",
-   "pos_y": "97",
+   "pos_x": -68.6046,
+   "pos_y": -519.833,
    "order": 8,
    "frame": 0,
    "rect": null,
@@ -1545,11 +1574,9 @@
     "hud_scoreclock_frame": "0",
     "hud_scoreclock_frame_color": "0 0 0",
     "hud_scoreclock_item_opacity": "0.4",
-    "hud_scoreclock_scale": "1",
+    "hud_scoreclock_scale": "0.5",
     "hud_scoreclock_format": "%d/%m-%Y",
-    "hud_scoreclock_proportional": "0",
-    "hud_scoreclock_align_x": "right",
-    "hud_scoreclock_align_y": "bottom"
+    "hud_scoreclock_proportional": "0"
    }
   },
   {
@@ -1560,15 +1587,15 @@
    "parent": null,
    "align_x": "right",
    "align_y": "bottom",
-   "pos_x": "62",
-   "pos_y": "6",
+   "pos_x": "-24",
+   "pos_y": "0",
    "order": 8,
    "frame": 0,
    "rect": {
-    "x": 1920,
-    "y": 261,
-    "w": 640,
-    "h": 115
+    "x": 2216,
+    "y": 255,
+    "w": 320,
+    "h": 58
    },
    "cvars": {
     "hud_clock_frame": "0",
@@ -1576,25 +1603,26 @@
     "hud_clock_item_opacity": "0.2",
     "hud_clock_big": "0",
     "hud_clock_style": "0",
-    "hud_clock_scale": "2",
+    "hud_clock_scale": "1",
     "hud_clock_blink": "0",
     "hud_clock_format": "3",
     "hud_clock_proportional": "1",
     "hud_clock_content": "0",
-    "hud_clock_align_x": "left",
-    "hud_clock_align_y": "top"
+    "hud_clock_place": "screen",
+    "hud_clock_align_x": "right",
+    "hud_clock_align_y": "center"
    }
   },
   {
    "name": "scoremapname",
    "description": "Shows map name on the scoreboard",
-   "shown": true,
+   "shown": false,
    "place": "screen",
    "parent": null,
    "align_x": "right",
    "align_y": "bottom",
-   "pos_x": "75",
-   "pos_y": "35",
+   "pos_x": 0,
+   "pos_y": -10,
    "order": 8,
    "frame": 0,
    "rect": null,
@@ -1604,9 +1632,7 @@
     "hud_scoremapname_item_opacity": "1",
     "hud_scoremapname_style": "0",
     "hud_scoremapname_proportional": "0",
-    "hud_scoremapname_scale": "1",
-    "hud_scoremapname_align_x": "center",
-    "hud_scoremapname_align_y": "top"
+    "hud_scoremapname_scale": "1"
    }
   },
   {
@@ -1617,13 +1643,13 @@
    "parent": null,
    "align_x": "center",
    "align_y": "center",
-   "pos_x": "-24",
-   "pos_y": "64",
+   "pos_x": "8",
+   "pos_y": "0",
    "order": 8,
    "frame": 0,
    "rect": {
-    "x": 1205,
-    "y": 1298,
+    "x": 1237,
+    "y": 1234,
     "w": 183,
     "h": 113
    },
@@ -1635,8 +1661,9 @@
     "hud_gun7_scale": "1",
     "hud_gun7_proportional": "0",
     "hud_gun7_frame_hide": "0",
-    "hud_gun7_align_x": "right",
-    "hud_gun7_align_y": "top"
+    "hud_gun7_place": "screen",
+    "hud_gun7_align_x": "left",
+    "hud_gun7_align_y": "center"
    }
   },
   {
@@ -1647,8 +1674,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "bottom",
-   "pos_x": "101",
-   "pos_y": "93",
+   "pos_x": "8",
+   "pos_y": "8",
    "order": 9,
    "frame": 0,
    "rect": null,
@@ -1656,17 +1683,18 @@
     "hud_ping_frame": "0",
     "hud_ping_frame_color": "0",
     "hud_ping_item_opacity": ".1",
-    "hud_ping_period": "0.6",
-    "hud_ping_show_pl": "1",
+    "hud_ping_period": "999999",
+    "hud_ping_show_pl": "0",
     "hud_ping_show_min": "0",
     "hud_ping_show_max": "0",
     "hud_ping_show_dev": "0",
     "hud_ping_style": "0",
     "hud_ping_blink": "0",
-    "hud_ping_scale": "2",
+    "hud_ping_scale": "1",
     "hud_ping_proportional": "1",
+    "hud_ping_place": "screen",
     "hud_ping_align_x": "left",
-    "hud_ping_align_y": "center"
+    "hud_ping_align_y": "top"
    }
   },
   {
@@ -1677,8 +1705,8 @@
    "parent": null,
    "align_x": "right",
    "align_y": "top",
-   "pos_x": "114",
-   "pos_y": "2",
+   "pos_x": "0",
+   "pos_y": "16",
    "order": 9,
    "frame": 0,
    "rect": null,
@@ -1689,8 +1717,9 @@
     "hud_vidlag_style": "1",
     "hud_vidlag_scale": "1",
     "hud_vidlag_proportional": "0",
+    "hud_vidlag_place": "screen",
     "hud_vidlag_align_x": "center",
-    "hud_vidlag_align_y": "center"
+    "hud_vidlag_align_y": "top"
    }
   },
   {
@@ -1701,8 +1730,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "bottom",
-   "pos_x": "127",
-   "pos_y": "31",
+   "pos_x": "-24",
+   "pos_y": "24",
    "order": 9,
    "frame": 0,
    "rect": null,
@@ -1713,11 +1742,12 @@
     "hud_fps_show_min": "1",
     "hud_fps_style": "0",
     "hud_fps_title": "1",
-    "hud_fps_scale": "1",
+    "hud_fps_scale": "0.985",
     "hud_fps_drop": "0",
     "hud_fps_proportional": "1",
+    "hud_fps_place": "screen",
     "hud_fps_align_x": "right",
-    "hud_fps_align_y": "center"
+    "hud_fps_align_y": "top"
    }
   },
   {
@@ -1728,41 +1758,42 @@
    "parent": null,
    "align_x": "before",
    "align_y": "center",
-   "pos_x": "140",
-   "pos_y": "60",
+   "pos_x": "8",
+   "pos_y": "0",
    "order": 10,
    "frame": 0,
    "rect": {
-    "x": 1395,
-    "y": 1249,
-    "w": 384,
-    "h": 115
+    "x": 1263,
+    "y": 1189,
+    "w": 192,
+    "h": 58
    },
    "cvars": {
     "hud_armor_frame": "0",
     "hud_armor_frame_color": "40 40 40",
     "hud_armor_item_opacity": "1",
     "hud_armor_style": "1",
-    "hud_armor_scale": "2",
+    "hud_armor_scale": "1",
     "hud_armor_align": "left",
     "hud_armor_digits": "3",
     "hud_armor_pent_666": "0",
     "hud_armor_proportional": "1",
     "hud_armor_hidezero": "0",
+    "hud_armor_place": "screen",
     "hud_armor_align_x": "left",
-    "hud_armor_align_y": "bottom"
+    "hud_armor_align_y": "center"
    }
   },
   {
    "name": "frametime",
    "description": "Shows your current frametime in ms.This can also show the maximum frametime that occured in the last measured period.",
-   "shown": true,
+   "shown": false,
    "place": "fps",
    "parent": "fps",
    "align_x": "center",
    "align_y": "after",
-   "pos_x": "153",
-   "pos_y": "89",
+   "pos_x": 28.5,
+   "pos_y": -16,
    "order": 10,
    "frame": 0,
    "rect": null,
@@ -1775,9 +1806,7 @@
     "hud_frametime_title": "1",
     "hud_frametime_scale": "1",
     "hud_frametime_spike": "10",
-    "hud_frametime_proportional": "0",
-    "hud_frametime_align_x": "center",
-    "hud_frametime_align_y": "bottom"
+    "hud_frametime_proportional": "0"
    }
   },
   {
@@ -1788,8 +1817,8 @@
    "parent": "armor",
    "align_x": "before",
    "align_y": "center",
-   "pos_x": "6",
-   "pos_y": "118",
+   "pos_x": "0",
+   "pos_y": "0",
    "order": 11,
    "frame": 0,
    "rect": null,
@@ -1800,8 +1829,9 @@
     "hud_iarmor_style": "0",
     "hud_iarmor_scale": "1",
     "hud_iarmor_proportional": "0",
-    "hud_iarmor_align_x": "right",
-    "hud_iarmor_align_y": "bottom"
+    "hud_iarmor_place": "screen",
+    "hud_iarmor_align_x": "center",
+    "hud_iarmor_align_y": "center"
    }
   },
   {
@@ -1812,13 +1842,13 @@
    "parent": null,
    "align_x": "right",
    "align_y": "center",
-   "pos_x": "-8",
-   "pos_y": "27",
+   "pos_x": "8",
+   "pos_y": "0",
    "order": 20,
    "frame": 0,
    "rect": {
-    "x": 304,
-    "y": 1337,
+    "x": 320,
+    "y": 1310,
     "w": 400,
     "h": 14
    },
@@ -1835,8 +1865,9 @@
     "hud_bar_armor_color_ya": "192 128 0 128",
     "hud_bar_armor_color_ra": "128 0 0 128",
     "hud_bar_armor_color_unnatural": "255 255 255 16",
+    "hud_bar_armor_place": "screen",
     "hud_bar_armor_align_x": "left",
-    "hud_bar_armor_align_y": "top"
+    "hud_bar_armor_align_y": "center"
    }
   },
   {
@@ -1847,8 +1878,8 @@
    "parent": null,
    "align_x": "55",
    "align_y": "before",
-   "pos_x": "32",
-   "pos_y": "56",
+   "pos_x": "-24",
+   "pos_y": "-24",
    "order": 99,
    "frame": 0,
    "rect": null,
@@ -1875,8 +1906,9 @@
     "hud_teamfrags_maxname": "16",
     "hud_teamfrags_scale": "1",
     "hud_teamfrags_proportional": "0",
-    "hud_teamfrags_align_x": "center",
-    "hud_teamfrags_align_y": "top"
+    "hud_teamfrags_place": "screen",
+    "hud_teamfrags_align_x": "right",
+    "hud_teamfrags_align_y": "bottom"
    }
   },
   {
@@ -1887,8 +1919,8 @@
    "parent": null,
    "align_x": "after",
    "align_y": "bottom",
-   "pos_x": "45",
-   "pos_y": "85",
+   "pos_x": "0",
+   "pos_y": "-16",
    "order": 999,
    "frame": 0.0001,
    "rect": null,
@@ -1902,8 +1934,9 @@
     "hud_score_enemy_digits": "4",
     "hud_score_enemy_colorize": "0",
     "hud_score_enemy_proportional": "0",
-    "hud_score_enemy_align_x": "right",
-    "hud_score_enemy_align_y": "top"
+    "hud_score_enemy_place": "screen",
+    "hud_score_enemy_align_x": "center",
+    "hud_score_enemy_align_y": "bottom"
    }
   },
   {
@@ -1914,8 +1947,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "bottom",
-   "pos_x": "58",
-   "pos_y": "114",
+   "pos_x": "0",
+   "pos_y": "0",
    "order": 999,
    "frame": 0.0001,
    "rect": null,
@@ -1924,12 +1957,13 @@
     "hud_score_team_frame_color": "0 0 0",
     "hud_score_team_item_opacity": "0.7",
     "hud_score_team_style": "1",
-    "hud_score_team_scale": "2",
+    "hud_score_team_scale": "1",
     "hud_score_team_align": "right",
     "hud_score_team_digits": "4",
     "hud_score_team_colorize": "0",
     "hud_score_team_proportional": "0",
-    "hud_score_team_align_x": "left",
+    "hud_score_team_place": "screen",
+    "hud_score_team_align_x": "center",
     "hud_score_team_align_y": "center"
    }
   },
@@ -1941,13 +1975,13 @@
    "parent": null,
    "align_x": "center",
    "align_y": "bottom",
-   "pos_x": "71",
-   "pos_y": "23",
+   "pos_x": "8",
+   "pos_y": "-8",
    "order": 1000,
    "frame": 0,
    "rect": {
-    "x": 1280,
-    "y": 297,
+    "x": 1217,
+    "y": 266,
     "w": 64,
     "h": 58
    },
@@ -1961,8 +1995,9 @@
     "hud_score_difference_digits": "0",
     "hud_score_difference_colorize": "1",
     "hud_score_difference_proportional": "1",
-    "hud_score_difference_align_x": "center",
-    "hud_score_difference_align_y": "center"
+    "hud_score_difference_place": "screen",
+    "hud_score_difference_align_x": "left",
+    "hud_score_difference_align_y": "bottom"
    }
   },
   {
@@ -1973,13 +2008,13 @@
    "parent": null,
    "align_x": "center",
    "align_y": "center",
-   "pos_x": "84",
-   "pos_y": "52",
+   "pos_x": "-24",
+   "pos_y": "24",
    "order": 2002,
    "frame": 0,
    "rect": {
-    "x": 1441,
-    "y": 1294,
+    "x": 1333,
+    "y": 1266,
     "w": 373,
     "h": 108
    },
@@ -1992,8 +2027,9 @@
     "hud_gun8_scale": "1",
     "hud_gun8_proportional": "0",
     "hud_gun8_frame_hide": "0",
+    "hud_gun8_place": "screen",
     "hud_gun8_align_x": "right",
-    "hud_gun8_align_y": "center"
+    "hud_gun8_align_y": "top"
    }
   },
   {
@@ -2004,8 +2040,8 @@
    "parent": null,
    "align_x": "center",
    "align_y": "center",
-   "pos_x": "97",
-   "pos_y": "81",
+   "pos_x": "0",
+   "pos_y": "16",
    "order": 9999,
    "frame": 0,
    "rect": null,
@@ -2014,13 +2050,14 @@
     "hud_armordamage_frame_color": "0 0 0",
     "hud_armordamage_item_opacity": "0.99",
     "hud_armordamage_style": "1",
-    "hud_armordamage_scale": "2",
+    "hud_armordamage_scale": "1",
     "hud_armordamage_align": "center",
     "hud_armordamage_digits": "3",
     "hud_armordamage_duration": "0.8",
     "hud_armordamage_proportional": "0",
-    "hud_armordamage_align_x": "left",
-    "hud_armordamage_align_y": "bottom"
+    "hud_armordamage_place": "screen",
+    "hud_armordamage_align_x": "center",
+    "hud_armordamage_align_y": "top"
    }
   },
   {
@@ -2031,13 +2068,13 @@
    "parent": null,
    "align_x": "center",
    "align_y": "before",
-   "pos_x": "-16",
-   "pos_y": "110",
+   "pos_x": "0",
+   "pos_y": "-16",
    "order": 10000000000000,
    "frame": 0,
    "rect": {
-    "x": 289,
-    "y": 151,
+    "x": 305,
+    "y": 25,
     "w": 384,
     "h": 58
    },
@@ -2048,6 +2085,7 @@
     "hud_tracking_format": "%n",
     "hud_tracking_scale": "1",
     "hud_tracking_proportional": "1",
+    "hud_tracking_place": "screen",
     "hud_tracking_align_x": "center",
     "hud_tracking_align_y": "bottom"
    }
@@ -2060,8 +2098,8 @@
    "parent": "score_difference",
    "align_x": "after",
    "align_y": "bottom",
-   "pos_x": "123",
-   "pos_y": "19",
+   "pos_x": "-24",
+   "pos_y": "0",
    "order": 1904210000,
    "frame": 0.5,
    "rect": null,
@@ -2075,8 +2113,9 @@
     "hud_score_position_digits": "0",
     "hud_score_position_colorize": "1",
     "hud_score_position_proportional": "0",
+    "hud_score_position_place": "screen",
     "hud_score_position_align_x": "right",
-    "hud_score_position_align_y": "bottom"
+    "hud_score_position_align_y": "center"
    }
   },
   {
@@ -2087,8 +2126,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "after",
-   "pos_x": "136",
-   "pos_y": "48",
+   "pos_x": "8",
+   "pos_y": "-8",
    "order": 10000000000000,
    "frame": 1,
    "rect": null,
@@ -2097,10 +2136,11 @@
     "hud_suit_frame_color": "0 0 0",
     "hud_suit_item_opacity": "0.99",
     "hud_suit_style": "0",
-    "hud_suit_scale": "2",
+    "hud_suit_scale": "1",
     "hud_suit_proportional": "0",
+    "hud_suit_place": "screen",
     "hud_suit_align_x": "left",
-    "hud_suit_align_y": "top"
+    "hud_suit_align_y": "bottom"
    }
   },
   {
@@ -2111,8 +2151,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "after",
-   "pos_x": "149",
-   "pos_y": "77",
+   "pos_x": "-24",
+   "pos_y": "0",
    "order": 10000000000000,
    "frame": 1,
    "rect": null,
@@ -2123,8 +2163,9 @@
     "hud_quad_style": "0",
     "hud_quad_scale": "1",
     "hud_quad_proportional": "0",
-    "hud_quad_align_x": "center",
-    "hud_quad_align_y": "top"
+    "hud_quad_place": "screen",
+    "hud_quad_align_x": "right",
+    "hud_quad_align_y": "center"
    }
   },
   {
@@ -2135,8 +2176,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "after",
-   "pos_x": "2",
-   "pos_y": "106",
+   "pos_x": "0",
+   "pos_y": "-16",
    "order": 10000000000000,
    "frame": 0,
    "rect": null,
@@ -2147,8 +2188,9 @@
     "hud_pent_style": "0",
     "hud_pent_scale": "1",
     "hud_pent_proportional": "0",
-    "hud_pent_align_x": "right",
-    "hud_pent_align_y": "top"
+    "hud_pent_place": "screen",
+    "hud_pent_align_x": "center",
+    "hud_pent_align_y": "bottom"
    }
   },
   {
@@ -2159,8 +2201,8 @@
    "parent": null,
    "align_x": "center",
    "align_y": "center",
-   "pos_x": "15",
-   "pos_y": "15",
+   "pos_x": "0",
+   "pos_y": "16",
    "order": 10000000000000,
    "frame": 0,
    "rect": null,
@@ -2169,10 +2211,11 @@
     "hud_iammo_frame_color": "0 0 0",
     "hud_iammo_item_opacity": "1",
     "hud_iammo_style": "0",
-    "hud_iammo_scale": "2",
+    "hud_iammo_scale": "1",
     "hud_iammo_show_always": "0",
-    "hud_iammo_align_x": "left",
-    "hud_iammo_align_y": "center"
+    "hud_iammo_place": "screen",
+    "hud_iammo_align_x": "center",
+    "hud_iammo_align_y": "top"
    }
   },
   {
@@ -2183,8 +2226,8 @@
    "parent": null,
    "align_x": "center",
    "align_y": "center",
-   "pos_x": "28",
-   "pos_y": "44",
+   "pos_x": "-24",
+   "pos_y": "24",
    "order": 10000000000000,
    "frame": 0,
    "rect": null,
@@ -2198,8 +2241,9 @@
     "hud_healthdamage_digits": "3",
     "hud_healthdamage_duration": "0.8",
     "hud_healthdamage_proportional": "0",
-    "hud_healthdamage_align_x": "center",
-    "hud_healthdamage_align_y": "center"
+    "hud_healthdamage_place": "screen",
+    "hud_healthdamage_align_x": "right",
+    "hud_healthdamage_align_y": "top"
    }
   },
   {
@@ -2210,13 +2254,13 @@
    "parent": null,
    "align_x": "center",
    "align_y": "center",
-   "pos_x": "-24",
-   "pos_y": "73",
+   "pos_x": "0",
+   "pos_y": "-16",
    "order": 10000000000000,
    "frame": 0,
    "rect": {
-    "x": 1261,
-    "y": 1262,
+    "x": 1285,
+    "y": 1173,
     "w": 192,
     "h": 58
    },
@@ -2229,8 +2273,9 @@
     "hud_health_align": "left",
     "hud_health_digits": "3",
     "hud_health_proportional": "1",
-    "hud_health_align_x": "right",
-    "hud_health_align_y": "center"
+    "hud_health_place": "screen",
+    "hud_health_align_x": "center",
+    "hud_health_align_y": "bottom"
    }
   },
   {
@@ -2241,8 +2286,8 @@
    "parent": "health",
    "align_x": "after",
    "align_y": "center",
-   "pos_x": "54",
-   "pos_y": "102",
+   "pos_x": "8",
+   "pos_y": "-8",
    "order": 10000000000000,
    "frame": 0,
    "rect": null,
@@ -2251,13 +2296,14 @@
     "hud_ammo_frame_color": "0 0 0",
     "hud_ammo_item_opacity": "0.99",
     "hud_ammo_style": "1",
-    "hud_ammo_scale": "2",
+    "hud_ammo_scale": "1",
     "hud_ammo_align": "right",
     "hud_ammo_digits": "2",
     "hud_ammo_proportional": "1",
     "hud_ammo_show_always": "0",
     "hud_ammo_text_color_low": "",
     "hud_ammo_text_color_normal": "",
+    "hud_ammo_place": "screen",
     "hud_ammo_align_x": "left",
     "hud_ammo_align_y": "bottom"
    }
@@ -2270,8 +2316,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "center",
-   "pos_x": "67",
-   "pos_y": "11",
+   "pos_x": "-24",
+   "pos_y": "-24",
    "order": -100000000000,
    "frame": 1,
    "rect": null,
@@ -2285,7 +2331,8 @@
     "hud_group4_picture": "",
     "hud_group4_pic_alpha": "1.0",
     "hud_group4_pic_scalemode": "0",
-    "hud_group4_align_x": "center",
+    "hud_group4_place": "screen",
+    "hud_group4_align_x": "right",
     "hud_group4_align_y": "bottom"
    }
   },
@@ -2297,8 +2344,8 @@
    "parent": null,
    "align_x": "right",
    "align_y": "center",
-   "pos_x": "80",
-   "pos_y": "40",
+   "pos_x": "0",
+   "pos_y": "16",
    "order": -100000000000000000,
    "frame": 0,
    "rect": null,
@@ -2312,8 +2359,9 @@
     "hud_group6_picture": "",
     "hud_group6_pic_alpha": "1.0",
     "hud_group6_pic_scalemode": "2",
-    "hud_group6_align_x": "right",
-    "hud_group6_align_y": "bottom"
+    "hud_group6_place": "screen",
+    "hud_group6_align_x": "center",
+    "hud_group6_align_y": "top"
    }
   },
   {
@@ -2324,8 +2372,8 @@
    "parent": null,
    "align_x": "left",
    "align_y": "top",
-   "pos_x": "93",
-   "pos_y": "69",
+   "pos_x": "-24",
+   "pos_y": "0",
    "order": -3,
    "frame": 5,
    "rect": null,
@@ -2339,8 +2387,9 @@
     "hud_group7_picture": "hud-bg-temp",
     "hud_group7_pic_alpha": "2",
     "hud_group7_pic_scalemode": "0",
-    "hud_group7_align_x": "left",
-    "hud_group7_align_y": "top"
+    "hud_group7_place": "screen",
+    "hud_group7_align_x": "right",
+    "hud_group7_align_y": "center"
    }
   },
   {
@@ -2351,8 +2400,8 @@
    "parent": null,
    "align_x": "right",
    "align_y": "top",
-   "pos_x": "106",
-   "pos_y": "98",
+   "pos_x": "8",
+   "pos_y": "8",
    "order": 0,
    "frame": 0.5,
    "rect": null,
@@ -2366,7 +2415,8 @@
     "hud_group3_picture": "",
     "hud_group3_pic_alpha": "1.0",
     "hud_group3_pic_scalemode": "0",
-    "hud_group3_align_x": "center",
+    "hud_group3_place": "screen",
+    "hud_group3_align_x": "left",
     "hud_group3_align_y": "top"
    }
   }
