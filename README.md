@@ -16,7 +16,8 @@ already run.
 — a full Quake engine boots in the tab and plays a demo behind the editor.
 Drop your own `config.cfg` on the page and it applies instantly, with a report
 of exactly what applied; drop your texture pk3s and `.mvd` demos too, and edit
-*your* HUD over *your* frag movie. Export writes back a config where every
+*your* HUD over *your* frag movie — pause the demo while you line things up,
+resize the window and the game view follows. Export writes back a config where every
 line you didn't touch survives byte-for-byte.
 
 What you never have to think about, because the tool does:
@@ -51,6 +52,11 @@ ezQuake's placement rules and inevitably drift from them.
 merged upstream. The FTE-web backend shipped from a spike
 ([`spikes/fte-web/`](spikes/fte-web/) — spec, findings, parity evidence) and is
 deployed. See [Known gaps](#known-gaps) for what is known to be unproven.
+Release 1 "Trust the geometry" (#39) is merged:
+[release notes](docs/release-1/RELEASE-NOTES.md) ·
+[evidence report](docs/release-1/index.html) — window-true canvas sizing,
+honest resolution export, demo pause, and the 12-cell geometry QA matrix
+that now gates every geometric change.
 
 ---
 

@@ -49,11 +49,17 @@ cvar strings survive re-import byte-identically. The demo-freeze step
 
 ## Follow-ups
 
-1. Fix the stale-screen-dims bug in the fork's `EZHud_StateJSON` (add a matrix
-   cell asserting `screen` matches rect extents after resize — it exists
-   already: containment turns green when the bug is fixed).
-2. Add the dynamic-elements position-only judgement for `ping`.
-3. Emit `physical` from the plugin export.
+All three closed by Release 1 (epic #39; evidence `docs/release-1/index.html`):
+
+1. ~~Stale screen dims~~ — **root cause corrected and fixed in PR #45** (#40).
+   The export was honest all along; the page's self-referential canvas CSS
+   froze the canvas, so resizes never reached the engine and the QA resize
+   step was a no-op. Finding 1's "62 outside" containment failures were the
+   master cfg's deliberate off-screen placements, fixed in the same PR.
+2. ~~Dynamic-width `ping`~~ — **fixed in PR #47** (#42): exported
+   `DYNAMIC_WIDTH` list, position still judged, exemption visible per report.
+3. ~~Emit `physical`~~ — **fixed in PR #46** (#41): one `GetVideoSize`
+   snapshot, integer pair, torn-read-safe with `screen`.
 
 ## Full 12-cell run (same day, later)
 

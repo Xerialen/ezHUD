@@ -1,0 +1,14 @@
+{
+  "screen": {
+    "vid_width": 960,
+    "vid_height": 540,
+    "scr_con_current": 0
+  },
+  "physical": [
+    1920,
+    1080
+  ],
+  "demo": {
+    "cl_demospeed": "1"
+  }
+}
