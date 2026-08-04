@@ -10,7 +10,9 @@
     "test:tier3": "node tools/tests/tier3.mjs",
     "test:tier3:fte": "node tools/tests/tier3_fte.mjs",
     "test:tier4": "bash tools/tests/tier4.sh",
-    "test:tier4:fte": "bash tools/tests/tier4_fte.sh"
+    "test:tier4:fte": "bash tools/tests/tier4_fte.sh",
+    "test:qa": "node --test tools/qa/tests/*.test.js && bash tools/qa/run.sh --selftest",
+    "qa": "bash tools/qa/run.sh"
   },
   "devDependencies": {
     "playwright": ">=1.45.0"

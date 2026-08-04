@@ -1,0 +1,46 @@
+{
+ "cell": "classic.classic.1440-1080",
+ "pass": true,
+ "reports": [
+  {
+   "name": "non-vacuous",
+   "pass": true,
+   "failures": []
+  },
+  {
+   "name": "proportionality",
+   "pass": true,
+   "failures": []
+  },
+  {
+   "name": "containment",
+   "pass": true,
+   "failures": []
+  },
+  {
+   "name": "alignment",
+   "pass": true,
+   "failures": []
+  },
+  {
+   "name": "metamorphic",
+   "pass": true,
+   "failures": []
+  },
+  {
+   "name": "round-trip",
+   "pass": true,
+   "failures": []
+  }
+ ],
+ "advisories": [
+  {
+   "name": "golden-cfg",
+   "note": "no golden blessed for this cell yet (--update-golden)"
+  },
+  {
+   "name": "screenshot",
+   "note": "no /frame.png from this backend"
+  }
+ ]
+}
