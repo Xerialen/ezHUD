@@ -479,7 +479,7 @@ async function proveControl(row) {
 	}
 }
 
-async function trackerClip(timeout = 90000) {
+async function trackerClip(messageRows, timeout = 90000) {
 	const state = await eventually(async () => {
 		const next = await readState('tracker');
 		const rect = next.element?.rect;
@@ -497,11 +497,15 @@ async function trackerClip(timeout = 90000) {
 	const screenX = state.screen.vid_width - state.element.rect.x - state.element.rect.w;
 	const x = Math.max(0, canvasBox.x + screenX * sx);
 	const y = Math.max(0, canvasBox.y + state.element.rect.y * sy);
+	// The rect reserves r_tracker_messages rows even when only one retained frag
+	// is drawn. At the new console scale that unused tail reaches into the 3-D
+	// view, so compare the first row where the newest tracker message is painted.
+	const rowHeight = state.element.rect.h / Math.max(1, messageRows);
 	return {
 		x,
 		y,
 		width: Math.min(Math.max(1, state.element.rect.w * sx), viewport.width - x),
-		height: Math.min(Math.max(1, state.element.rect.h * sy), viewport.height - y),
+		height: Math.min(Math.max(1, rowHeight * sy), viewport.height - y),
 	};
 }
 
@@ -1029,6 +1033,10 @@ try {
 	assert(/^-?\d+$/.test(originalNotifyLines),
 		`con_notifylines is not an integer: ${JSON.stringify(originalNotifyLines)}`);
 	let notifyLinesSilenced = false;
+	let demoFrozen = false;
+	let dynamicHudHidden = false;
+	let originalGameclockShow;
+	let originalFpsShow;
 	let visualPassText;
 	try {
 		await page.evaluate(() => {
@@ -1042,7 +1050,52 @@ try {
 		await eventually(async () => await readCvar('con_notifylines') === '0' ? true : null,
 			'the visual case to silence FTE console notify lines', UI_WAIT);
 
-		const clip = await trackerClip(Math.max(1, visualDeadline - Date.now()));
+		// At vid_conautoscale 2 the tracker occupies more of the canvas, so its
+		// mirrored clip is no longer wholly over viewsize 30's static border.
+		// Let the pinned demo reach its first obituary (about ten seconds in), so
+		// enabling the tracker has a retained row to reveal, then freeze before
+		// establishing either hidden or enabled pixels. Any difference is then
+		// the tracker itself, never the moving 3-D view.
+		await sleep(12000);
+		await page.evaluate(() => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) {
+				throw new Error('the live FTE command channel is unavailable');
+			}
+			channel.cbufadd('demo_setspeed 0\n');
+		});
+		demoFrozen = true;
+		await eventually(async () => await readCvar('cl_demospeed') === '0' ? true : null,
+			'the visual case to freeze demo playback', UI_WAIT);
+		// Let interpolation and any packet already queued before the speed change
+		// settle before the hidden baseline starts.
+		await sleep(2000);
+
+		// cl_demospeed freezes demo packets, but this FTE build continues to
+		// advance cl.time for interpolation. The gameclock (and its child FPS)
+		// therefore remains live over the now-larger tracker clip. Preserve and
+		// hide those unrelated HUD pixels so the comparison isolates tracker.
+		originalGameclockShow = await readCvar('hud_gameclock_show');
+		originalFpsShow = await readCvar('hud_fps_show');
+		await page.evaluate(() => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) {
+				throw new Error('the live FTE command channel is unavailable');
+			}
+			channel.cbufadd('set hud_gameclock_show 0\nset hud_fps_show 0\n');
+		});
+		dynamicHudHidden = true;
+		await eventually(async () => {
+			const [gameclock, fps] = await Promise.all([
+				readCvar('hud_gameclock_show'), readCvar('hud_fps_show'),
+			]);
+			return gameclock === '0' && fps === '0' ? true : null;
+		}, 'the visual case to hide unrelated dynamic HUD pixels', UI_WAIT);
+
+		const messageRows = Number(await readCvar('r_tracker_messages'));
+		assert(Number.isInteger(messageRows) && messageRows > 0,
+			`r_tracker_messages is not a positive integer: ${JSON.stringify(messageRows)}`);
+		const clip = await trackerClip(messageRows, Math.max(1, visualDeadline - Date.now()));
 		const trackerVisibility = page.locator('.tree__row[data-name="tracker"] .tree__vis');
 		if ((await readCvar('hud_tracker_show')) !== '0') {
 			await trackerVisibility.click();
@@ -1061,30 +1114,31 @@ try {
 
 		await trackerVisibility.click();
 		await sleep(500);
-		const enabledBefore = await captureRegion('tracker-enabled-before', clip);
-		let differsFromHidden = enabledBefore.signature !== hiddenAfter.signature;
-		let changedWhileEnabled = false;
-		try {
-			await eventually(async () => {
-				const current = await captureRegion('tracker-enabled-after', clip);
-				differsFromHidden ||= current.signature !== hiddenAfter.signature;
-				changedWhileEnabled = current.signature !== enabledBefore.signature;
-				return changedWhileEnabled ? current : null;
-			}, 'tracker pixels to change across a real frag', Math.max(1, visualDeadline - Date.now()));
-		} catch (err) {
-			// Frag timing can be awkward to synchronize in a demo. The spec permits
-			// the weaker, still-pixel-level proof that the enabled region differs
-			// from the hidden baseline at least once inside the same budget.
-			if (!differsFromHidden) {
-				throw err;
-			}
-		}
-		assert(changedWhileEnabled || differsFromHidden,
+		const enabled = await captureRegion('tracker-enabled', clip);
+		assert(enabled.signature !== hiddenAfter.signature,
 			'the enabled tracker never differed from its hidden pixel baseline');
-		visualPassText = changedWhileEnabled
-			? 'tracker pixels changed while enabled and stayed static while hidden'
-			: 'tracker pixels differed from the hidden baseline and stayed static while hidden';
+		visualPassText = 'tracker pixels differed from the hidden baseline and stayed static while hidden';
 	} finally {
+		if (demoFrozen) {
+			// Restore normal playback only after the last comparison capture. Keep
+			// notify lines silenced until this command has been queued as well.
+			await page.evaluate(() => {
+				const channel = window.EZHUD_FTE?.engine()?.ftec;
+				if (!channel) {
+					throw new Error('the live FTE command channel is unavailable');
+				}
+				channel.cbufadd('demo_setspeed 100\n');
+			});
+		}
+		if (dynamicHudHidden) {
+			await page.evaluate(([gameclock, fps]) => {
+				const channel = window.EZHUD_FTE?.engine()?.ftec;
+				if (!channel) {
+					throw new Error('the live FTE command channel is unavailable');
+				}
+				channel.cbufadd(`set hud_gameclock_show ${gameclock}\nset hud_fps_show ${fps}\n`);
+			}, [originalGameclockShow, originalFpsShow]);
+		}
 		if (notifyLinesSilenced) {
 			await page.evaluate((value) => {
 				const channel = window.EZHUD_FTE?.engine()?.ftec;

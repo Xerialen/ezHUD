@@ -45,6 +45,28 @@ test('proportionality skips elements without a rect on either side', () => {
 	assert.equal(proportionality(before, after).pass, true);
 });
 
+test('FTE proportionality follows screen anchors while HUD glyph sizes stay fixed', () => {
+	const before = {
+		...snapshot(960, 540, [
+			el('left', { x: 8, y: 8, w: 64, h: 16 }, {}, { place: 'screen', align_x: 'left', align_y: 'top' }),
+			el('center', { x: 376, y: 262, w: 208, h: 16 }, {}, { place: 'screen', align_x: 'center', align_y: 'center' }),
+			el('right', { x: 872, y: 516, w: 64, h: 16 }, {}, { place: 'screen', align_x: 'right', align_y: 'bottom' }),
+		]),
+		engine: 'fteqw ezhud (web)',
+	};
+	const after = {
+		...snapshot(672, 378, [
+			el('left', { x: 8, y: 8, w: 64, h: 16 }, {}, { place: 'screen', align_x: 'left', align_y: 'top' }),
+			el('center', { x: 232, y: 181, w: 208, h: 16 }, {}, { place: 'screen', align_x: 'center', align_y: 'center' }),
+			el('right', { x: 584, y: 354, w: 64, h: 16 }, {}, { place: 'screen', align_x: 'right', align_y: 'bottom' }),
+		]),
+		engine: 'fteqw ezhud (web)',
+	};
+	const report = proportionality(before, after);
+	assert.equal(report.pass, true);
+	assert.deepEqual(report.ratio, { x: 0.7, y: 0.7 });
+});
+
 test('containment flags any rect leaving the screen', () => {
 	const state = snapshot(1920, 1080, [
 		el('inside', { x: 0, y: 0, w: 100, h: 100 }),

@@ -130,6 +130,10 @@ export async function runCell(engine, cell, { masterCfg, artifactsDir, goldenDir
 	await engine.applyCfg(masterCfg);
 	await engine.apply(HUD_STYLE[cell.hud]);
 	await engine.apply(KILLFEED[cell.killfeed]);
+	// Placement cvars update their strings immediately, but ezHUD caches the
+	// parsed place/alignment enums until this command. Judge the generated
+	// layout, not whichever enums the demo happened to boot with.
+	await engine.cmd('hud_recalculate');
 
 	const source = await engine.state();
 	await save('1-source.json', source);

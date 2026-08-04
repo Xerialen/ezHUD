@@ -203,6 +203,10 @@
 			// harmless no-op-equivalent. Either way `+set` is the safe,
 			// uniform choice (core/fte-adapter.js's wireLine()).
 			'+set', 'scr_newhud', '1',
+			// Keep the virtual HUD dimensions proportional to the canvas. FTE's
+			// desktop default (0) fixes an inferred console height, so a correctly
+			// resized canvas would still leave EZHud_StateJSON at the boot size.
+			'+set', 'vid_conautoscale', '2',
 			// Owner decision (#10): demos default quiet — a quarter of FTE's
 			// volume 0.7, not full blast under an editor. The value follows the
 			// fte-bar's stored slider/mute state, so a reload never blasts a

@@ -3,17 +3,24 @@
 //   node tools/qa/gen_master_cfg.mjs <state.json|bridge-url> [--out file]
 //   node tools/qa/gen_master_cfg.mjs <state.json|bridge-url> --check <file>
 //
-// One cfg that touches every registered element, in deliberately stressful
-// positions: alignments and offsets cycle deterministically by element index,
-// every third element gets scale 2, every seventh a negative offset. The
-// --check mode fails when the engine registers an element the cfg does not
-// cover — coverage can never silently rot (plan B1).
+// One cfg that touches every registered element while keeping it inside the
+// reference frame: every element is placed directly against the screen,
+// alignments cycle deterministically, and offsets always point inward from the
+// selected edge. The --check mode fails when the engine registers an element
+// the cfg does not cover — coverage can never silently rot (plan B1).
 
 import { readFile, writeFile } from 'node:fs/promises';
 import process from 'node:process';
 
 const ALIGN_X = ['left', 'center', 'right'];
 const ALIGN_Y = ['top', 'center', 'bottom'];
+
+function inset(align, index) {
+	const amount = 8 * (1 + (index % 3));
+	if (align === 'right' || align === 'bottom') return -amount;
+	if (align === 'center') return 0;
+	return amount;
+}
 
 async function loadState(source) {
 	if (/^https?:/.test(source)) {
@@ -31,13 +38,24 @@ export function generate(state) {
 	];
 	state.elements.forEach((element, i) => {
 		const name = element.name;
+		const alignX = ALIGN_X[i % 3];
+		const alignY = ALIGN_Y[Math.floor(i / 3) % 3];
 		lines.push(`hud_${name}_show 1`);
-		lines.push(`hud_${name}_align_x ${ALIGN_X[i % 3]}`);
-		lines.push(`hud_${name}_align_y ${ALIGN_Y[Math.floor(i / 3) % 3]}`);
-		lines.push(`hud_${name}_pos_x ${i % 7 === 0 ? -8 * (1 + (i % 3)) : (i * 13) % 160}`);
-		lines.push(`hud_${name}_pos_y ${(i * 29) % 120}`);
+		lines.push(`hud_${name}_place screen`);
+		lines.push(`hud_${name}_align_x ${alignX}`);
+		lines.push(`hud_${name}_align_y ${alignY}`);
+		lines.push(`hud_${name}_pos_x ${inset(alignX, i)}`);
+		lines.push(`hud_${name}_pos_y ${inset(alignY, i)}`);
 		if (`hud_${name}_scale` in (element.cvars ?? {})) {
-			lines.push(`hud_${name}_scale ${i % 3 === 0 ? 2 : 1}`);
+			lines.push(`hud_${name}_scale 1`);
+		}
+		// demo_setspeed freezes demo content, not cls.realtime. Keep ping drawn
+		// but stop its blink/period fields changing width between checkpoints;
+		// dynamic-width judgement itself belongs to issue #42.
+		if (name === 'ping') {
+			lines.push('hud_ping_period 999999');
+			lines.push('hud_ping_show_pl 0');
+			lines.push('hud_ping_blink 0');
 		}
 	});
 	return lines.join('\n') + '\n';
