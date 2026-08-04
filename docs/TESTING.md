@@ -191,3 +191,12 @@ the same shape, before implementation starts.**
 
 Reference example: issue #18 (the Cases list) and PR #34 (the per-case PASS
 mapping).
+
+### Enforcement
+
+Three checks keep the convention live: the tier 4F control-coverage case in
+`tools/tests/tier4_fte.mjs` rejects a rendered control without a table row or
+explicit exemption; `.github/workflows/cases-gate.yml` checks issue Cases and
+the PR mapping (the `no-cases` label opts out docs/refactor/test-only PRs); and
+`.github/ISSUE_TEMPLATE/behaviour.md` starts behaviour issues with the required
+Cases shape.

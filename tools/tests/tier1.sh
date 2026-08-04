@@ -18,6 +18,7 @@ node --check hud_web_ui/core/*.js
 # ezQuake checkout, where hud_web_ui/ arrives without this backend's files.
 if [ -d hud_web_ui/fte ]; then node --check hud_web_ui/fte/*.js; fi
 node --test hud_web_ui/core/tests/*.test.js
+node --test tools/tests/*.test.mjs
 python3 "$embed" --check
 # What the public build ships, asserted against an allowlist. Guarded for the
 # same reason as the check above -- an ezQuake checkout has no tools/fte-web/ --
