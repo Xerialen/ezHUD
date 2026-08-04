@@ -35,7 +35,7 @@ import { QUAKE_PALETTE } from './quake-palette.js';
 // the same refusals produce the same editor behaviour on both backends.
 const BARE_COMMANDS = new Set([
 	'hud_recalculate', 'vid_restart', 'cfg_save', 'move', 'align', 'place',
-	'toggleconsole', 'fontload', 'hud_export', 'hud_reset_layout',
+	'toggleconsole', 'fontload', 'hud_export', 'hud_reset_layout', 'demo_setspeed',
 ]);
 const PREFIXES = ['hud_', 'vid_', 'scr_', 'cl_hud', 'font_', 'r_tracker'];
 // Exact cvar names outside those prefixes the editor legitimately writes:

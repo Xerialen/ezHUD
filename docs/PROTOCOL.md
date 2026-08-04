@@ -69,6 +69,7 @@ Engine-authoritative HUD state.
     "vid_width": 512, "vid_height": 288,
     "scr_con_current": 0
   },
+  "demo": { "cl_demospeed": "1" },
   "fonts": { "proportional_loaded": false, "facepath": "" },
   "view": { "spectator": true, "tracking": true },
   "physical": [2560, 1440],
@@ -97,6 +98,9 @@ the cvar set with no face loaded. With no face, every `proportional 1` silently 
 8px, so a client that presents `proportional` as live is lying to the user.
 
 - Coordinates are **console pixels**, matching `vid.width`/`vid.height`.
+- `demo.cl_demospeed` is the engine cvar string (`"0"` paused, `"1"` normal).
+  Absence means the backend does not expose demo pause and the control must be
+  disabled rather than maintaining click-local state.
 - `physical` is read from `renderer.ScreenshotWidth()`/`Height()` — the *same* source
   `/frame.png` captures from, so the two can never disagree about the size of the same
   picture. Do not switch it to `glwidth`/`glheight`: those are only assigned inside
@@ -123,7 +127,8 @@ Response `{"ok": true}`, or `403 {"ok": false, "error": "command not permitted"}
 
 **Allowlist** — cvar assignments whose name starts with `hud_`, `vid_`, `scr_`, `cl_hud`,
 plus the bare commands `hud_recalculate`, `vid_restart`, `cfg_save`, `move`, `align`,
-`place`, `toggleconsole`, `fontload`, `hud_export`, `hud_reset_layout`, plus the
+`place`, `toggleconsole`, `fontload`, `hud_export`, `hud_reset_layout`,
+`demo_setspeed`, plus the
 `font_` prefix and `gl_consolefont`. Everything else is refused. No `exec`, no `quit`,
 no `rcon`, no aliases, no semicolon chaining.
 

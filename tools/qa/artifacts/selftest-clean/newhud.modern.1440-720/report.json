@@ -5,11 +5,18 @@
   {
    "name": "non-vacuous",
    "pass": true,
+   "drawn": 25,
+   "min": 10,
    "failures": []
   },
   {
    "name": "proportionality",
    "pass": true,
+   "ratio": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "model": "full rect scale",
    "failures": []
   },
   {

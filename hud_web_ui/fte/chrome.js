@@ -10,6 +10,7 @@
 // resolving to a second URL would be a second module instance with its own
 // `current` -- so this file would hold a Bridge nobody is polling.
 import { currentBridge } from '../core/bridge.js';
+import * as syslog from '../core/log.js';
 import { importFile, importDemoUrl } from './import.js';
 
 const $ = (id) => document.getElementById(id);
@@ -90,6 +91,94 @@ async function buildDemoPicker() {
 				+ 'and dropped on the page instead.');
 		}
 	});
+}
+
+// ---- demo pause -------------------------------------------------------------
+// FTE's demo_setspeed argument is a percentage, while state reports the
+// resulting cl_demospeed multiplier: 0 -> "0", 100 -> "1". aria-pressed and
+// the label are updated only from the last engine state app.js polled; a click
+// merely requests the opposite state and disables the control until readback.
+
+function installDemoPause() {
+	const button = $('fte-pause');
+	const label = $('fte-pause-label');
+	const reason = $('fte-pause-reason');
+	if (!button || !label || !reason) {
+		return;
+	}
+	let pendingSpeed = null;
+	let refused = false;
+	let warned = false;
+	let lastMissingState = null;
+	let missingPolls = 0;
+
+	function warnOnce(detail) {
+		if (warned) return;
+		warned = true;
+		syslog.warn('fte', 'Demo pause unavailable', { reason: detail });
+	}
+
+	function disable(detail, warn = false) {
+		button.disabled = true;
+		button.title = detail;
+		reason.textContent = detail;
+		reason.hidden = false;
+		if (warn) warnOnce(detail);
+	}
+
+	function sync() {
+		if (refused) return;
+		const bridge = currentBridge();
+		const state = bridge?.lastState;
+		if (!state) {
+			disable('Waiting for engine demo state…');
+			return;
+		}
+		const raw = state.demo?.cl_demospeed;
+		const speed = Number(raw);
+		if (raw === undefined || !Number.isFinite(speed)) {
+			// FTE can export one early state before cl_demospeed is registered.
+			// Count distinct app polls, not this 200ms reflector's repeats, so a
+			// supported engine never gets a false warning during startup.
+			if (state !== lastMissingState) {
+				lastMissingState = state;
+				missingPolls += 1;
+			}
+			const detail = 'Demo pause unavailable: this backend does not report cl_demospeed.';
+			disable(detail, missingPolls >= 3);
+			return;
+		}
+		lastMissingState = null;
+		missingPolls = 0;
+		const paused = speed === 0;
+		button.setAttribute('aria-pressed', String(paused));
+		label.textContent = paused ? 'Resume' : 'Pause';
+		button.setAttribute('aria-label', paused ? 'Resume demo playback' : 'Pause demo playback');
+		if (pendingSpeed !== null && raw !== pendingSpeed) {
+			disable('Waiting for engine demo-speed readback…');
+			return;
+		}
+		pendingSpeed = null;
+		button.disabled = false;
+		button.title = paused ? 'Resume demo playback' : 'Pause demo playback';
+		reason.hidden = true;
+	}
+
+	button.addEventListener('click', async () => {
+		const paused = button.getAttribute('aria-pressed') === 'true';
+		pendingSpeed = paused ? '1' : '0';
+		disable('Waiting for engine demo-speed readback…');
+		try {
+			await currentBridge()?.send(`demo_setspeed ${paused ? 100 : 0}`);
+		} catch (err) {
+			refused = true;
+			pendingSpeed = null;
+			disable(`Demo pause unavailable: backend refused demo_setspeed (${err.message ?? err}).`, true);
+		}
+	});
+
+	sync();
+	setInterval(sync, 200);
 }
 
 // ---- volume -----------------------------------------------------------------
@@ -313,5 +402,6 @@ function renderDrift(report) {
 // ---- go ---------------------------------------------------------------------
 
 buildDemoPicker();
+installDemoPause();
 installVolume();
 installDropZone();

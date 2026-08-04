@@ -78,6 +78,26 @@ test('token is attached as ?t= to every bridge request', async (t) => {
 	assert.deepEqual(JSON.parse(s.requests.at(-1).body), { cmd: 'hud_face_pos_x 1' });
 });
 
+test('a rejected command surfaces the hud_web diagnostic once without impersonating token loss', async (t) => {
+	syslog._reset();
+	const s = await localStub(t, (_request, response) =>
+		json(response, 403, { ok: false, error: 'command not permitted' }));
+	if (!s) return;
+	t.after(s.close);
+	await assert.rejects(s.bridge.send('demo_setspeed 0'), (err) => {
+		assert.ok(err instanceof BridgeError);
+		assert.equal(err.status, 403);
+		assert.match(err.message, /command/i);
+		return true;
+	});
+	const diagnostics = syslog.snapshot().filter((entry) => /\[hud_web\] cmd rejected/.test(entry.msg));
+	assert.equal(diagnostics.length, 1);
+	assert.equal(diagnostics[0].level, 'warn');
+	assert.equal(diagnostics[0].data.command, 'demo_setspeed 0');
+	assert.equal(syslog.snapshot().filter((entry) => /token rejected/.test(entry.msg)).length, 0);
+	syslog._reset();
+});
+
 test('403 is the sole non-retryable BridgeError status', async (t) => {
 	const s = await localStub(t, (_request, response) => json(response, 403, { error: 'denied' }));
 	if (!s) return;

@@ -89,6 +89,32 @@
 	color: var(--text-dim);
 }
 
+.fte-pause {
+	padding: 3px 9px;
+	border: 1px solid var(--line);
+	border-radius: 3px;
+	background: rgba(255, 255, 255, 0.03);
+	color: var(--text-body);
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.fte-pause[aria-pressed="true"] {
+	border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+	color: var(--accent);
+}
+
+.fte-pause:disabled {
+	cursor: not-allowed;
+	opacity: 0.45;
+}
+
+.fte-control-reason {
+	font-size: 11px;
+	color: var(--text-dim);
+}
+
 /* The volume pair (#10): deliberately quiet chrome. A dim icon-button whose
  * two speaker glyphs swap on aria-pressed — state lives in the attribute the
  * accessibility tree reads, so the icon can never disagree with it — and a

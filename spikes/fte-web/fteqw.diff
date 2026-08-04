@@ -62,7 +62,7 @@ index bc04299..f1d3b58 100644
  		FTEC.evcb.jaxis = evjaxis;
  		FTEC.evcb.jorientation = evjorientation;
 diff --git a/plugins/ezhud/hud.c b/plugins/ezhud/hud.c
-index a8a1171..c44b224 100644
+index a8a1171..32c352b 100644
 --- a/plugins/ezhud/hud.c
 +++ b/plugins/ezhud/hud.c
 @@ -784,6 +784,46 @@ void HUD_Recalculate_f(void)
@@ -120,7 +120,7 @@ index a8a1171..c44b224 100644
  	Cmd_AddCommand ("hud_export", HUD_Export_f);
  
  	// Register the hud items.
-@@ -1582,3 +1623,169 @@ void HUD_Sort(void)
+@@ -1582,3 +1623,179 @@ void HUD_Sort(void)
      // Recalculate elements so vars are parsed.
      HUD_Recalculate();
  }
@@ -201,6 +201,9 @@ index a8a1171..c44b224 100644
 +	int firstel = 1;
 +	float screen_size[2] = {vid.width, vid.height};
 +	unsigned int physical_size[2] = {0, 0};
++	char demo_speed[64] = "";
++	int has_demo_speed = cvarfuncs && cvarfuncs->GetString
++		&& cvarfuncs->GetString("cl_demospeed", demo_speed, sizeof(demo_speed));
 +
 +	/* One plugin API call snapshots both spaces. The engine side reads
 +	 * vid.width/height and vid.pixelwidth/pixelheight together. */
@@ -220,7 +223,14 @@ index a8a1171..c44b224 100644
 +	EZHud_JsonNum(physical_size[0]);
 +	EZHud_JsonRaw(",");
 +	EZHud_JsonNum(physical_size[1]);
-+	EZHud_JsonRaw("],\"view\":{\"spectator\":");
++	EZHud_JsonRaw("]");
++	if (has_demo_speed)
++	{
++		EZHud_JsonRaw(",\"demo\":{\"cl_demospeed\":");
++		EZHud_JsonStr(demo_speed);
++		EZHud_JsonRaw("}");
++	}
++	EZHud_JsonRaw(",\"view\":{\"spectator\":");
 +	EZHud_JsonRaw(cl.spectator ? "true" : "false");
 +	EZHud_JsonRaw(",\"tracking\":");
 +	EZHud_JsonRaw((cl.tracknum != -1) ? "true" : "false");

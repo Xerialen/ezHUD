@@ -148,6 +148,8 @@ def main():
     state = json.loads(state_body)
     if status != 200:
         raise Failure(f"authorised /state failed: HTTP {status}")
+    if (state.get("demo") or {}).get("cl_demospeed") != "1":
+        raise Failure("/state did not report the engine's initial cl_demospeed=1")
 
     # Unknown parameters, including the removed scale knob, must be ignored. A
     # successful response at any other dimensions would revive the old lie that
@@ -174,6 +176,21 @@ def main():
     expect_status(args.port, token, "hud_missing_contract_cvar 1")
     expect_status(args.port, token, "hud_\x7fcontract 1")
     expect_status(args.port, token, "hud_face_pos_x " + "1" * 1024)
+
+    # Demo pause is one exact command, with the same percentage contract on
+    # ezQuake and FTE: 0% pauses and 100% restores cl_demospeed to 1. A prefix
+    # lookalike and command chaining remain forbidden after extending the list.
+    expect_status(args.port, token, "demo_setspeedfoo 0")
+    expect_status(args.port, token, "demo_setspeed 0;quit")
+    expect_status(args.port, token, "demo_setspeed 0", expected=200)
+
+    def demo_speed():
+        _, _, body = request(args.port, "GET", "/state", token)
+        return (json.loads(body).get("demo") or {}).get("cl_demospeed")
+
+    wait_for(lambda: demo_speed() == "0", "paused cl_demospeed reflected in /state")
+    expect_status(args.port, token, "demo_setspeed 100", expected=200)
+    wait_for(lambda: demo_speed() == "1", "resumed cl_demospeed reflected in /state")
 
     # Prove this name really is a user alias before testing the Cvar_Find guard.
     before = log_text(args.log).count("HUD_CONTRACT_ALIAS_RAN")

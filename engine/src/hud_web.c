@@ -781,7 +781,10 @@ qbool HUD_Web_CommandAllowed(const char *line)
 		"hud_export",
 		/* Restores placement and visibility to the registered defaults. Added to
 		 * the engine for the editor; there was no way to do this before. */
-		"hud_reset_layout"
+		"hud_reset_layout",
+		/* Demo playback uses percent arguments on both supported engines:
+		 * demo_setspeed 0 pauses, demo_setspeed 100 restores cl_demospeed=1. */
+		"demo_setspeed"
 	};
 	const char *start;
 	const char *end;
