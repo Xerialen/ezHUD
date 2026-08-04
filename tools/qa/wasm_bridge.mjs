@@ -91,6 +91,7 @@ async function pageMetrics() {
 				css_width: rect.width,
 				css_height: rect.height,
 			},
+			physical: state.physical,
 			screen: state.screen,
 		};
 	});
