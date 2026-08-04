@@ -1,8 +1,8 @@
 diff --git a/engine/Makefile b/engine/Makefile
-index ab4281d..b30d304 100644
+index 70d7b08..536255a 100644
 --- a/engine/Makefile
 +++ b/engine/Makefile
-@@ -1896,6 +1896,8 @@ ifeq ($(FTE_TARGET),web)
+@@ -1897,6 +1897,8 @@ ifeq ($(FTE_TARGET),web)
  	EMCC_LDFLAGS+= -s MAX_WEBGL_VERSION=2			#make use of what we can.
  	EMCC_LDFLAGS+= -s TOTAL_STACK=5MB			#big!
     	EMCC_LDFLAGS+=-s ERROR_ON_UNDEFINED_SYMBOLS=1	#fairly obvious. no runtime errors please.
@@ -62,7 +62,7 @@ index bc04299..f1d3b58 100644
  		FTEC.evcb.jaxis = evjaxis;
  		FTEC.evcb.jorientation = evjorientation;
 diff --git a/plugins/ezhud/hud.c b/plugins/ezhud/hud.c
-index a8a117176..0a9134435 100644
+index a8a1171..c44b224 100644
 --- a/plugins/ezhud/hud.c
 +++ b/plugins/ezhud/hud.c
 @@ -784,6 +784,46 @@ void HUD_Recalculate_f(void)
@@ -120,7 +120,7 @@ index a8a117176..0a9134435 100644
  	Cmd_AddCommand ("hud_export", HUD_Export_f);
  
  	// Register the hud items.
-@@ -1582,3 +1623,160 @@ void HUD_Sort(void)
+@@ -1582,3 +1623,169 @@ void HUD_Sort(void)
      // Recalculate elements so vars are parsed.
      HUD_Recalculate();
  }
@@ -129,9 +129,7 @@ index a8a117176..0a9134435 100644
 +// ez-hud spike (spike/fte-web): JSON state export for the in-browser editor.
 +//
 +// One EMSCRIPTEN_KEEPALIVE function returning the same shape as ez-hud's
-+// GET /state (docs/PROTOCOL.md), so core/model.js needs no changes. `physical`
-+// is deliberately absent: the page reads the canvas size itself, the same way
-+// the ezQuake bridge reads the framebuffer it captures from.
++// GET /state (docs/PROTOCOL.md), so core/model.js needs no changes.
 +// ============================================================================
 +#ifdef __EMSCRIPTEN__
 +#include <emscripten.h>
@@ -201,17 +199,28 @@ index a8a117176..0a9134435 100644
 +	hud_t *hud;
 +	int i;
 +	int firstel = 1;
++	float screen_size[2] = {vid.width, vid.height};
++	unsigned int physical_size[2] = {0, 0};
++
++	/* One plugin API call snapshots both spaces. The engine side reads
++	 * vid.width/height and vid.pixelwidth/pixelheight together. */
++	if (drawfuncs && drawfuncs->GetVideoSize)
++		drawfuncs->GetVideoSize(screen_size, physical_size);
 +
 +	ezhud_state_cur = ezhud_state_buf;
 +	*ezhud_state_cur = 0;
 +
 +	EZHud_JsonRaw("{\"protocol\":1,\"engine\":\"fteqw ezhud (web)\",\"screen\":{\"vid_width\":");
-+	EZHud_JsonNum(vid.width);
++	EZHud_JsonNum(screen_size[0]);
 +	EZHud_JsonRaw(",\"vid_height\":");
-+	EZHud_JsonNum(vid.height);
++	EZHud_JsonNum(screen_size[1]);
 +	EZHud_JsonRaw(",\"scr_con_current\":");
 +	EZHud_JsonNum(scr_con_current);
-+	EZHud_JsonRaw("},\"view\":{\"spectator\":");
++	EZHud_JsonRaw("},\"physical\":[");
++	EZHud_JsonNum(physical_size[0]);
++	EZHud_JsonRaw(",");
++	EZHud_JsonNum(physical_size[1]);
++	EZHud_JsonRaw("],\"view\":{\"spectator\":");
 +	EZHud_JsonRaw(cl.spectator ? "true" : "false");
 +	EZHud_JsonRaw(",\"tracking\":");
 +	EZHud_JsonRaw((cl.tracknum != -1) ? "true" : "false");

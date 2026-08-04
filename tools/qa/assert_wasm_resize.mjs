@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// QA-level regression for #40: a browser viewport resize must reach the FTE
-// canvas backing store and the HUD screen exported by EZHud_StateJSON.
+// QA-level regressions for #40/#41: a browser viewport resize must reach the
+// FTE canvas backing store and both dimensions exported by EZHud_StateJSON.
 //
 //   node tools/qa/assert_wasm_resize.mjs --bridge http://127.0.0.1:PORT --token TOKEN
 
@@ -46,7 +46,9 @@ async function resize(width, height) {
 	for (let attempt = 0; attempt < 40; attempt++) {
 		await new Promise((resolve) => setTimeout(resolve, 100));
 		value = await metrics();
-		const signature = JSON.stringify({ canvas: value.canvas, screen: value.screen });
+		const signature = JSON.stringify({
+			canvas: value.canvas, physical: value.physical, screen: value.screen,
+		});
 		stable = signature === previous ? stable + 1 : 0;
 		previous = signature;
 		if (value.viewport.width === width && value.viewport.height === height && stable >= 2) {
@@ -56,8 +58,22 @@ async function resize(width, height) {
 	throw new Error(`resize ${width}x${height} did not settle: ${JSON.stringify(value)}`);
 }
 
+function assertPhysical(snapshot, label) {
+	assert.ok(Array.isArray(snapshot.physical),
+		`${label} /state.physical must be an array, got ${JSON.stringify(snapshot.physical)}`);
+	assert.equal(snapshot.physical.length, 2,
+		`${label} /state.physical must have exactly two entries`);
+	assert.ok(snapshot.physical.every(Number.isInteger),
+		`${label} /state.physical must contain integers, got ${JSON.stringify(snapshot.physical)}`);
+	assert.deepEqual(snapshot.physical, [snapshot.canvas.width, snapshot.canvas.height],
+		`${label} /state.physical must equal the canvas backing-store size`);
+}
+
 const source = await resize(2560, 1440);
 const resized = await resize(1920, 1080);
+
+assertPhysical(source, 'source');
+assertPhysical(resized, 'resized');
 
 assert.notEqual(resized.canvas.css_width, source.canvas.css_width,
 	`canvas CSS width stayed ${source.canvas.css_width}px after viewport resize`);
@@ -71,6 +87,10 @@ assert.notEqual(resized.screen.vid_width, source.screen.vid_width,
 	`state.screen width stayed ${source.screen.vid_width} after viewport resize`);
 assert.notEqual(resized.screen.vid_height, source.screen.vid_height,
 	`state.screen height stayed ${source.screen.vid_height} after viewport resize`);
+assert.notEqual(resized.physical[0], source.physical[0],
+	`state.physical width stayed ${source.physical[0]} after viewport resize`);
+assert.notEqual(resized.physical[1], source.physical[1],
+	`state.physical height stayed ${source.physical[1]} after viewport resize`);
 
 const ratio = {
 	x: resized.screen.vid_width / source.screen.vid_width,
