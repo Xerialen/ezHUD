@@ -16,7 +16,11 @@
 #include <windows.h>
 #endif
 
-#define HUD_WEB_MAX_CLIENTS          4
+/* Chrome opens up to 6 parallel connections per origin, and the editor's module
+ * graph (9 files with Connection: close) rides that limit on a cold load. Fewer
+ * slots than the browser's parallelism means hard-closed module requests and a
+ * page that never boots — 8 leaves headroom on top of Chrome's 6. */
+#define HUD_WEB_MAX_CLIENTS          8
 #define HUD_WEB_MAX_REQUEST          (64 * 1024)
 #define HUD_WEB_MAX_TARGET           2048
 #define HUD_WEB_CLIENT_TIMEOUT       2.0
@@ -60,6 +64,9 @@ typedef struct hud_web_request_s {
 	size_t body_length;
 	const char *header_token;
 	size_t header_token_length;
+	/* Correlation id the UI sends as X-HUD-Req; echoed into the request log so a
+	 * UI log line and an engine log line about the same request can be matched. */
+	char req_id[32];
 } hud_web_request_t;
 
 typedef enum hud_web_parse_result_e {
@@ -76,6 +83,9 @@ static cvar_t hud_web_port = { "hud_web_port", "27700" };
  * could ask, and four of them polling together cost four full captures in one
  * frame. Serve at most one per interval and let the rest wait. */
 static cvar_t hud_web_frame_interval = { "hud_web_frame_interval", "250" };
+/* 0 = errors only, 1 = + one line per request, 2 = + commands run for the UI.
+ * Spec: docs/specs/2026-08-04-logging.md. */
+static cvar_t hud_web_log = { "hud_web_log", "0" };
 
 static socket_t hud_web_listener = INVALID_SOCKET;
 static hud_web_client_t hud_web_clients[HUD_WEB_MAX_CLIENTS];
@@ -84,6 +94,58 @@ static int hud_web_bound_port;
 static int hud_web_retry_port;
 static double hud_web_retry_after;
 static qbool hud_web_initialized;
+
+/* ---- request log ----------------------------------------------------------
+ * Fixed-size ring so logging can never allocate in the frame path. Lines are
+ * kept regardless of hud_web_log (the ring is cheap; GET /log serves history
+ * from before the user thought to raise the level); the cvar only gates what
+ * reaches the console. Errors always reach the console. Tokens never enter the
+ * log: targets are recorded as path only, query string cut. */
+
+#define HUD_WEB_LOG_LINES 256
+#define HUD_WEB_LOG_LINE_MAX 192
+
+static char hud_web_log_ring[HUD_WEB_LOG_LINES][HUD_WEB_LOG_LINE_MAX];
+static int hud_web_log_head;
+static int hud_web_log_count;
+
+static void HUD_Web_Log(int level, const char *format, ...)
+{
+	char line[HUD_WEB_LOG_LINE_MAX];
+	va_list args;
+
+	va_start(args, format);
+	vsnprintf(line, sizeof(line), format, args);
+	va_end(args);
+
+	strlcpy(hud_web_log_ring[hud_web_log_head], line, HUD_WEB_LOG_LINE_MAX);
+	hud_web_log_head = (hud_web_log_head + 1) % HUD_WEB_LOG_LINES;
+	if (hud_web_log_count < HUD_WEB_LOG_LINES) {
+		hud_web_log_count++;
+	}
+	if (level == 0 || hud_web_log.integer >= level) {
+		Com_Printf("[hud_web] %s\n", line);
+	}
+}
+
+/* The whole ring as one text/plain body, oldest first, caller owns. */
+static char *HUD_Web_LogText(size_t *length)
+{
+	char *text = (char *)Q_malloc((size_t)hud_web_log_count * HUD_WEB_LOG_LINE_MAX + 1);
+	size_t written = 0;
+	int i;
+
+	for (i = 0; i < hud_web_log_count; i++) {
+		int slot = (hud_web_log_head - hud_web_log_count + i + HUD_WEB_LOG_LINES) % HUD_WEB_LOG_LINES;
+		size_t line_length = strlen(hud_web_log_ring[slot]);
+		memcpy(text + written, hud_web_log_ring[slot], line_length);
+		written += line_length;
+		text[written++] = '\n';
+	}
+	text[written] = '\0';
+	*length = written;
+	return text;
+}
 
 static qbool HUD_Web_IsWouldBlock(int error)
 {
@@ -474,6 +536,18 @@ static hud_web_parse_result_t HUD_Web_ParseRequest(const hud_web_client_t *clien
 			request->header_token_length = value_end - value_start;
 			have_header_token = true;
 		}
+		else if (HUD_Web_SpanEqualsInsensitive((const char *)buffer + position, colon - position, "X-HUD-Req")) {
+			/* Log correlation only; a hostile value must not be able to forge
+			 * log lines, so keep it short and strip anything non-printable. */
+			size_t i, out = 0;
+			for (i = value_start; i < value_end && out < sizeof(request->req_id) - 1; ++i) {
+				char c = (char)buffer[i];
+				if (c > 0x20 && c < 0x7f) {
+					request->req_id[out++] = c;
+				}
+			}
+			request->req_id[out] = '\0';
+		}
 		position = line_end + 2;
 	}
 
@@ -563,12 +637,43 @@ static const char *HUD_Web_StatusReason(int status)
 	}
 }
 
+/* Route sets this for the duration of one dispatch so the response funnel below
+ * can write the request log line knowing the status. Single-threaded by design
+ * (HUD_Web_Frame runs on the client frame), so a static is enough. */
+static struct {
+	const hud_web_request_t *request;
+	double started;
+	qbool logged;
+} hud_web_active;
+
+static void HUD_Web_LogRequestLine(int status, size_t body_length)
+{
+	const hud_web_request_t *request = hud_web_active.request;
+	int level;
+
+	if (!request || hud_web_active.logged) {
+		return;
+	}
+	hud_web_active.logged = true;
+	/* 404 is browser noise (favicon.ico); everything else that failed is worth
+	 * a console line even at hud_web_log 0. */
+	level = (status >= 400 && status != 404) ? 0 : 1;
+	HUD_Web_Log(level, "%s %.*s %d %lluB %.1fms%s%s",
+		request->method,
+		(int)HUD_Web_PathLength(request->target), request->target,   /* query (and token) cut */
+		status, (unsigned long long)body_length,
+		(Sys_DoubleTime() - hud_web_active.started) * 1000.0,
+		request->req_id[0] ? " req=" : "", request->req_id);
+}
+
 /* `extra_headers` is NULL for everything except the rate-limited 503, which needs a
  * Retry-After. It used to be a hand-copied duplicate of this whole function. */
 static qbool HUD_Web_QueueOwnedResponseEx(hud_web_client_t *client, int status,
 		const char *content_type, byte *body, size_t body_length, const char *extra_headers)
 {
 	int header_length;
+
+	HUD_Web_LogRequestLine(status, body_length);
 
 	header_length = snprintf(client->response_header, sizeof(client->response_header),
 		"HTTP/1.1 %d %s\r\n"
@@ -578,7 +683,7 @@ static qbool HUD_Web_QueueOwnedResponseEx(hud_web_client_t *client, int status,
 		"%s"
 		"Access-Control-Allow-Origin: *\r\n"
 		"Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
-		"Access-Control-Allow-Headers: X-HUD-Token, Content-Type\r\n"
+		"Access-Control-Allow-Headers: X-HUD-Token, X-HUD-Req, Content-Type\r\n"
 		"Cache-Control: no-store\r\n"
 		"\r\n",
 		status, HUD_Web_StatusReason(status), (unsigned long long)body_length,
@@ -840,10 +945,27 @@ static qbool HUD_Web_IsKnownPath(const char *target)
 		HUD_Web_PathEquals(target, "/frame.png") || HUD_Web_PathEquals(target, "/fonts") ||
 		HUD_Web_PathEquals(target, "/configs") ||
 		HUD_Web_PathEquals(target, "/palette") ||
+		HUD_Web_PathEquals(target, "/log") ||
 		HUD_Web_LookupAsset(target, &content_type, &length) != NULL;
 }
 
+static void HUD_Web_RouteDispatch(hud_web_client_t *client, const hud_web_request_t *request);
+
 static void HUD_Web_Route(hud_web_client_t *client, const hud_web_request_t *request)
+{
+	hud_web_active.request = request;
+	hud_web_active.started = Sys_DoubleTime();
+	hud_web_active.logged = false;
+	HUD_Web_RouteDispatch(client, request);
+	/* A dispatch that queued nothing (queue failure -> client closed) still gets
+	 * its line, as an error: a silently dropped request is the worst kind. */
+	if (!hud_web_active.logged) {
+		HUD_Web_LogRequestLine(0, 0);
+	}
+	hud_web_active.request = NULL;
+}
+
+static void HUD_Web_RouteDispatch(hud_web_client_t *client, const hud_web_request_t *request)
 {
 	/* The editor's own files are served without the token, and deliberately.
 	 * They are this project's source: byte-identical for every user, carrying
@@ -918,6 +1040,14 @@ static void HUD_Web_Route(hud_web_client_t *client, const hud_web_request_t *req
 		}
 		return;
 	}
+	if (!strcmp(request->method, "GET") && HUD_Web_PathEquals(request->target, "/log")) {
+		size_t length = 0;
+		char *text = HUD_Web_LogText(&length);
+		if (!HUD_Web_QueueOwnedResponse(client, 200, "text/plain; charset=utf-8", (byte *)text, length)) {
+			HUD_Web_CloseClient(client);
+		}
+		return;
+	}
 	if (!strcmp(request->method, "GET") && HUD_Web_PathEquals(request->target, "/configs")) {
 		size_t length = 0;
 		char *json = HUD_Web_ConfigsJSON(&length);
@@ -960,10 +1090,12 @@ static void HUD_Web_Route(hud_web_client_t *client, const hud_web_request_t *req
 			return;
 		}
 		if (!HUD_Web_CommandAllowed(command)) {
+			HUD_Web_Log(0, "cmd rejected: %s", command);
 			Q_free(command);
 			HUD_Web_QueueError(client, 403, "command not permitted");
 			return;
 		}
+		HUD_Web_Log(2, "cmd: %s", command);
 		Cbuf_AddText(command);
 		Cbuf_AddText("\n");
 		Q_free(command);
@@ -1090,12 +1222,6 @@ static hud_web_client_t *HUD_Web_FreeClient(void)
 	return NULL;
 }
 
-static void HUD_Web_RejectExcessClient(socket_t socket)
-{
-	/* No fifth request is admitted: without a slot we cannot parse and authenticate it. */
-	closesocket(socket);
-}
-
 static void HUD_Web_AcceptClients(double now)
 {
 	int accepted;
@@ -1103,8 +1229,17 @@ static void HUD_Web_AcceptClients(double now)
 	for (accepted = 0; accepted < HUD_WEB_ACCEPTS_PER_FRAME; ++accepted) {
 		struct sockaddr_in peer;
 		socklen_t peer_length = sizeof(peer);
-		socket_t socket = accept(hud_web_listener, (struct sockaddr *)&peer, &peer_length);
+		socket_t socket;
 		hud_web_client_t *client;
+
+		/* Slot check before accept: with every slot busy the connection stays in
+		 * the kernel backlog and is served next frame, instead of being accepted
+		 * and hard-closed — which a browser reports as a failed module load and
+		 * does not retry. */
+		if (!HUD_Web_FreeClient()) {
+			break;
+		}
+		socket = accept(hud_web_listener, (struct sockaddr *)&peer, &peer_length);
 
 		if (socket == INVALID_SOCKET) {
 			if (!HUD_Web_IsWouldBlock(qerrno)) {
@@ -1118,7 +1253,8 @@ static void HUD_Web_AcceptClients(double now)
 		}
 		client = HUD_Web_FreeClient();
 		if (!client) {
-			HUD_Web_RejectExcessClient(socket);
+			/* Cannot happen after the pre-accept check, but never leak a socket. */
+			closesocket(socket);
 			continue;
 		}
 		memset(client, 0, sizeof(*client));
@@ -1142,6 +1278,7 @@ void HUD_Web_Init(void)
 	Cvar_Register(&hud_web);
 	Cvar_Register(&hud_web_port);
 	Cvar_Register(&hud_web_frame_interval);
+	Cvar_Register(&hud_web_log);
 	Cvar_ResetCurrentGroup();
 	hud_web_initialized = true;
 }

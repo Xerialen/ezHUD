@@ -3,6 +3,8 @@
 // Everything this module knows about ezQuake goes through the loopback bridge
 // documented in docs/hud-web/PROTOCOL.md. No DOM access: see PRODUCT.md ## Stack.
 
+import * as syslog from './log.js';
+
 const TOKEN_KEY = 't';
 
 export class BridgeError extends Error {
@@ -43,19 +45,45 @@ export class Bridge {
 		return `${this.origin}${path}?${query}`;
 	}
 
-	async #json(path, init) {
+	// One log transition per outage, not one per failed poll: #alive flips on
+	// the edges only.
+	#alive = true;
+
+	#reachable(reqId) {
+		if (!this.#alive) {
+			this.#alive = true;
+			syslog.info('bridge', 'reconnected to engine', { reqId });
+		}
+	}
+
+	async #json(path, init = {}) {
+		const reqId = syslog.nextReqId();
+		const started = performance.now();
+		init.headers = { ...init.headers, 'X-HUD-Req': reqId };
 		let response;
 		try {
 			response = await fetch(this.url(path), init);
 		} catch (cause) {
 			// fetch only rejects on transport failure, which here means the engine
 			// went away rather than that the request was bad.
+			if (this.#alive) {
+				this.#alive = false;
+				syslog.error('bridge', 'Lost contact with ezQuake', { reqId, path });
+			}
 			throw new BridgeError('Lost contact with ezQuake', { cause });
 		}
+		this.#reachable(reqId);
+		syslog.debug('bridge', `${init.method ?? 'GET'} ${path}`, {
+			reqId,
+			status: response.status,
+			ms: Math.round(performance.now() - started),
+		});
 		if (response.status === 403) {
+			syslog.error('bridge', 'token rejected (403)', { reqId, path });
 			throw new BridgeError('This link is no longer valid', { status: 403 });
 		}
 		if (!response.ok) {
+			syslog.error('bridge', `engine returned ${response.status}`, { reqId, path });
 			throw new BridgeError(`Engine returned ${response.status}`, { status: response.status });
 		}
 		return response.json();
@@ -77,6 +105,17 @@ export class Bridge {
 	// the engine's to state, not ours to hardcode. Fetched once.
 	palette() {
 		return this.#json('/palette', { cache: 'no-store' });
+	}
+
+	// The engine's own log ring (GET /log), plain text. Best-effort: the debug
+	// panel and the copy-log blob degrade to "(unavailable)" rather than fail.
+	async logText() {
+		try {
+			const response = await fetch(this.url('/log'), { cache: 'no-store' });
+			return response.ok ? await response.text() : '';
+		} catch {
+			return '';
+		}
 	}
 
 	// Saving is two engine commands, not three: cfg_save writes a whole config,

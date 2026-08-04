@@ -216,6 +216,21 @@ warning has to be about the directory the chosen mode actually writes to.
 `backup_enabled` reports `cfg_backup`, which **defaults to `0`** — a plain `cfg_save`
 over an existing config destroys it with nothing kept. Set it before overwriting.
 
+### `GET /log`
+
+The bridge's own request log as `text/plain; charset=utf-8`, oldest line first — a
+256-line in-memory ring that exists whether or not `hud_web_log` has ever been
+raised, so the editor's Copy-log blob can include history from before anyone
+thought to turn logging up. `hud_web_log` (default `0`) only gates what reaches
+the console: `0` errors only, `1` one line per request, `2` also every command
+the bridge runs for the UI.
+
+Targets are logged path-only — the query string, and therefore the token, is cut
+before the line is written. Requests carrying an `X-HUD-Req` header (the UI sends
+one per request) get `req=<id>` appended, which is how a UI log line and an engine
+log line about the same request are matched. The header value is truncated to 31
+printable characters before it is stored, so a client cannot forge log lines.
+
 ### `GET /` and the UI's static files
 
 The editor itself, compiled into the binary. `hud_web_ui/` is baked into
