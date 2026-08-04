@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-	alignment, containment, hudCvars, logShape, metamorphic, proportionality, roundTrip,
+	alignment, containment, DYNAMIC_WIDTH, hudCvars, logShape, metamorphic, proportionality, roundTrip,
 } from '../invariants.mjs';
 
 function snapshot(width, height, elements) {
@@ -28,6 +28,43 @@ test('proportionality passes a perfect rescale and fails a kept size', () => {
 	assert.ok(report.failures[0].deltas.w > 8);
 });
 
+test('dynamic ping width is ignored by proportionality but health width is still judged', () => {
+	const before = (name) => snapshot(960, 540, [el(name, { x: 100, y: 100, w: 176, h: 20 })]);
+	const after = (name) => snapshot(672, 378, [el(name, { x: 70, y: 70, w: 136, h: 14 })]);
+	const ping = proportionality(before('ping'), after('ping'));
+	assert.equal(ping.pass, true);
+	assert.deepEqual(ping.exempt_width, ['ping']);
+	const health = proportionality(before('health'), after('health'));
+	assert.equal(health.pass, false);
+	assert.deepEqual(health.failures[0].judged, ['x', 'y', 'w', 'h']);
+});
+
+test('dynamic ping width is ignored by metamorphic but health width is still judged', () => {
+	const original = (name) => snapshot(960, 540, [el(name, { x: 100, y: 100, w: 176, h: 20 })]);
+	const returned = (name) => snapshot(960, 540, [el(name, { x: 100, y: 100, w: 136, h: 20 })]);
+	const ping = metamorphic(original('ping'), returned('ping'));
+	assert.equal(ping.pass, true);
+	assert.deepEqual(ping.exempt_width, ['ping']);
+	const health = metamorphic(original('health'), returned('health'));
+	assert.equal(health.pass, false);
+	assert.deepEqual(health.failures[0].judged, ['x', 'y', 'w', 'h']);
+});
+
+test('dynamic-width exemption is the reviewed ping list', () => {
+	assert.deepEqual(DYNAMIC_WIDTH, ['ping']);
+});
+
+test('dynamic ping width exemption does not hide position drift', () => {
+	const original = snapshot(960, 540, [el('ping', { x: 100, y: 100, w: 176, h: 20 })]);
+	const drifted = snapshot(960, 540, [el('ping', { x: 120, y: 100, w: 176, h: 20 })]);
+	const proportional = proportionality(original, drifted);
+	const thereAndBack = metamorphic(original, drifted);
+	assert.equal(proportional.pass, false);
+	assert.deepEqual(proportional.failures[0].judged, ['x', 'y', 'h']);
+	assert.equal(thereAndBack.pass, false);
+	assert.deepEqual(thereAndBack.failures[0].judged, ['x', 'y', 'h']);
+});
+
 test('proportionality tolerance widens with the element scale', () => {
 	const before = snapshot(2560, 1440, [
 		el('big', { x: 0, y: 0, w: 200, h: 80 }, { hud_big_scale: '4' }),
@@ -45,12 +82,13 @@ test('proportionality skips elements without a rect on either side', () => {
 	assert.equal(proportionality(before, after).pass, true);
 });
 
-test('FTE proportionality follows screen anchors while HUD glyph sizes stay fixed', () => {
+test('FTE proportionality keeps screen anchors strict while ping width varies', () => {
 	const before = {
 		...snapshot(960, 540, [
 			el('left', { x: 8, y: 8, w: 64, h: 16 }, {}, { place: 'screen', align_x: 'left', align_y: 'top' }),
 			el('center', { x: 376, y: 262, w: 208, h: 16 }, {}, { place: 'screen', align_x: 'center', align_y: 'center' }),
 			el('right', { x: 872, y: 516, w: 64, h: 16 }, {}, { place: 'screen', align_x: 'right', align_y: 'bottom' }),
+			el('ping', { x: 8, y: 32, w: 176, h: 16 }, {}, { place: 'screen', align_x: 'left', align_y: 'top' }),
 		]),
 		engine: 'fteqw ezhud (web)',
 	};
@@ -59,12 +97,14 @@ test('FTE proportionality follows screen anchors while HUD glyph sizes stay fixe
 			el('left', { x: 8, y: 8, w: 64, h: 16 }, {}, { place: 'screen', align_x: 'left', align_y: 'top' }),
 			el('center', { x: 232, y: 181, w: 208, h: 16 }, {}, { place: 'screen', align_x: 'center', align_y: 'center' }),
 			el('right', { x: 584, y: 354, w: 64, h: 16 }, {}, { place: 'screen', align_x: 'right', align_y: 'bottom' }),
+			el('ping', { x: 8, y: 32, w: 136, h: 16 }, {}, { place: 'screen', align_x: 'left', align_y: 'top' }),
 		]),
 		engine: 'fteqw ezhud (web)',
 	};
 	const report = proportionality(before, after);
 	assert.equal(report.pass, true);
 	assert.deepEqual(report.ratio, { x: 0.7, y: 0.7 });
+	assert.deepEqual(report.exempt_width, ['ping']);
 });
 
 test('containment flags any rect leaving the screen', () => {
