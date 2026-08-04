@@ -25,8 +25,10 @@ SOURCES = [
     "ui.css",
     "core/bridge.js",
     "core/geometry.js",
+    "core/log.js",
     "core/model.js",
     "view/app.js",
+    "view/debug.js",
 ]
 
 # One entry per suffix in SOURCES. A new asset type must add its own here, and

@@ -234,10 +234,10 @@ def main():
         raise Failure(f"authorised /log failed: HTTP {status}")
     if "text/plain" not in log_headers.get("content-type", ""):
         raise Failure(f"/log content-type is {log_headers.get('content-type')!r}, not text/plain")
-    log_text = log_body.decode("utf-8", "replace")
-    if token in log_text:
+    log_output = log_body.decode("utf-8", "replace")
+    if token in log_output:
         raise Failure("/log leaks the bridge token into its own output")
-    if "GET /state" not in log_text:
+    if "GET /state" not in log_output:
         raise Failure("/log ring is missing the request lines this test already caused")
     # The correlation id round-trip: a request tagged X-HUD-Req comes back in the ring.
     request(args.port, "GET", "/state", token, headers={"X-HUD-Req": "contract-42"})
