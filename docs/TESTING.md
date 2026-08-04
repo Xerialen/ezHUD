@@ -165,3 +165,29 @@ Match the evidence to the change; do not report "done" without it:
 - **`core/` logic** — pure tests against the fixture.
 - **Anything visual** — screenshots at a console size whose aspect ratio
   differs from the screen's.
+
+---
+
+## Test-plan convention: issue → Cases → PR
+
+Owner rule (2026-08-04): **the test plan lives in the GitHub issue, always in
+the same shape, before implementation starts.**
+
+1. **Every issue that adds or changes user-visible behaviour carries a
+   `## Cases` section**: a numbered list where each case is one observable
+   effect, written as *operate → observable result* (engine cvar readback,
+   export line, pixel change — never "the code sets X"). The Cases section is
+   the acceptance criteria; scope prose above it explains, Cases decide.
+2. **The implementing PR maps every case**: its description lists each case
+   number with the test that proves it (tier + case id/label), or an explicit
+   `untested: <reason>` line. A case with no test and no reason blocks merge.
+3. **Tier placement follows the tier table above**: engine-observable effects
+   land in tier 4F (table-driven — one declarative row per control), editor
+   logic in tier 1/3F. New GUI controls ship WITH their 4F row, not after
+   (#18).
+4. **A failing case is a finding, not a maintenance chore**: leave it failing,
+   document it (docs/notes/), file or update the issue. No self-healing, no
+   quarantine.
+
+Reference example: issue #18 (the Cases list) and PR #34 (the per-case PASS
+mapping).
