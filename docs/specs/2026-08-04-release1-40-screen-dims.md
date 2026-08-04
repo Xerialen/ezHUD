@@ -48,3 +48,34 @@ after, the same cell green. Both artifact paths go in the PR.
 
 `physical` export (#41 — separate PR), classic-HUD sbar expectations,
 any editor/UI change.
+
+## Revision 2 (after Sol's investigation + reviewer verification)
+
+Sol's honest stop was correct. Verified independently (canvas/style probes
+against the assembled dist):
+
+- `EZHud_StateJSON` already exports the exact variables the layout uses
+  (`plugvid.width/height` via `#define vid plugvid`). No engine bug.
+- The real defect is in the page: `#canvas` width is
+  `min(1920px, 100%, calc((100vh − …) * 16/9))` where `100%` resolves against
+  `.stage__frame`, whose width is derived from the canvas — self-referential,
+  so the canvas freezes at its initial size (704×396 at 1280×720 boot) and
+  never follows the window. FTE's glue (`ftejslib.js onresize`) reads the
+  canvas rect, so the engine never sees any resize: `screen` stays 853×480,
+  QA's resize step is a no-op, proportionality measures 1.0.
+- The 62 containment failures are the master cfg deliberately placing
+  elements off-screen (generator artifact), not stale dims.
+
+### Revised requirement
+
+1. `hud_web_ui/fte/fte.css`: break the circular constraint — the canvas's
+   size limits must derive from the viewport/stage, never from a parent that
+   shrink-wraps the canvas. After a window resize, `canvas.width/height` and
+   `/state.screen` must follow (ftejslib glue already handles the rest).
+2. `tools/qa/gen_master_cfg.mjs`: generated placements stay within the
+   1440p frame so containment is meaningful; regenerate the golden.
+3. Matrix cell GREEN with a measured resize ratio ≠ 1.0 in report.json, and
+   containment passing over ≥10 drawn elements.
+
+Issue #40's Cases 1–5 stand — they were always phrased against observable
+behaviour, which is why they survive the root-cause correction.
