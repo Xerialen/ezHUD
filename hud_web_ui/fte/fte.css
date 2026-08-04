@@ -8,21 +8,31 @@
 
 /* ---- stage layering ------------------------------------------------------ */
 
-/* The canvas is now the thing with a size: .stage__frame is position:relative
- * with no dimensions of its own, so it takes them from here.
+/* The frame gets its size from the viewport, not from its canvas child. A 100%
+ * limit on #canvas is circular here: the grid item shrink-wraps the canvas,
+ * while that percentage asks the shrink-wrapped item how wide it may be. The
+ * result latches at the boot width and window.onresize keeps reading it back.
  *
- * Unlike the ezQuake <img>, which can only be displayed at the size the engine
- * captured, this canvas *dictates* the render size: FTE's glue
- * (engine/web/ftejslib.js, window.onresize) reads the canvas's on-screen rect,
- * sets the backing store to rect × devicePixelRatio, and tells the engine —
- * so the bigger this displays, the higher the resolution FTE actually renders
- * at. Target 1080p, then: 1920 wide at 16:9, shrinking only when the panel
- * or the viewport cannot fit it — the height term keeps the fte-bar row
- * below on screen (44px header + 40px stage padding + ~46px bar row and
- * gap). */
+ * The shell's middle column is the viewport minus both fixed side panels and
+ * the stage's horizontal padding. The height term leaves the header, status
+ * bar, FTE controls and their gaps on screen. Both are definite viewport-based
+ * limits, so resizing the window necessarily changes this frame when either
+ * available dimension changes. */
+.stage__frame {
+	width: min(
+		1920px,
+		calc(100vw - var(--rail-w) - var(--inspect-w) - 24px),
+		calc((100vh - var(--bar-h) - var(--statusbar-h) - 110px) * 16 / 9)
+	);
+	aspect-ratio: 16 / 9;
+}
+
+/* FTE's glue (engine/web/ftejslib.js, window.onresize) reads this rendered
+ * rectangle, updates the backing store to rect × devicePixelRatio, and tells
+ * the engine. The child fills the viewport-sized frame but never sizes it. */
 #canvas {
 	display: block;
-	width: min(1920px, 100%, calc((100vh - var(--bar-h) - var(--statusbar-h) - 110px) * 16 / 9));
+	width: 100%;
 	height: auto;
 	aspect-ratio: 16 / 9;
 	/* Pointer isolation, and the single rule the whole interaction model rests

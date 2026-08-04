@@ -12,15 +12,27 @@
 export function proportionality(before, after, { name = 'proportionality' } = {}) {
 	const rx = after.screen.vid_width / before.screen.vid_width;
 	const ry = after.screen.vid_height / before.screen.vid_height;
+	const fteAnchors = /^fteqw ezhud\b/.test(before.engine ?? '');
 	const failures = [];
 	const byName = new Map(after.elements.map((e) => [e.name, e]));
+	const anchor = { left: 0, top: 0, center: 0.5, right: 1, bottom: 1 };
 
 	for (const b of before.elements) {
 		const a = byName.get(b.name);
 		if (!b.rect || !a?.rect) continue;
 		const scale = Number(b.cvars?.[`hud_${b.name}_scale`] ?? 1) || 1;
 		const tolerance = Math.max(8 * scale, 1);
-		const expected = {
+		// FTE's ezHUD sizes glyphs in fixed virtual pixels. A screen resize moves
+		// screen-placed rects by their selected anchor; it does not rescale their
+		// glyph boxes. The fake/ezQuake model retains the original full-rescale
+		// contract, including the planted kept-size fault in the QA selftest.
+		const fixed = fteAnchors && b.place === 'screen';
+		const expected = fixed ? {
+			x: b.rect.x + (after.screen.vid_width - before.screen.vid_width) * (anchor[b.align_x] ?? 0),
+			y: b.rect.y + (after.screen.vid_height - before.screen.vid_height) * (anchor[b.align_y] ?? 0),
+			w: b.rect.w,
+			h: b.rect.h,
+		} : {
 			x: b.rect.x * rx, y: b.rect.y * ry,
 			w: b.rect.w * rx, h: b.rect.h * ry,
 		};
@@ -30,7 +42,13 @@ export function proportionality(before, after, { name = 'proportionality' } = {}
 			failures.push({ element: b.name, before: b.rect, after: a.rect, expected, deltas, tolerance });
 		}
 	}
-	return { name, pass: failures.length === 0, failures };
+	return {
+		name,
+		pass: failures.length === 0,
+		ratio: { x: rx, y: ry },
+		model: fteAnchors ? 'fixed-size screen anchors' : 'full rect scale',
+		failures,
+	};
 }
 
 // Every drawn rect stays inside the screen.
@@ -120,6 +138,8 @@ export function nonVacuous(state, { min = 1, name = 'non-vacuous' } = {}) {
 	return {
 		name,
 		pass: drawn >= min,
+		drawn,
+		min,
 		failures: drawn >= min ? [] : [{ drawn, min, note: 'no (or too few) elements drawn; geometric passes are meaningless' }],
 	};
 }

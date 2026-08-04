@@ -76,6 +76,26 @@ async function pageState() {
 	});
 }
 
+async function pageMetrics() {
+	return page.evaluate(() => {
+		const canvas = document.getElementById('canvas');
+		const rect = canvas.getBoundingClientRect();
+		const m = globalThis.Module;
+		const state = JSON.parse(m.UTF8ToString(m._EZHud_StateJSON()));
+		return {
+			viewport: { width: innerWidth, height: innerHeight },
+			resize_callback: globalThis.FTEC?.evcb?.resize ?? null,
+			canvas: {
+				width: canvas.width,
+				height: canvas.height,
+				css_width: rect.width,
+				css_height: rect.height,
+			},
+			screen: state.screen,
+		};
+	});
+}
+
 async function pageCmd(line) {
 	await page.evaluate((l) => globalThis.FTEC.cbufadd(l + '\n'), line);
 }
@@ -97,6 +117,13 @@ const bridge = createServer(async (request, response) => {
 			await page.waitForTimeout(150);
 			response.writeHead(200, { 'content-type': 'application/json' });
 			response.end(JSON.stringify(await pageState()));
+			return;
+		}
+		if (url.pathname === '/metrics') {
+			// QA-only browser/engine receipt: proves a requested viewport resize
+			// reached both the canvas backing store and EZHud_StateJSON.
+			response.writeHead(200, { 'content-type': 'application/json' });
+			response.end(JSON.stringify(await pageMetrics()));
 			return;
 		}
 		if (url.pathname === '/log') {
