@@ -142,6 +142,7 @@ const pageUrl = `http://127.0.0.1:${port}${prefix}index.html`;
 await mkdir(artifactDir, { recursive: true });
 
 const consoleLog = [];
+const engineConsole = [];
 const record = (text) => consoleLog.push(`${new Date().toISOString()} ${text}`);
 
 let browser;
@@ -155,7 +156,11 @@ try {
 }
 
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
-page.on('console', (message) => record(`[${message.type()}] ${message.text()}`));
+page.on('console', (message) => {
+	const messageText = message.text();
+	engineConsole.push(...messageText.split(/\r?\n/));
+	record(`[${message.type()}] ${messageText}`);
+});
 page.on('pageerror', (err) => record(`[pageerror] ${err.message}`));
 page.on('requestfailed', (request) => record(`[requestfailed] ${request.url()} ${request.failure()?.errorText}`));
 page.on('response', (response) => {
@@ -234,6 +239,55 @@ const waitLive = (label) => eventually(
 	async () => ((await readState()).live ? true : null), label, ENGINE_WAIT,
 );
 
+let cvarProbe = 0;
+
+/**
+ * Read one cvar through the engine's public console, not the adapter ledger.
+ * The pinned FTE console prints `echo <marker>\nvolume\n` as the marker followed
+ * by `"volume" is "0.175"`. FTE also emits the variants
+ * `"<name>" is currently "<value>"` and a trailing ` (default)`, so the parser
+ * accepts all three. A per-call marker and a starting console offset ensure a
+ * delayed line from an older probe can never satisfy this one.
+ */
+async function readCvar(name) {
+	assert(/^[A-Za-z_][A-Za-z0-9_]*$/.test(name), `unsafe cvar probe name ${JSON.stringify(name)}`);
+	const marker = `EZHUD_T4_CVAR_${Date.now().toString(36)}_${++cvarProbe}`;
+	const start = engineConsole.length;
+	await page.evaluate(([probe, cvar]) => {
+		const channel = window.EZHUD_FTE?.engine()?.ftec;
+		if (!channel) {
+			throw new Error('the live FTE command channel is unavailable');
+		}
+		channel.cbufadd(`echo ${probe}\n${cvar}\n`);
+	}, [marker, name]);
+
+	const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const valuePattern = new RegExp(
+		`"${escaped}"\\s+is(?:\\s+currently)?\\s+"([^"]*)"(?:\\s+\\(default\\))?`, 'i');
+	const found = await eventually(() => {
+		const lines = engineConsole.slice(start);
+		const markerAt = lines.findIndex((line) => line.includes(marker));
+		if (markerAt < 0) {
+			return null;
+		}
+		for (const line of lines.slice(markerAt + 1)) {
+			const match = valuePattern.exec(line);
+			if (match) {
+				return { value: match[1] };
+			}
+		}
+		return null;
+	}, `FTE console readback for ${name} after ${marker}`, UI_WAIT);
+	return found.value;
+}
+
+const readExport = () => page.evaluate(async (spec) => {
+	const { currentBridge } = await import(spec);
+	const bridge = currentBridge();
+	await bridge.state();
+	return bridge.exportFullCfg();
+}, BRIDGE);
+
 // The tree prints the engine's own rect for each element, so it is the cheapest
 // proof that the editor's model has caught up with a change made behind its
 // back. app.js polls once a second (app.js:83) and drags from the position the
@@ -269,6 +323,132 @@ async function shot(name) {
 	const file = path.join(artifactDir, `${name}.png`);
 	await page.screenshot({ path: file, fullPage: false }).catch(() => {});
 	return file;
+}
+
+function controlLocator(target) {
+	let locator = page.locator(target.selector);
+	if (target.text) {
+		locator = locator.filter({ hasText: new RegExp(`^${target.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) });
+	}
+	if (target.index != null) {
+		locator = locator.nth(target.index);
+	}
+	return locator;
+}
+
+async function operateControl(row) {
+	if (row.prepare?.selectElement) {
+		await page.locator(`.tree__row[data-name="${row.prepare.selectElement}"]`).click();
+		await page.waitForFunction(
+			(name) => document.querySelector('#inspector .inspect__name')?.textContent === name,
+			row.prepare.selectElement,
+			{ timeout: UI_WAIT },
+		);
+	}
+	const locator = controlLocator(row.target);
+	await locator.waitFor({ state: 'visible', timeout: UI_WAIT });
+	switch (row.operation.kind) {
+	case 'click':
+		await locator.click();
+		break;
+	case 'fill':
+		await locator.fill(String(row.operation.value));
+		if (row.operation.commit) {
+			await locator.press('Enter');
+		}
+		break;
+	case 'select':
+		await locator.selectOption(String(row.operation.value));
+		break;
+	case 'reset':
+		await locator.click();
+		await page.locator('#reset-dialog[open]').waitFor({ timeout: UI_WAIT });
+		await page.locator('#reset-dialog button', { hasText: /^Reset$/ }).click();
+		await page.locator('#reset-dialog[open]').waitFor({ state: 'hidden', timeout: UI_WAIT });
+		break;
+	default:
+		throw new Error(`unknown operation ${row.operation.kind} for ${row.label}`);
+	}
+}
+
+async function proveControl(row) {
+	let unchangedBefore = null;
+	if (row.exportOnly) {
+		unchangedBefore = await readCvar(row.exportOnly.unchangedCvar);
+	}
+	await operateControl(row);
+	if (row.expect) {
+		for (const [cvar, expected] of Object.entries(row.expect)) {
+			await eventually(async () => {
+				const actual = await readCvar(cvar);
+				return actual === String(expected) ? actual : null;
+			}, `${row.label} to leave engine ${cvar} at ${expected}`, UI_WAIT);
+		}
+	}
+	if (row.exportOnly) {
+		const unchangedAfter = await readCvar(row.exportOnly.unchangedCvar);
+		assert(unchangedAfter === unchangedBefore,
+			`${row.label} is export-only but changed engine ${row.exportOnly.unchangedCvar} `
+			+ `${unchangedBefore} -> ${unchangedAfter}`);
+		const exportedText = await eventually(async () => {
+			const text = await readExport();
+			return text.split('\n').includes(row.exportOnly.line) ? text : null;
+		}, `${row.label} to land ${row.exportOnly.line} in the full export`, UI_WAIT);
+		assert(exportedText, `${row.label} did not land in the full export`);
+	}
+}
+
+async function trackerClip(timeout = 90000) {
+	const state = await eventually(async () => {
+		const next = await readState('tracker');
+		const rect = next.element?.rect;
+		return rect && rect.w > 0 && rect.h > 0 ? next : null;
+	}, 'the tracker element to expose a non-empty engine rect', timeout);
+	const canvasBox = await page.locator('#canvas').boundingBox();
+	assert(canvasBox, 'the live engine canvas has no screen bounds');
+	const sx = canvasBox.width / state.screen.vid_width;
+	const sy = canvasBox.height / state.screen.vid_height;
+	const viewport = page.viewportSize();
+	// The pinned engine's classic-text tracker reports its right-aligned rect X
+	// from the New-HUD anchor while drawing at the mirrored screen coordinate;
+	// tools/fte-web/fragfile-proof.mjs established the same mapping against this
+	// dist. Width/Y still come straight from the state-tree rect.
+	const screenX = state.screen.vid_width - state.element.rect.x - state.element.rect.w;
+	const x = Math.max(0, canvasBox.x + screenX * sx);
+	const y = Math.max(0, canvasBox.y + state.element.rect.y * sy);
+	return {
+		x,
+		y,
+		width: Math.min(Math.max(1, state.element.rect.w * sx), viewport.width - x),
+		height: Math.min(Math.max(1, state.element.rect.h * sy), viewport.height - y),
+	};
+}
+
+// A screenshot is decoded back to RGBA in the browser before comparison. That
+// makes this a pixel assertion rather than a comparison of PNG container bytes.
+async function pixelSignature(png) {
+	return page.evaluate(async (base64) => {
+		const response = await fetch(`data:image/png;base64,${base64}`);
+		const bitmap = await createImageBitmap(await response.blob());
+		const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+		const context = canvas.getContext('2d');
+		context.drawImage(bitmap, 0, 0);
+		const pixels = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+		let a = 2166136261;
+		let b = 0;
+		for (let i = 0; i < pixels.length; i++) {
+			a = Math.imul(a ^ pixels[i], 16777619) >>> 0;
+			b = (b + Math.imul(pixels[i], i + 1)) >>> 0;
+		}
+		return `${bitmap.width}x${bitmap.height}:${a}:${b}`;
+	}, png.toString('base64'));
+}
+
+const visualFailureShots = new Map();
+async function captureRegion(name, clip) {
+	const png = await page.screenshot({ clip });
+	visualFailureShots.set(name, png);
+	return { png, signature: await pixelSignature(png) };
 }
 
 let failure = null;
@@ -467,11 +647,308 @@ try {
 	// ---- 7. artifacts -------------------------------------------------------
 	const successShot = await shot('tier4-fte-pass');
 	pass(7, `success screenshot at ${successShot}`);
+
+	// ---- per-control deploy gate -------------------------------------------
+	// Interactive engine/export controls rendered by the public FTE page:
+	//
+	//   FTE chrome: demo picker (case 6), cfg drop target (case 4), volume
+	//   range, mute and unmute. The Overlay/filter/Hidden/Spectator controls are
+	//   editor-view filters only; Save is an export workflow (case 5), not an
+	//   engine setting.
+	//
+	//   HUD systems: Classic/New/Both (scr_newhud), QW262 overlay (cl_hud),
+	//   classic bar (cl_sbar), compact style (scr_compacthud), viewsize, and
+	//   Reset positions. cl_hud and scr_compacthud are honest export-only FTE
+	//   controls: their rows prove an effective engine cvar stays unchanged and
+	//   the chosen value is present in the full export.
+	//
+	//   Killfeed: all three Where positions (the r_tracker/con_fragmessages
+	//   pair), both Style positions, five toggles (frags, streaks, flags,
+	//   pickups, align-right), and the time/messages/scale fields. This panel's
+	//   Scale is r_tracker_scale; hud_tracker_scale is the tracker element's
+	//   generic inspector field and has its own row below.
+	//
+	//   Element editor: tree visibility, overlay drag (case 3), one numeric
+	//   placement field, tracker scale through the generic parameter inspector,
+	//   and Reset. Place/alignment selects, raw/color fields and direction
+	//   segments are generated by the same group()/applyAll() path as these
+	//   representative inspector edits; the owner-required classic paths are
+	//   the visibility, drag and numeric rows.
+	//
+	// One row is one visible setting/position. The executor below is the only
+	// place that operates controls and checks console cvar/export readback, so a
+	// future authored control is covered by adding one declarative row here.
+	const controlCases = [
+		{
+			label: 'volume slider', target: { selector: '#fte-volume' },
+			operation: { kind: 'fill', value: '0.35' }, expect: { volume: '0.35' },
+		},
+		{
+			label: 'mute button', target: { selector: '#fte-mute' },
+			operation: { kind: 'click' }, expect: { volume: '0' },
+		},
+		{
+			label: 'unmute button restores the slider', target: { selector: '#fte-mute' },
+			operation: { kind: 'click' }, expect: { volume: '0.35' },
+		},
+		{
+			label: 'killfeed Where: Console messages',
+			target: { selector: '#killfeed .seg__item', text: 'Console messages' },
+			operation: { kind: 'click' }, expect: { r_tracker: '0', con_fragmessages: '1' },
+		},
+		{
+			label: 'killfeed Where: Dedicated killfeed',
+			target: { selector: '#killfeed .seg__item', text: 'Dedicated killfeed' },
+			operation: { kind: 'click' }, expect: { r_tracker: '1', con_fragmessages: '0' },
+		},
+		{
+			label: 'killfeed Where: Both',
+			target: { selector: '#killfeed .seg__item', text: 'Both' },
+			operation: { kind: 'click' }, expect: { r_tracker: '1', con_fragmessages: '1' },
+		},
+		{
+			label: 'killfeed Style: Weapon icons',
+			target: { selector: '#killfeed .seg__item', text: 'Weapon icons' },
+			operation: { kind: 'click' }, expect: { cl_useimagesinfraglog: '1' },
+		},
+		{
+			label: 'killfeed Style: Classic text',
+			target: { selector: '#killfeed .seg__item', text: 'Classic text' },
+			operation: { kind: 'click' }, expect: { cl_useimagesinfraglog: '0' },
+		},
+		{
+			label: 'killfeed Show frags',
+			target: { selector: '#killfeed label[title="Sets r_tracker_frags 0/1."] input' },
+			operation: { kind: 'click' }, expect: { r_tracker_frags: '0' },
+		},
+		{
+			label: 'killfeed Show streaks',
+			target: { selector: '#killfeed label[title="Sets r_tracker_streaks 0/1."] input' },
+			operation: { kind: 'click' }, expect: { r_tracker_streaks: '1' },
+		},
+		{
+			label: 'killfeed Show flag events',
+			target: { selector: '#killfeed label[title="Sets r_tracker_flags 0/1."] input' },
+			operation: { kind: 'click' }, expect: { r_tracker_flags: '1' },
+		},
+		{
+			label: 'killfeed Show pickups',
+			target: { selector: '#killfeed label[title="Sets r_tracker_pickups 0/1."] input' },
+			operation: { kind: 'click' }, expect: { r_tracker_pickups: '1' },
+		},
+		{
+			label: 'killfeed Align right',
+			target: { selector: '#killfeed label[title="Sets r_tracker_align_right 0/1."] input' },
+			operation: { kind: 'click' }, expect: { r_tracker_align_right: '0' },
+		},
+		{
+			label: 'killfeed Seconds on screen',
+			target: { selector: '#killfeed input[title="Sets r_tracker_time."]' },
+			operation: { kind: 'fill', value: '6', commit: true }, expect: { r_tracker_time: '6' },
+		},
+		{
+			label: 'killfeed Max lines',
+			target: { selector: '#killfeed input[title="Sets r_tracker_messages."]' },
+			operation: { kind: 'fill', value: '7', commit: true }, expect: { r_tracker_messages: '7' },
+		},
+		{
+			label: 'killfeed Scale',
+			target: { selector: '#killfeed input[title="Sets r_tracker_scale."]' },
+			operation: { kind: 'fill', value: '1.25', commit: true }, expect: { r_tracker_scale: '1.25' },
+		},
+		{
+			label: 'HUD system: Classic',
+			target: { selector: '#hudmodes .seg__item', text: 'Classic' },
+			operation: { kind: 'click' }, expect: { scr_newhud: '0' },
+		},
+		{
+			label: 'QW262 overlay', target: { selector: '#hudmodes label.toggle input' },
+			operation: { kind: 'click' },
+			exportOnly: { unchangedCvar: 'scr_newhud', line: 'cl_hud "0"' },
+		},
+		{
+			label: 'classic bar', target: { selector: '#hudmodes select', index: 0 },
+			operation: { kind: 'select', value: '1' }, expect: { cl_sbar: '1' },
+		},
+		{
+			label: 'classic compact style', target: { selector: '#hudmodes select', index: 1 },
+			operation: { kind: 'select', value: '1' },
+			exportOnly: { unchangedCvar: 'scr_newhud', line: 'scr_compacthud "1"' },
+		},
+		{
+			label: 'classic viewsize', target: { selector: '#hudmodes input[type="number"]' },
+			operation: { kind: 'fill', value: '110', commit: true }, expect: { viewsize: '110' },
+		},
+		{
+			label: 'HUD system: New',
+			target: { selector: '#hudmodes .seg__item', text: 'New' },
+			operation: { kind: 'click' }, expect: { scr_newhud: '1' },
+		},
+		{
+			label: 'HUD system: Both',
+			target: { selector: '#hudmodes .seg__item', text: 'Both' },
+			operation: { kind: 'click' }, expect: { scr_newhud: '2' },
+		},
+		{
+			label: `${candidate.name} visibility`,
+			target: { selector: `.tree__row[data-name="${candidate.name}"] .tree__vis` },
+			operation: { kind: 'click' }, expect: { [`hud_${candidate.name}_show`]: '0' },
+		},
+		{
+			label: `${candidate.name} numeric placement`, prepare: { selectElement: candidate.name },
+			target: { selector: `#f-${candidate.name}-pos_x` },
+			operation: { kind: 'fill', value: '37', commit: true },
+			expect: { [`hud_${candidate.name}_pos_x`]: '37' },
+		},
+		{
+			label: 'tracker inspector scale', prepare: { selectElement: 'tracker' },
+			target: { selector: '#f-tracker-scale' },
+			operation: { kind: 'fill', value: '1.5', commit: true },
+			expect: { hud_tracker_scale: '1.5' },
+		},
+		{
+			label: 'Reset positions', target: { selector: '#hudmodes button.btn', text: 'Reset positions…' },
+			operation: { kind: 'reset' }, expect: { [`hud_${candidate.name}_pos_x`]: String(candidate.pos_x) },
+		},
+	];
+
+	let nextCase = 8;
+	for (const row of controlCases) {
+		await proveControl(row);
+		const effect = row.expect
+			? Object.entries(row.expect).map(([name, value]) => `${name}=${value}`).join(', ')
+			: `${row.exportOnly.line}; ${row.exportOnly.unchangedCvar} unchanged`;
+		pass(nextCase++, `${row.label} — ${effect}`);
+	}
+
+	// ---- visual truth: the real tracker pixels -----------------------------
+	// Restart the real-frag demo through its visible picker so the 90s budget
+	// starts at a known point instead of wherever the control matrix left it.
+	await page.selectOption('#fte-demo', host.initialDemo);
+	await eventually(async () => (await readChrome()).title.includes(firstDemo),
+		`the hot engine to return to ${firstDemo}`, UI_WAIT);
+	await page.selectOption('#fte-demo', second.path);
+	await eventually(async () => {
+		const [chrome, state] = await Promise.all([readChrome(), readState()]);
+		return chrome.title.includes(secondName) && state.live ? true : null;
+	}, `the engine to restart and draw ${secondName}`, ENGINE_WAIT);
+	// Put the moving 3-D view inside FTE's static border. The tracker remains a
+	// live new-HUD element over that border, while hiding it now leaves a region
+	// whose pixels can honestly stay unchanged during demo playback.
+	const visualViewsize = page.locator('#hudmodes input[type="number"]');
+	await visualViewsize.fill('30');
+	await visualViewsize.press('Enter');
+	await eventually(async () => await readCvar('viewsize') === '30' ? true : null,
+		'the visual case to establish a static view border', UI_WAIT);
+	const visualDeadline = Date.now() + 90000;
+
+	// Remove editor outlines from the capture. This is a real UI operation and
+	// prevents the overlay box itself from masquerading as tracker pixels.
+	if (await page.locator('#chrome').isChecked()) {
+		await page.locator('#chrome').click();
+	}
+	const dedicated = page.locator('#killfeed .seg__item').filter({ hasText: /^Dedicated killfeed$/ });
+	await dedicated.click();
+	await eventually(async () => await readCvar('r_tracker') === '1' ? true : null,
+		'the visual case to enable r_tracker', UI_WAIT);
+	const frags = page.locator('#killfeed label[title="Sets r_tracker_frags 0/1."] input');
+	if (!(await frags.isChecked())) {
+		await frags.click();
+	}
+	await eventually(async () => await readCvar('r_tracker_frags') === '1' ? true : null,
+		'the visual case to enable frag rows', UI_WAIT);
+	const trackerTime = page.locator('#killfeed input[title="Sets r_tracker_time."]');
+	await trackerTime.fill('60');
+	await trackerTime.press('Enter');
+	await eventually(async () => await readCvar('r_tracker_time') === '60' ? true : null,
+		'the visual case to retain a frag until the next one', UI_WAIT);
+
+	// Console cvar probes are also drawn as NOTIFY text by FTE. The pinned
+	// engine honours con_notifylines as the main console's maximum notify-line
+	// count, so preserve it, set it to zero through the raw channel, and prove
+	// the live engine accepted that value before taking any comparison image.
+	// Restoration and its confirming probe happen only after all captures.
+	const originalNotifyLines = await readCvar('con_notifylines');
+	assert(/^-?\d+$/.test(originalNotifyLines),
+		`con_notifylines is not an integer: ${JSON.stringify(originalNotifyLines)}`);
+	let notifyLinesSilenced = false;
+	let visualPassText;
+	try {
+		await page.evaluate(() => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) {
+				throw new Error('the live FTE command channel is unavailable');
+			}
+			channel.cbufadd('con_notifylines 0\n');
+		});
+		notifyLinesSilenced = true;
+		await eventually(async () => await readCvar('con_notifylines') === '0' ? true : null,
+			'the visual case to silence FTE console notify lines', UI_WAIT);
+
+		const clip = await trackerClip(Math.max(1, visualDeadline - Date.now()));
+		const trackerVisibility = page.locator('.tree__row[data-name="tracker"] .tree__vis');
+		if ((await readCvar('hud_tracker_show')) !== '0') {
+			await trackerVisibility.click();
+		}
+		await eventually(async () => await readCvar('hud_tracker_show') === '0' ? true : null,
+			'the tracker visibility control to hide the tracker', UI_WAIT);
+
+		// From this point until the final enabled capture, do not issue console
+		// probes: each comparison window consists only of settling and captures.
+		await sleep(500);
+		const hiddenBefore = await captureRegion('tracker-hidden-before', clip);
+		await sleep(1000);
+		const hiddenAfter = await captureRegion('tracker-hidden-after', clip);
+		assert(hiddenAfter.signature === hiddenBefore.signature,
+			`tracker region changed while hidden (${hiddenBefore.signature} -> ${hiddenAfter.signature})`);
+
+		await trackerVisibility.click();
+		await sleep(500);
+		const enabledBefore = await captureRegion('tracker-enabled-before', clip);
+		let differsFromHidden = enabledBefore.signature !== hiddenAfter.signature;
+		let changedWhileEnabled = false;
+		try {
+			await eventually(async () => {
+				const current = await captureRegion('tracker-enabled-after', clip);
+				differsFromHidden ||= current.signature !== hiddenAfter.signature;
+				changedWhileEnabled = current.signature !== enabledBefore.signature;
+				return changedWhileEnabled ? current : null;
+			}, 'tracker pixels to change across a real frag', Math.max(1, visualDeadline - Date.now()));
+		} catch (err) {
+			// Frag timing can be awkward to synchronize in a demo. The spec permits
+			// the weaker, still-pixel-level proof that the enabled region differs
+			// from the hidden baseline at least once inside the same budget.
+			if (!differsFromHidden) {
+				throw err;
+			}
+		}
+		assert(changedWhileEnabled || differsFromHidden,
+			'the enabled tracker never differed from its hidden pixel baseline');
+		visualPassText = changedWhileEnabled
+			? 'tracker pixels changed while enabled and stayed static while hidden'
+			: 'tracker pixels differed from the hidden baseline and stayed static while hidden';
+	} finally {
+		if (notifyLinesSilenced) {
+			await page.evaluate((value) => {
+				const channel = window.EZHUD_FTE?.engine()?.ftec;
+				if (!channel) {
+					throw new Error('the live FTE command channel is unavailable');
+				}
+				channel.cbufadd(`con_notifylines ${value}\n`);
+			}, originalNotifyLines);
+			await eventually(async () => await readCvar('con_notifylines') === originalNotifyLines ? true : null,
+				'the visual case to restore FTE console notify lines', UI_WAIT);
+		}
+	}
+	pass(nextCase++, visualPassText);
 } catch (err) {
 	failure = err;
 	const file = await shot('tier4-fte-failure');
 	const logFile = path.join(artifactDir, 'tier4-fte-console.log');
 	await writeFile(logFile, `${consoleLog.join('\n')}\n`).catch(() => {});
+	for (const [name, png] of visualFailureShots) {
+		await writeFile(path.join(artifactDir, `${name}.png`), png).catch(() => {});
+	}
 	console.error(`\ntier 4 FTE FAILED after cases [${passed.join(', ')}]: ${err.message}`);
 	console.error(`  screenshot: ${file}`);
 	console.error(`  console log: ${logFile}`);
@@ -484,6 +961,6 @@ try {
 if (failure) {
 	process.exit(1);
 }
-console.log(`Tier 4 FTE: boot, control, drag, import, export and demo switch passed against `
+console.log(`Tier 4 FTE: boot, drag/import/export/demo, per-control readback and tracker pixels passed against `
 	+ `${distDir} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 console.log(`Tier 4 FTE artifacts: ${artifactDir}`);
