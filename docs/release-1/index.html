@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ezHUD Release 1 — "Trust the geometry" — evidence report</title>
+<style>
+:root { color-scheme: light dark; --accent: #d97706; --ok: #16a34a; --bad: #dc2626; }
+body { font: 15px/1.55 system-ui, sans-serif; max-width: 62rem; margin: 2rem auto; padding: 0 1rem; }
+h1 { font-size: 1.6rem; } h2 { margin-top: 2.2rem; border-bottom: 2px solid var(--accent); padding-bottom: .2rem; }
+table { border-collapse: collapse; width: 100%; margin: .8rem 0; font-size: .92em; }
+th, td { border: 1px solid #8884; padding: .35rem .55rem; text-align: left; }
+code, pre { font-family: ui-monospace, monospace; font-size: .92em; }
+pre { background: #8881; padding: .7rem; overflow-x: auto; border-radius: 6px; }
+img { max-width: 100%; border: 1px solid #8886; border-radius: 6px; }
+figure { margin: 1rem 0; } figcaption { font-size: .9em; opacity: .85; margin-top: .35rem; }
+.ok { color: var(--ok); font-weight: 600; } .bad { color: var(--bad); font-weight: 600; }
+.note { background: #d9770615; border-left: 4px solid var(--accent); padding: .5rem .8rem; margin: 1rem 0; }
+</style>
+</head>
+<body>
+<h1>ezHUD Release 1 — “Trust the geometry”</h1>
+<p>Epic <strong>#39</strong>, subissues <strong>#40–#43</strong>. Built by Sol (GPT-5.6-sol), specified and reviewed by Claude (Fable 5), 2026-08-04.
+Release commit: <code>df07436</code> on <code>main</code> (merged PRs <a href="https://github.com/Xerialen/ezHUD/pull/44">#44</a>,
+<a href="https://github.com/Xerialen/ezHUD/pull/45">#45</a>, <a href="https://github.com/Xerialen/ezHUD/pull/46">#46</a>,
+<a href="https://github.com/Xerialen/ezHUD/pull/47">#47</a>, <a href="https://github.com/Xerialen/ezHUD/pull/48">#48</a>).</p>
+
+<h2>Scope</h2>
+<p>Release 1 makes the geometric measurements the editor and its QA depend on <em>honest</em>, and ships the first
+piece of demo control built on them:</p>
+<ul>
+<li><strong>#40 — the game view follows your window.</strong> Resizing the browser window now resizes the engine canvas
+and everything the engine reports about its screen. Before, the canvas froze at its boot size forever.</li>
+<li><strong>#41 — the engine tells the whole truth about resolution.</strong> The FTE state export now includes
+<code>physical</code> (the real backing-store pixels) next to the virtual console size, from one torn-read-safe snapshot.</li>
+<li><strong>#42 — QA judges content-sized elements fairly.</strong> The ping readout's width tracks its text; the matrix
+now judges it on position only, through a reviewed, exported exemption list.</li>
+<li><strong>#43 — demo pause, end to end.</strong> A Pause/Resume button in the demo bar that reflects the engine's own
+state — pausing from the console flips the button too, and a backend that can't pause says so instead of pretending.</li>
+<li><strong>Foundation (#44)</strong> — session/engine logging (F9 debug panel, <code>GET /log</code>, request-id
+correlation) and the 12-cell golden QA matrix that every claim below is measured with.</li>
+</ul>
+
+<h2>#40 — Canvas resize truth (before / after)</h2>
+<p><strong>User journey:</strong> open the editor, then enlarge the browser window.</p>
+<figure>
+<img src="img/before-resized-window.png" alt="Before: small frozen canvas in a large window">
+<figcaption><strong>Before</strong> (page files at foundation commit <code>63f54bf</code>): the window is 2560×1440 but the
+game canvas stays frozen at its 1280×720-boot size — header reads <em>editing at 853×480 · 1px = 0.83×</em>. The engine
+never learns the window changed; QA's resize step silently measured nothing (ratio 1.0).</figcaption>
+</figure>
+<figure>
+<img src="img/after-resized-window.png" alt="After: canvas fills the window">
+<figcaption><strong>After</strong> (release build): same journey — the canvas fills the stage and the engine follows:
+<em>editing at 960×540 · 1px = 2×</em>. Root cause was self-referential CSS (<code>#canvas</code> width limited by a frame
+that shrink-wrapped the canvas); the frame is now viewport-sized. Note the new <em>Pause</em> button in the demo bar (#43).</figcaption>
+</figure>
+<pre>before /state (window 2560×1440):  screen 853×480, physical [704, 396]   ← frozen
+after  /state (window 2560×1440):  screen 960×540, physical [1920, 1080] ← follows</pre>
+
+<h2>#41 — <code>physical</code> in the state export</h2>
+<p><strong>Before:</strong> the QA assertion failed with <code>source /state.physical must be an array, got undefined</code>
+(RED log, <code>red-41-physical/</code>). <strong>After:</strong> <code>physical</code> is an integer pair equal to the canvas
+backing store and moves with <code>screen</code> in the same snapshot (single <code>GetVideoSize</code> plugin call —
+see <code>after /state</code> above). ezQuake backend unchanged (<code>renderer.ScreenshotWidth/Height</code>).</p>
+
+<h2>#42 — Fair judgement for content-sized elements</h2>
+<p><code>DYNAMIC_WIDTH = ['ping']</code> in <code>tools/qa/invariants.mjs</code>: proportionality and metamorphic judge ping
+on x/y/h, never width; position drift still fails; every report carries <code>exempt_width</code> so reviewers see the
+exemption was applied; extending the list requires naming the element in a PR (docs/TESTING.md).</p>
+
+<h2>#43 — Demo pause (user journey)</h2>
+<p><strong>Journey:</strong> press <em>Pause</em> next to the volume control → demo freezes (democlock pixels stop);
+press <em>Resume</em> → it moves again. Type <code>demo_setspeed 0</code> in the console instead → the button flips to
+<em>Resume</em> on the next poll, because it renders engine state, never click state.</p>
+<figure>
+<img src="img/after-bar.png" alt="Demo bar with pause control">
+<figcaption>The demo bar with the new Pause control (crop from the live release build).</figcaption>
+</figure>
+<figure>
+<img src="img/after-paused.png" alt="Editor with demo paused">
+<figcaption>Paused: the button shows <em>Resume</em>, the demo scene is frozen while the editor stays fully live.</figcaption>
+</figure>
+<p>On a backend that does not report <code>demo.cl_demospeed</code>, the control renders disabled with a reason and logs one
+<code>warn</code>-level session-log entry (tier-3F case). <code>demo_setspeed</code> is a <em>percent</em> on both engines
+(0 pauses, 100 restores) — the protocol doc and allowlists say so explicitly, with negative tests for lookalikes and chaining.</p>
+
+<h2>QA matrix — release run (commit df07436, fresh dist)</h2>
+<p>12 cells: HUD system (newhud/classic) × killfeed style (classic/modern/separated) × resize (2560×1440 → 1920×1080 and
+→ 1280×720, metamorphic there-and-back). Invariants per cell: non-vacuous (≥10 drawn), proportionality (measured ratio),
+containment, alignment, metamorphic, cvar round-trip. Artifacts: <code>tools/qa/artifacts/release1-final/</code>.</p>
+<table>
+<tr><th>cell</th><th>verdict</th><th>drawn</th><th>measured ratio (x, y)</th><th>failures</th></tr>
+<tr><td>newhud.classic.1440-1080</td><td class="ok">PASS</td><td>73</td><td>0.700, 0.700</td><td>—</td></tr>
+<tr><td>newhud.classic.1440-720</td><td class="ok">PASS</td><td>73</td><td>0.367, 0.370</td><td>—</td></tr>
+<tr><td>newhud.modern.1440-1080</td><td class="ok">PASS</td><td>73</td><td>0.700, 0.700</td><td>—</td></tr>
+<tr><td>newhud.modern.1440-720</td><td class="ok">PASS</td><td>73</td><td>0.367, 0.370</td><td>—</td></tr>
+<tr><td>newhud.separated.1440-1080</td><td class="ok">PASS</td><td>73</td><td>0.700, 0.700</td><td>—</td></tr>
+<tr><td>newhud.separated.1440-720</td><td class="ok">PASS</td><td>73</td><td>0.367, 0.370</td><td>—</td></tr>
+<tr><td>classic.* (all six)</td><td class="bad">FAIL (expected)</td><td>0</td><td>real ratios measured</td><td>non-vacuous only</td></tr>
+</table>
+<div class="note">The six <code>classic.*</code> failures are the release definition working as designed: with
+<code>scr_newhud 0</code> no plugin elements draw, and the non-vacuous invariant refuses to bless geometry passes over an
+empty set. The classic axis needs its own expectations (the engine's sbar is not a plugin element) — tracked as a
+follow-up issue, see Known limitations.</div>
+
+<h2>Test summary (release commit)</h2>
+<table>
+<tr><th>gate</th><th>result</th><th>where</th></tr>
+<tr><td>tier 1 — pure core + dist allowlist + asset freshness</td><td class="ok">PASS</td><td>CI + local</td></tr>
+<tr><td>tier 2 — bridge client (JS) / engine security contract (C)</td><td class="ok">PASS / PASS</td><td>CI + local ezQuake build</td></tr>
+<tr><td>tier 3 / 3F — view layer / FTE page vs fake engine</td><td class="ok">PASS / 13 of 13</td><td>CI + local</td></tr>
+<tr><td>tier 4 — native ezQuake end-to-end (GPU)</td><td class="ok">PASS</td><td>CI (self-hosted)</td></tr>
+<tr><td>tier 4F — public dist end-to-end, 40 cases incl. 130-control coverage audit &amp; pixel truth</td><td class="ok">40 of 40</td><td>fresh <code>BASE_PATH=/ezHUD/</code> dist, run by builder and reviewer</td></tr>
+<tr><td>QA selftest — fake engine, planted-fault drill</td><td class="ok">12 of 12 + fault detected</td><td><code>npm run test:qa</code></td></tr>
+<tr><td>QA matrix — real engine, 12 cells</td><td class="ok">6 of 6 newhud PASS; 6 classic fail non-vacuous only (expected)</td><td><code>tools/qa/artifacts/release1-final/</code></td></tr>
+</table>
+<p>TDD receipts (observed-failing before implementation): <code>tools/qa/artifacts/red-40-pre/</code>,
+<code>red-40-css/</code>, <code>red-41-physical/</code>, <code>red-43-demo-pause/</code>; green twins beside them.</p>
+
+<h2>Known limitations</h2>
+<ul>
+<li>The <code>classic.*</code> matrix axis has no expectations of its own yet (sbar is engine-drawn, not a plugin element) — follow-up issue filed.</li>
+<li>Real-run ping width variation is currently pinned static by the master cfg, so the #42 exemption is proven at unit level; a live-variation cell is a follow-up.</li>
+<li>Pausing freezes demo time, not <code>cl.time</code>: the gameclock keeps ticking while paused (engine behaviour, documented in the spec and tests).</li>
+<li>Golden screenshots (perceptual diff) remain unblessed — the capture hook exists, blessing is future work.</li>
+</ul>
+</body>
+</html>
