@@ -220,6 +220,12 @@ byte-identical cvar round-trip) → optional golden-cfg diff (bless with
 (state snapshots, invariant report with the numbers, exported cvars, engine
 `/log` dump, `frame.png` when the backend has a framebuffer).
 
+`DYNAMIC_WIDTH` in `tools/qa/invariants.mjs` is the reviewed list of
+content-sized elements whose width is exempt from proportionality and
+metamorphic judgement; their x/y position and height remain judged. Extending
+this list requires the PR to name the added element explicitly, just like
+blessing a golden.
+
 Entry points:
 
 - `npm run test:qa` — invariant unit tests + fake-engine selftest, including

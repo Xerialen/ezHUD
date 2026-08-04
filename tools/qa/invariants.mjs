@@ -6,6 +6,10 @@
 // every failure carries the numbers, because the review agent works from the
 // artifact alone.
 
+// Content-sized elements whose width may legitimately change with their text.
+// Names are the same hud_-stripped element names carried by /state and reports.
+export const DYNAMIC_WIDTH = ['ping'];
+
 // After a resize, every rect must scale by the resolution ratio, within one
 // glyph (8px at the element's scale) — the engine lays out in integers, so
 // exactness is not on offer, but drift beyond a character cell is a bug.
@@ -36,10 +40,11 @@ export function proportionality(before, after, { name = 'proportionality' } = {}
 			x: b.rect.x * rx, y: b.rect.y * ry,
 			w: b.rect.w * rx, h: b.rect.h * ry,
 		};
+		const judged = DYNAMIC_WIDTH.includes(b.name) ? ['x', 'y', 'h'] : ['x', 'y', 'w', 'h'];
 		const deltas = Object.fromEntries(
-			Object.entries(expected).map(([k, v]) => [k, Math.abs(a.rect[k] - v)]));
+			judged.map((k) => [k, Math.abs(a.rect[k] - expected[k])]));
 		if (Object.values(deltas).some((d) => d > tolerance)) {
-			failures.push({ element: b.name, before: b.rect, after: a.rect, expected, deltas, tolerance });
+			failures.push({ element: b.name, before: b.rect, after: a.rect, expected, judged, deltas, tolerance });
 		}
 	}
 	return {
@@ -47,6 +52,7 @@ export function proportionality(before, after, { name = 'proportionality' } = {}
 		pass: failures.length === 0,
 		ratio: { x: rx, y: ry },
 		model: fteAnchors ? 'fixed-size screen anchors' : 'full rect scale',
+		exempt_width: [...DYNAMIC_WIDTH],
 		failures,
 	};
 }
@@ -107,11 +113,12 @@ export function metamorphic(original, returned, { name = 'metamorphic' } = {}) {
 	for (const o of original.elements) {
 		const r = byName.get(o.name);
 		if (!o.rect || !r?.rect) continue;
-		if (['x', 'y', 'w', 'h'].some((k) => o.rect[k] !== r.rect[k])) {
-			failures.push({ element: o.name, original: o.rect, returned: r.rect });
+		const judged = DYNAMIC_WIDTH.includes(o.name) ? ['x', 'y', 'h'] : ['x', 'y', 'w', 'h'];
+		if (judged.some((k) => o.rect[k] !== r.rect[k])) {
+			failures.push({ element: o.name, original: o.rect, returned: r.rect, judged });
 		}
 	}
-	return { name, pass: failures.length === 0, failures };
+	return { name, pass: failures.length === 0, exempt_width: [...DYNAMIC_WIDTH], failures };
 }
 
 // The log-shape gate: a cell that passed geometry but logged something
