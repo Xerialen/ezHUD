@@ -16,7 +16,11 @@
 #include <windows.h>
 #endif
 
-#define HUD_WEB_MAX_CLIENTS          4
+/* Chrome opens up to 6 parallel connections per origin, and the editor's module
+ * graph (9 files with Connection: close) rides that limit on a cold load. Fewer
+ * slots than the browser's parallelism means hard-closed module requests and a
+ * page that never boots — 8 leaves headroom on top of Chrome's 6. */
+#define HUD_WEB_MAX_CLIENTS          8
 #define HUD_WEB_MAX_REQUEST          (64 * 1024)
 #define HUD_WEB_MAX_TARGET           2048
 #define HUD_WEB_CLIENT_TIMEOUT       2.0
@@ -1218,12 +1222,6 @@ static hud_web_client_t *HUD_Web_FreeClient(void)
 	return NULL;
 }
 
-static void HUD_Web_RejectExcessClient(socket_t socket)
-{
-	/* No fifth request is admitted: without a slot we cannot parse and authenticate it. */
-	closesocket(socket);
-}
-
 static void HUD_Web_AcceptClients(double now)
 {
 	int accepted;
@@ -1231,8 +1229,17 @@ static void HUD_Web_AcceptClients(double now)
 	for (accepted = 0; accepted < HUD_WEB_ACCEPTS_PER_FRAME; ++accepted) {
 		struct sockaddr_in peer;
 		socklen_t peer_length = sizeof(peer);
-		socket_t socket = accept(hud_web_listener, (struct sockaddr *)&peer, &peer_length);
+		socket_t socket;
 		hud_web_client_t *client;
+
+		/* Slot check before accept: with every slot busy the connection stays in
+		 * the kernel backlog and is served next frame, instead of being accepted
+		 * and hard-closed — which a browser reports as a failed module load and
+		 * does not retry. */
+		if (!HUD_Web_FreeClient()) {
+			break;
+		}
+		socket = accept(hud_web_listener, (struct sockaddr *)&peer, &peer_length);
 
 		if (socket == INVALID_SOCKET) {
 			if (!HUD_Web_IsWouldBlock(qerrno)) {
@@ -1246,7 +1253,8 @@ static void HUD_Web_AcceptClients(double now)
 		}
 		client = HUD_Web_FreeClient();
 		if (!client) {
-			HUD_Web_RejectExcessClient(socket);
+			/* Cannot happen after the pre-accept check, but never leak a socket. */
+			closesocket(socket);
 			continue;
 		}
 		memset(client, 0, sizeof(*client));

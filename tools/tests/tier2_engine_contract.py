@@ -232,8 +232,9 @@ def main():
     status, log_headers, log_body = request(args.port, "GET", "/log", token)
     if status != 200:
         raise Failure(f"authorised /log failed: HTTP {status}")
-    if "text/plain" not in log_headers.get("content-type", ""):
-        raise Failure(f"/log content-type is {log_headers.get('content-type')!r}, not text/plain")
+    log_content_type = {name.lower(): value for name, value in log_headers.items()}.get("content-type", "")
+    if "text/plain" not in log_content_type:
+        raise Failure(f"/log content-type is {log_content_type!r}, not text/plain")
     log_output = log_body.decode("utf-8", "replace")
     if token in log_output:
         raise Failure("/log leaks the bridge token into its own output")
