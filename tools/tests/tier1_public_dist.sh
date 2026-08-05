@@ -50,6 +50,14 @@ index.html
 qw/demos/hudtest_src.mvd
 qw/demos/tb4gf_book_vs_s.mvd
 qw/fragfile.dat
+release-1/img/after-bar.png
+release-1/img/after-paused.png
+release-1/img/after-resized-window.png
+release-1/img/after-state.json
+release-1/img/before-resized-window.png
+release-1/img/before-state.json
+release-1/index.html
+release-1/release-notes.html
 ui.css
 view/app.js
 view/debug.js"
@@ -58,9 +66,11 @@ view/debug.js"
 
 engine_dir=$run_dir/engine
 game_data_dir=$run_dir/game-data
+release_docs_dir=$run_dir/docs/release-1
 dist_dir=$run_dir/dist
 
-mkdir -p "$engine_dir" "$game_data_dir/id1" "$game_data_dir/qw/demos"
+mkdir -p "$engine_dir" "$game_data_dir/id1" "$game_data_dir/qw/demos" "$run_dir/docs"
+cp -R "$repo_dir/docs/release-1" "$release_docs_dir"
 # ftewebglcl.html exists here and must not be shipped: our index.html replaces
 # the stock FTE shell.
 for name in ftewebglcl.html ftewebglcl.js ftewebglcl.wasm; do
@@ -73,12 +83,16 @@ done
 # input directory would pick them up here too.
 echo "placeholder pak1" > "$game_data_dir/id1/pak1.pak"
 echo "placeholder owner config" > "$game_data_dir/owner-config.cfg"
+# A normal (non-dotfile) source beside the reviewed release files. A wildcard
+# over docs/release-1 would publish it; the explicit document allowlist must not.
+echo "release docs poison" > "$release_docs_dir/tier1-poison-do-not-ship.txt"
 
 # ---- build ----------------------------------------------------------------
 
 DIST_DIR=$dist_dir \
 ENGINE_DIR=$engine_dir \
 GAME_DATA_DIR=$game_data_dir \
+RELEASE_DOCS_DIR=$release_docs_dir \
 BASE_PATH=/ezHUD/ \
 	bash "$repo_dir/tools/fte-web/assemble-public.sh" > "$run_dir/assemble.log" 2>&1 ||
 	{ cat "$run_dir/assemble.log" >&2; fail "assemble-public.sh failed"; }
@@ -95,11 +109,16 @@ fi
 # 2. poison, named explicitly so a failure says what leaked rather than "extra
 # file". Redundant with 1 by construction; cheap, and it is the assertion the
 # whole exercise is for.
-for poison in id1/pak1.pak owner-config.cfg; do
+for poison in id1/pak1.pak owner-config.cfg release-1/tier1-poison-do-not-ship.txt; do
 	[ ! -e "$dist_dir/$poison" ] || fail "$poison reached the dist"
 done
 
-# 3. the import map is resolved URLs, so an unrewritten key is a page that
+# 3. Every local link in the release pages resolves in this exact dist, and
+# every page and reviewed release asset has bytes.
+node "$repo_dir/tools/tests/tier1_release_pages.mjs" "$dist_dir" ||
+	fail "release page integrity check failed"
+
+# 4. the import map is resolved URLs, so an unrewritten key is a page that
 # loads the ezQuake bridge under a Pages prefix and reports a lost connection.
 grep -qF '"/ezHUD/core/bridge.js"' "$dist_dir/index.html" ||
 	fail "index.html has no '/ezHUD/core/bridge.js' import-map key"
@@ -108,7 +127,7 @@ grep -qF '"/ezHUD/core/fte-adapter.js"' "$dist_dir/index.html" ||
 ! grep -qF '"/core/bridge.js"' "$dist_dir/index.html" ||
 	fail "index.html still carries the root-served '/core/bridge.js' key"
 
-# 4. the seeder filters as hard as the assembler does.
+# 5. the seeder filters as hard as the assembler does.
 site_dir=$run_dir/site
 staged=$run_dir/staged
 mkdir -p "$site_dir/id1" "$site_dir/qw/demos"
@@ -139,4 +158,4 @@ if [ "$staged_actual" != "$staged_expected" ]; then
 	fail "stage-game-data.sh staged something off the allowlist"
 fi
 
-echo "tier1_public_dist: ok (dist allowlist, poison, import map, staging)."
+echo "tier1_public_dist: ok (dist allowlist, docs poison, release links/assets, import map, staging)."

@@ -16,9 +16,15 @@ img { max-width: 100%; border: 1px solid #8886; border-radius: 6px; }
 figure { margin: 1rem 0; } figcaption { font-size: .9em; opacity: .85; margin-top: .35rem; }
 .ok { color: var(--ok); font-weight: 600; } .bad { color: var(--bad); font-weight: 600; }
 .note { background: #d9770615; border-left: 4px solid var(--accent); padding: .5rem .8rem; margin: 1rem 0; }
+.release-nav { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin-bottom: 1.5rem; }
+.release-nav a { color: var(--accent); text-underline-offset: .18em; }
 </style>
 </head>
 <body>
+<nav class="release-nav" aria-label="Release links">
+<a href="./release-notes.html">Player release notes</a>
+<a href="../">Open ezHUD</a>
+</nav>
 <h1>ezHUD Release 1 — “Trust the geometry”</h1>
 <p>Epic <strong>#39</strong>, subissues <strong>#40–#43</strong>. Built by Sol (GPT-5.6-sol), specified and reviewed by Claude (Fable 5), 2026-08-04.
 Release commit: <code>df07436</code> on <code>main</code> (merged PRs <a href="https://github.com/Xerialen/ezHUD/pull/44">#44</a>,

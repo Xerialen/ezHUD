@@ -214,7 +214,11 @@ jobs:
           for f in index.html ui.css favicon.svg default.fmf \
                    ftewebglcl.js ftewebglcl.wasm \
                    id1/pak0.pak id1/nquake.pk3 id1/gpl_maps.pk3 id1/qrp-dm3.pk3 \
-                   qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd qw/fragfile.dat; do
+                   qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd qw/fragfile.dat \
+                   release-1/index.html release-1/release-notes.html \
+                   release-1/img/after-bar.png release-1/img/after-paused.png \
+                   release-1/img/after-resized-window.png release-1/img/after-state.json \
+                   release-1/img/before-resized-window.png release-1/img/before-state.json; do
             if [ ! -s "$f" ]; then
               echo "dist: missing or empty $f" >&2
               exit 1
@@ -233,6 +237,10 @@ jobs:
               ./id1/pak0.pak|./id1/nquake.pk3|./id1/gpl_maps.pk3|./id1/qrp-dm3.pk3) ;;
               ./qw/demos/hudtest_src.mvd|./qw/demos/tb4gf_book_vs_s.mvd) ;;
               ./qw/fragfile.dat) ;;
+              ./release-1/index.html|./release-1/release-notes.html) ;;
+              ./release-1/img/after-bar.png|./release-1/img/after-paused.png) ;;
+              ./release-1/img/after-resized-window.png|./release-1/img/after-state.json) ;;
+              ./release-1/img/before-resized-window.png|./release-1/img/before-state.json) ;;
               # core/ is flat; a nested path means core/tests/ came along.
               ./core/*/*) bad="$bad $f" ;;
               ./core/*.js) ;;
