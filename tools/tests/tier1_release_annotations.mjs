@@ -4,7 +4,6 @@
 // never a browser or image package.
 import assert from 'node:assert/strict';
 import { readFile, stat } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { inflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +13,6 @@ const releaseDir = path.join(repo, 'docs/release-1');
 const manifestPath = path.join(releaseDir, 'annotations.json');
 const capturesPath = path.join(releaseDir, 'captures.json');
 const afterStatePath = path.join(releaseDir, 'img/after-state.json');
-const announcementPath = path.join(releaseDir, 'ANNOUNCEMENT-discord.md');
 const FULL_FRAME_BY_ID = {
 	'pause-resume': 'img/after-paused.png',
 	'canvas-resize': 'img/after-resized-window.png',
@@ -256,56 +254,6 @@ for (const [assetIndex, asset] of manifest.assets.entries()) {
 }
 console.log('Case 3: PASS — targets are in bounds and callouts contain no inset, prose label or chip');
 
-const announcement = (await nonEmptyFile(announcementPath, 'docs/release-1/ANNOUNCEMENT-discord.md')).toString('utf8');
-const startMarker = '<!-- MESSAGE START -->';
-const endMarker = '<!-- MESSAGE END -->';
-assert.equal(announcement.split(startMarker).length - 1, 1, 'announcement needs exactly one MESSAGE START');
-assert.equal(announcement.split(endMarker).length - 1, 1, 'announcement needs exactly one MESSAGE END');
-const start = announcement.indexOf(startMarker) + startMarker.length;
-const end = announcement.indexOf(endMarker);
-assert(start < end, 'announcement message markers are out of order');
-const message = announcement.slice(start, end).trim();
-assert(message, 'announcement message block is empty');
-for (const pattern of [/\/home\//i, /\/Users\//i, /\$USER\b/i, /file:\/\//i, /[A-Z]:\\Users\\/i]) {
-	assert(!pattern.test(announcement), `announcement contains private-path pattern ${pattern}`);
-}
-for (const privateValue of [os.hostname(), os.userInfo().username]) {
-	if (privateValue && privateValue.length >= 3) {
-		const escaped = privateValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		const privateToken = new RegExp(`(^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`, 'i');
-		assert(!privateToken.test(announcement), 'announcement contains the local machine name or username');
-	}
-}
-assert(!/(?:^|\s)#\d+\b/m.test(message), 'announcement body must not contain issue numbers');
-const lines = message.split(/\r?\n/);
-const imageUrlPattern = /^https:\/\/xerialen\.github\.io\/ezHUD\/release-1\/(img\/[^\s<>]+\.(?:png|jpg|jpeg|webp))$/i;
-let previousImage = -1;
-let imageCount = 0;
-const announcedImages = [];
-for (let i = 0; i < lines.length; i += 1) {
-	const match = lines[i].trim().match(imageUrlPattern);
-	if (!match) continue;
-	imageCount += 1;
-	announcedImages.push(match[1]);
-	assert.equal(lines[i], lines[i].trim(), `announcement image URL on line ${i + 1} must stand alone`);
-	const localImage = releasePath(match[1], `announcement image on line ${i + 1}`);
-	await nonEmptyFile(localImage, match[1]);
-	const block = lines.slice(previousImage + 1, i).filter((line) => line.trim());
-	assert(block.some((line) => /^#{1,6}\s+\S/.test(line)),
-		`announcement image on line ${i + 1} has no feature heading above it`);
-	assert(block.some((line) => !/^#{1,6}\s+/.test(line)),
-		`announcement image on line ${i + 1} has no feature description above it`);
-	previousImage = i;
-}
-assert(imageCount > 0, 'announcement message references no public feature images');
-assert.deepEqual(announcedImages, [
-	'img/window-follow-focused-annotated.png',
-	'img/pause-resume-focused-annotated.png',
-], 'announcement must use the two focused annotated proofs in feature order');
-const allUrls = [...message.matchAll(/https?:\/\/[^\s<>]+/g)];
-for (const match of allUrls) {
-	if (imageUrlPattern.test(match[0])) continue;
-	assert.equal(message[match.index - 1], '<', `non-image link ${match[0]} must be wrapped in <…>`);
-	assert.equal(message[match.index + match[0].length], '>', `non-image link ${match[0]} must be wrapped in <…>`);
-}
-console.log(`Case 6: PASS — one announcement message references ${imageCount} headed image(s) with privacy intact`);
+// Announcement/payload validation now lives with the release-note gate
+// (tools/ci/release_note_gate.mjs), which owns docs/<slug>/NOTES.md.
+console.log('tier1_release_annotations: ok (focused, ring-only evidence with manifest provenance).');

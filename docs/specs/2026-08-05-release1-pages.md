@@ -23,8 +23,8 @@ the evidence is unusable in a browser.
    keep those links working under the `/ezHUD/release-1/` prefix (relative
    links already do; do not absolutize).
 3. **`release-notes.html`**: a hand-written static HTML page (no runtime JS,
-   no CDN, self-contained CSS like index.html). RELEASE-NOTES.md stays
-   canonical; the HTML page carries the same content, player-voiced, plus
+   no CDN, self-contained CSS like index.html). `NOTES.md` is the canonical
+   source; the HTML page carries the same content, player-voiced, plus
    links: evidence report (`./`), the app (`../`), the repo. Evidence report
    gains a link to the notes and to the app. Cross-links must be relative so
    they work both offline and under the Pages prefix.
