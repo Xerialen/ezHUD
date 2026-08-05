@@ -52,7 +52,11 @@ const siteOrigin = `http://127.0.0.1:${site.address().port}`;
 
 // ---- the engine, headless ---------------------------------------------------
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const deviceScaleFactor = Number(flag('device-scale-factor', 1));
+if (!Number.isFinite(deviceScaleFactor) || deviceScaleFactor <= 0) {
+	throw new Error('--device-scale-factor must be a positive number');
+}
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor });
 page.on('pageerror', (err) => console.error('[page]', err.message));
 await page.goto(`${siteOrigin}/index.html`, { waitUntil: 'domcontentloaded' });
 
@@ -97,6 +101,73 @@ async function pageMetrics() {
 	});
 }
 
+// Capture exactly the rectangle the engine exported. This deliberately has no
+// element-specific coordinate correction: a consumer must be able to trust
+// rect.x as drawn. `rows` limits content-sized proofs such as the tracker to
+// their first painted row instead of including reserved empty rows.
+async function pageElementPixels(name, rows = 1, suppliedRect = null, includeRaw = false) {
+	const state = await pageState();
+	const element = state.elements?.find((entry) => entry.name === name);
+	const rect = suppliedRect ?? element?.rect;
+	if (!rect || rect.w <= 0 || rect.h <= 0) {
+		throw new Error(`${name} has no non-empty exported rect`);
+	}
+	const canvasBox = await page.locator('#canvas').boundingBox();
+	if (!canvasBox) throw new Error('canvas has no browser bounds');
+	const sx = canvasBox.width / state.screen.vid_width;
+	const sy = canvasBox.height / state.screen.vid_height;
+	const viewport = page.viewportSize();
+	const x = Math.max(0, canvasBox.x + rect.x * sx);
+	const y = Math.max(0, canvasBox.y + rect.y * sy);
+	const width = Math.min(Math.max(1, rect.w * sx), viewport.width - x);
+	const rowHeight = rect.h / Math.max(1, rows);
+	const height = Math.min(Math.max(1, rowHeight * sy), viewport.height - y);
+	if (width <= 0 || height <= 0) {
+		throw new Error(`${name} exported rect lies outside the browser viewport`);
+	}
+	// Editor outlines are a consumer of the contract, not engine pixels. Hide
+	// them only for this QA capture so an outline disappearing with rect:null
+	// cannot masquerade as the tracker's rendered text.
+	const overlayVisibility = await page.locator('#overlay').evaluate((node) => node.style.visibility);
+	await page.locator('#overlay').evaluate((node) => { node.style.visibility = 'hidden'; });
+	let png;
+	try {
+		png = await page.screenshot({ clip: { x, y, width, height } });
+	} finally {
+		await page.locator('#overlay').evaluate((node, value) => { node.style.visibility = value; }, overlayVisibility);
+	}
+	const decoded = await page.evaluate(async ([base64, raw]) => {
+		const response = await fetch(`data:image/png;base64,${base64}`);
+		const bitmap = await createImageBitmap(await response.blob());
+		const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+		const context = canvas.getContext('2d');
+		context.drawImage(bitmap, 0, 0);
+		const pixels = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+		let a = 2166136261;
+		let b = 0;
+		for (let i = 0; i < pixels.length; i++) {
+			a = Math.imul(a ^ pixels[i], 16777619) >>> 0;
+			b = (b + Math.imul(pixels[i], i + 1)) >>> 0;
+		}
+		let rgba = null;
+		if (raw) {
+			let binary = '';
+			for (let i = 0; i < pixels.length; i += 0x8000) {
+				binary += String.fromCharCode(...pixels.subarray(i, i + 0x8000));
+			}
+			rgba = btoa(binary);
+		}
+		return { signature: `${bitmap.width}x${bitmap.height}:${a}:${b}`, width: bitmap.width,
+			height: bitmap.height, rgba };
+	}, [png.toString('base64'), includeRaw]);
+	return {
+		...decoded,
+		png: png.toString('base64'),
+		rect,
+		screen: state.screen,
+	};
+}
+
 async function pageCmd(line) {
 	await page.evaluate((l) => globalThis.FTEC.cbufadd(l + '\n'), line);
 }
@@ -125,6 +196,25 @@ const bridge = createServer(async (request, response) => {
 			// reached both the canvas backing store and EZHud_StateJSON.
 			response.writeHead(200, { 'content-type': 'application/json' });
 			response.end(JSON.stringify(await pageMetrics()));
+			return;
+		}
+		if (url.pathname === '/pixels') {
+			const rows = Number(url.searchParams.get('rows') ?? 1);
+			const name = url.searchParams.get('element') ?? '';
+			const includeRaw = url.searchParams.get('raw') === '1';
+			const rectValues = ['x', 'y', 'w', 'h'].map((key) => url.searchParams.has(key)
+				? Number(url.searchParams.get(key)) : null);
+			const hasSuppliedRect = rectValues.every(Number.isFinite);
+			const suppliedRect = hasSuppliedRect
+				? Object.fromEntries(['x', 'y', 'w', 'h'].map((key, index) => [key, rectValues[index]]))
+				: null;
+			if (!/^[a-z0-9_]+$/i.test(name) || !Number.isInteger(rows) || rows < 1
+				|| (rectValues.some((value) => value !== null) && !hasSuppliedRect)) {
+				response.writeHead(400).end('{"ok":false,"error":"invalid pixel probe"}');
+				return;
+			}
+			response.writeHead(200, { 'content-type': 'application/json' });
+			response.end(JSON.stringify(await pageElementPixels(name, rows, suppliedRect, includeRaw)));
 			return;
 		}
 		if (url.pathname === '/log') {
