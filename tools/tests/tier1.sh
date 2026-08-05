@@ -20,6 +20,9 @@ if [ -d hud_web_ui/fte ]; then node --check hud_web_ui/fte/*.js; fi
 node --test hud_web_ui/core/tests/*.test.js
 node --test tools/tests/*.test.mjs
 python3 "$embed" --check
+# Committed release evidence is repository-only, so this guard is absent from
+# an ezQuake source checkout just like the public-dist assembler below.
+if [ -d docs/release-1 ]; then node tools/tests/tier1_release_annotations.mjs; fi
 # What the public build ships, asserted against an allowlist. Guarded for the
 # same reason as the check above -- an ezQuake checkout has no tools/fte-web/ --
 # and cheap to run here rather than only in CI, because the thing it guards

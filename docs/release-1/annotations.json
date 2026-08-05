@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "id": "pause-resume",
+      "source": "img/pause-resume-focused.png",
+      "output": "img/pause-resume-focused-annotated.png",
+      "accent": "#ff4116",
+      "callouts": [
+        {
+          "badge": 1,
+          "target": { "x": 438, "y": 428, "w": 132, "h": 52 }
+        }
+      ]
+    },
+    {
+      "id": "canvas-resize",
+      "source": "img/window-follow-focused.png",
+      "output": "img/window-follow-focused-annotated.png",
+      "accent": "#ff4116",
+      "callouts": [
+        {
+          "badge": 1,
+          "target": { "x": 100, "y": 24, "w": 581, "h": 43 }
+        }
+      ]
+    }
+  ]
+}
