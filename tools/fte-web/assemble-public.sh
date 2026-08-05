@@ -26,6 +26,7 @@ engine_dir=${ENGINE_DIR:-$workspace/fteqw/engine/release}
 # seeds it from the dev site. Never the dev site itself: this script must not
 # be pointed at a directory that also contains pak1 and the owner's files.
 game_data_dir=${GAME_DATA_DIR:-$workspace/game-data}
+release_docs_dir=${RELEASE_DOCS_DIR:-$repo_dir/docs/release-1}
 base_path=${BASE_PATH:-/}
 ui_dir=$repo_dir/hud_web_ui
 
@@ -57,6 +58,10 @@ for dir in "$engine_dir" "$game_data_dir"; do
 		exit 1
 	fi
 done
+if [ ! -d "$release_docs_dir" ]; then
+	echo "assemble-public.sh: no such release docs directory: $release_docs_dir" >&2
+	exit 1
+fi
 
 # Missing inputs are fatal, never skipped. A dist that is quietly short one pak
 # boots into a black canvas, which looks like an engine bug rather than a build
@@ -91,6 +96,25 @@ done
 # resulting name list, which is what stops a stray file riding along.
 cp -R "$ui_dir/view" "$dist_dir/view"
 cp -R "$ui_dir/fte" "$dist_dir/fte"
+
+# ---- Release 1 report -----------------------------------------------------
+
+# Public documentation follows the same review-step rule as executable and
+# game data: every path is named. In particular, do not replace this with a
+# wildcard or a recursive copy of docs/ -- a newly added source file must not
+# become public until this list and the independent dist guard both name it.
+for rel in \
+	index.html \
+	release-notes.html \
+	img/after-bar.png \
+	img/after-paused.png \
+	img/after-resized-window.png \
+	img/after-state.json \
+	img/before-resized-window.png \
+	img/before-state.json
+do
+	copy "$release_docs_dir/$rel" "release-1/$rel"
+done
 
 # ---- the engine -----------------------------------------------------------
 

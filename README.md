@@ -53,10 +53,11 @@ merged upstream. The FTE-web backend shipped from a spike
 ([`spikes/fte-web/`](spikes/fte-web/) — spec, findings, parity evidence) and is
 deployed. See [Known gaps](#known-gaps) for what is known to be unproven.
 Release 1 "Trust the geometry" (#39) is merged:
-[release notes](docs/release-1/RELEASE-NOTES.md) ·
-[evidence report](docs/release-1/index.html) — window-true canvas sizing,
-honest resolution export, demo pause, and the 12-cell geometry QA matrix
-that now gates every geometric change.
+[release notes](https://xerialen.github.io/ezHUD/release-1/release-notes.html) ·
+[evidence report](https://xerialen.github.io/ezHUD/release-1/) — window-true
+canvas sizing, honest resolution export, demo pause, and the 12-cell geometry
+QA matrix that now gates every geometric change. The
+[source files](docs/release-1/) remain available to checkout readers.
 
 ---
 
