@@ -30,6 +30,9 @@ h1 { max-width: 13em; margin: 0; font-size: clamp(2rem, 7vw, 4rem); line-height:
 section { margin: 1rem 0; padding: 1.15rem 1.25rem; border: 1px solid var(--line); background: var(--panel); }
 h2 { margin: 0 0 .35rem; font-size: 1.15rem; }
 p { margin: .35rem 0 0; }
+figure { margin: .75rem 0 1.5rem; }
+img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); }
+figcaption { margin-top: .4rem; color: var(--muted); font-size: .88rem; }
 .compatibility { margin-top: 2rem; padding-left: 1rem; border-left: 4px solid var(--accent); }
 footer { margin-top: 2.5rem; color: var(--muted); font-size: .9rem; }
 @media (prefers-color-scheme: light) {
@@ -53,11 +56,19 @@ footer { margin-top: 2.5rem; color: var(--muted); font-size: .9rem; }
 <h2>The editor finally follows your window</h2>
 <p>Resize the browser and the game view grows and shrinks with it, while every overlay handle stays exactly on its element. Before this release the game view silently stayed at its boot size, leaving a small frozen picture on a big monitor and subtly misplaced handles after a resize.</p>
 </section>
+<figure>
+<a href="img/window-follow-focused-annotated.png"><img src="img/window-follow-focused-annotated.png" alt="Focused editor view with marker 1 around the live canvas-size readout"></a>
+<figcaption>Marker 1 identifies the engine-read size that follows the browser window. Open the image for the full-size proof.</figcaption>
+</figure>
 
 <section>
 <h2>Pause the demo while you edit</h2>
 <p>A Pause button now sits next to the volume control. Pause, line up your HUD against a quiet scene, then resume. The button always shows what the engine is actually doing: pause from the console and it flips by itself; use a backend that cannot pause and the control says so instead of pretending.</p>
 </section>
+<figure>
+<a href="img/pause-resume-focused-annotated.png"><img src="img/pause-resume-focused-annotated.png" alt="Focused lower editor view with marker 1 around the Resume control"></a>
+<figcaption>Marker 1 identifies the engine-read Pause/Resume control. Open the image for the full-size proof.</figcaption>
+</figure>
 
 <section>
 <h2>Sharper resolution honesty</h2>
