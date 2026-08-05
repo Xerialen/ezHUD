@@ -56,6 +56,8 @@ release-1/img/after-resized-window.png
 release-1/img/after-state.json
 release-1/img/before-resized-window.png
 release-1/img/before-state.json
+release-1/img/pause-resume-focused-annotated.png
+release-1/img/window-follow-focused-annotated.png
 release-1/index.html
 release-1/release-notes.html
 ui.css

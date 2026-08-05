@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "captures": [
+    {
+      "id": "pause-resume",
+      "page": "./",
+      "output": "img/pause-resume-focused.png",
+      "context": "img/after-paused.png",
+      "viewport": { "width": 1400, "height": 788 },
+      "state": {
+        "demo": "paused",
+        "demoPath": "demos/hudtest_src.mvd",
+        "demoTimeSeconds": 30,
+        "trackPlayer": "Book Milton",
+        "hideDynamicHud": true
+      },
+      "clip": { "x": 260, "y": 400, "w": 550, "h": 300 },
+      "deviceScaleFactor": 2,
+      "focusSelector": "#fte-pause"
+    },
+    {
+      "id": "canvas-resize",
+      "page": "./",
+      "output": "img/window-follow-focused.png",
+      "context": "img/after-resized-window.png",
+      "viewport": { "width": 1536, "height": 864 },
+      "state": {
+        "demo": "paused",
+        "demoPath": "demos/hudtest_src.mvd",
+        "demoTimeSeconds": 30,
+        "trackPlayer": "Book Milton",
+        "hideDynamicHud": true,
+        "resizeFrom": { "width": 1280, "height": 720 }
+      },
+      "expectedState": {
+        "screen": [960, 540],
+        "physical": [1920, 1080]
+      },
+      "clip": { "x": 886, "y": 0, "w": 500, "h": 270 },
+      "deviceScaleFactor": 2,
+      "focusSelector": "#readout"
+    }
+  ]
+}

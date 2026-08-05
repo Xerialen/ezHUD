@@ -51,15 +51,24 @@ correlation) and the 12-cell golden QA matrix that every claim below is measured
 <p><strong>User journey:</strong> open the editor, then enlarge the browser window.</p>
 <figure>
 <img src="img/before-resized-window.png" alt="Before: small frozen canvas in a large window">
-<figcaption><strong>Before</strong> (page files at foundation commit <code>63f54bf</code>): the window is 2560×1440 but the
-game canvas stays frozen at its 1280×720-boot size — header reads <em>editing at 853×480 · 1px = 0.83×</em>. The engine
-never learns the window changed; QA's resize step silently measured nothing (ratio 1.0).</figcaption>
+<figcaption><strong>Full-frame context — before.</strong> At foundation commit <code>63f54bf</code>, the window is 2560×1440
+but the game canvas stays frozen at its 1280×720 boot size. The engine never learns the window changed; QA's resize step
+silently measured nothing (ratio 1.0). This context frame is unannotated.</figcaption>
 </figure>
 <figure>
-<img src="img/after-resized-window.png" alt="After: canvas fills the window">
-<figcaption><strong>After</strong> (release build): same journey — the canvas fills the stage and the engine follows:
-<em>editing at 960×540 · 1px = 2×</em>. Root cause was self-referential CSS (<code>#canvas</code> width limited by a frame
-that shrink-wrapped the canvas); the frame is now viewport-sized. Note the new <em>Pause</em> button in the demo bar (#43).</figcaption>
+<img src="img/after-resized-window.png" alt="Full resized ezHUD editor with the game canvas filling the stage">
+<figcaption><strong>Full-frame context — after.</strong> In the release build the canvas fills the stage and the engine
+follows. Root cause was self-referential CSS (<code>#canvas</code> width limited by a frame that shrink-wrapped the canvas);
+the frame is now viewport-sized. This context frame remains unannotated.</figcaption>
+</figure>
+<figure>
+<a href="img/window-follow-focused-annotated.png">
+<img src="img/window-follow-focused-annotated.png" alt="Focused editor crop with a ring and badge 1 around the live editing-at 960 by 540 canvas-size readout">
+</a>
+<figcaption><strong>Focused proof.</strong> <strong>Marker 1</strong> rings only the live
+<em>editing at 960×540 · 1 px = 2× on screen</em> readout. It agrees with the after-state receipt below and updates from
+engine state after the browser is resized; the adjacent Overlay and Save controls are deliberately unmarked.
+<a href="img/window-follow-focused-annotated.png">Open full size</a>.</figcaption>
 </figure>
 <pre>before /state (window 2560×1440):  screen 853×480, physical [704, 396]   ← frozen
 after  /state (window 2560×1440):  screen 960×540, physical [1920, 1080] ← follows</pre>
@@ -80,12 +89,17 @@ exemption was applied; extending the list requires naming the element in a PR (d
 press <em>Resume</em> → it moves again. Type <code>demo_setspeed 0</code> in the console instead → the button flips to
 <em>Resume</em> on the next poll, because it renders engine state, never click state.</p>
 <figure>
-<img src="img/after-bar.png" alt="Demo bar with pause control">
-<figcaption>The demo bar with the new Pause control (crop from the live release build).</figcaption>
+<img src="img/after-paused.png" alt="Full ezHUD editor while demo playback is paused">
+<figcaption><strong>Full-frame context.</strong> The demo scene is frozen while the editor remains live. This context frame
+is unannotated; the focused proof below identifies the changed control.</figcaption>
 </figure>
 <figure>
-<img src="img/after-paused.png" alt="Editor with demo paused">
-<figcaption>Paused: the button shows <em>Resume</em>, the demo scene is frozen while the editor stays fully live.</figcaption>
+<a href="img/pause-resume-focused-annotated.png">
+<img src="img/pause-resume-focused-annotated.png" alt="Focused lower-editor crop with a ring and badge 1 around the Resume button">
+</a>
+<figcaption><strong>Focused proof.</strong> <strong>Marker 1</strong> rings only the engine-read Pause/Resume control.
+Its <em>Resume</em> label means demo time is paused; the selector, volume control, and import hint remain unmarked.
+<a href="img/pause-resume-focused-annotated.png">Open full size</a>.</figcaption>
 </figure>
 <p>On a backend that does not report <code>demo.cl_demospeed</code>, the control renders disabled with a reason and logs one
 <code>warn</code>-level session-log entry (tier-3F case). <code>demo_setspeed</code> is a <em>percent</em> on both engines

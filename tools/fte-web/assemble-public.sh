@@ -111,7 +111,9 @@ for rel in \
 	img/after-resized-window.png \
 	img/after-state.json \
 	img/before-resized-window.png \
-	img/before-state.json
+	img/before-state.json \
+	img/pause-resume-focused-annotated.png \
+	img/window-follow-focused-annotated.png
 do
 	copy "$release_docs_dir/$rel" "release-1/$rel"
 done
