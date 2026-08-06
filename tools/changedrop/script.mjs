@@ -7,6 +7,7 @@ import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
 const INPUT_SCHEMA_VERSION = 'changedrop-value-summary/1';
+const AUTHORING_SCHEMA_VERSION = 'changedrop-script-authoring/1';
 const OUTPUT_SCHEMA_VERSION = 'changedrop-script/1';
 const ROOT_VARIABLE = 'EZHUD_CHANGEDROP_ROOT';
 const INTRO = "Hey guys, it's Xeri with another changedrop.";
@@ -17,35 +18,6 @@ const MAX_SURFACE_SECONDS = 10.0;
 // low end of clear conversational narration. It leaves room for natural pauses;
 // Stage V2 remains authoritative because it checks the measured audio duration.
 export const WORDS_PER_SECOND = 2.2;
-
-const AUTHORED_SURFACES = Object.freeze({
-	'window-follow': Object.freeze({
-		text: 'Resizing now keeps your game and HUD aligned.',
-		requires: Object.freeze({
-			before: Object.freeze([/resiz/i]),
-			after: Object.freeze([/view/i, /browser|window/i]),
-			value: Object.freeze([/HUD/i, /align/i]),
-		}),
-		walkthrough: Object.freeze([
-			'Show the game view before changing the browser size.',
-			'Resize the browser while keeping the game view and HUD handles visible.',
-			'Hold on the resized view with a HUD handle aligned to its element.',
-		]),
-	}),
-	'pause-resume': Object.freeze({
-		text: 'Pause keeps engine frames steady for HUD edits.',
-		requires: Object.freeze({
-			before: Object.freeze([/frame/i]),
-			after: Object.freeze([/pause/i, /engine/i]),
-			value: Object.freeze([/frame/i, /HUD|adjust|edit/i]),
-		}),
-		walkthrough: Object.freeze([
-			'Load a demo with Pause visible beside the demo selector.',
-			'Pause on a quiet frame and hold while the demo clock stays still.',
-			'Resume and hold while the demo clock advances again.',
-		]),
-	}),
-});
 
 function exactObject(value, expectedKeys, at) {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -99,6 +71,42 @@ function validateValueSummary(summary) {
 	return summary;
 }
 
+function nonEmptyStringArray(value, at) {
+	if (!Array.isArray(value) || value.length === 0) throw new Error(`${at} must be a non-empty array.`);
+	for (const [index, entry] of value.entries()) nonEmptyString(entry, `${at} step ${index + 1}`);
+	if (new Set(value).size !== value.length) throw new Error(`${at} contains duplicate steps.`);
+}
+
+function validateAuthoring(authoring) {
+	exactObject(authoring, ['schema_version', 'bookends', 'treatments'], 'Changedrop script authoring');
+	if (authoring.schema_version !== AUTHORING_SCHEMA_VERSION) {
+		throw new Error(`Changedrop script authoring must use ${AUTHORING_SCHEMA_VERSION}.`);
+	}
+	exactObject(authoring.bookends, ['intro_walkthrough', 'outro_walkthrough'], 'Changedrop script authoring bookends');
+	nonEmptyStringArray(authoring.bookends.intro_walkthrough, 'Changedrop intro walkthrough');
+	nonEmptyStringArray(authoring.bookends.outro_walkthrough, 'Changedrop outro walkthrough');
+	if (!Array.isArray(authoring.treatments)) throw new Error('Changedrop script authoring treatments must be an array.');
+
+	const surfaces = new Set();
+	for (const [index, treatment] of authoring.treatments.entries()) {
+		exactObject(treatment, ['surface', 'source', 'text', 'walkthrough'], `Changedrop authored treatment ${index + 1}`);
+		if (typeof treatment.surface !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(treatment.surface)) {
+			throw new Error(`Changedrop authored treatment ${index + 1} has an invalid surface.`);
+		}
+		if (surfaces.has(treatment.surface)) {
+			throw new Error(`Changedrop script authoring has duplicate surface "${treatment.surface}".`);
+		}
+		surfaces.add(treatment.surface);
+		exactObject(treatment.source, ['before', 'after', 'value'], `Authored source for surface "${treatment.surface}"`);
+		for (const field of ['before', 'after', 'value']) {
+			nonEmptyString(treatment.source[field], `Authored source for surface "${treatment.surface}" ${field}`);
+		}
+		nonEmptyString(treatment.text, `Authored narration for surface "${treatment.surface}"`);
+		nonEmptyStringArray(treatment.walkthrough, `Authored walkthrough for surface "${treatment.surface}"`);
+	}
+	return authoring;
+}
+
 function stringsIn(value) {
 	if (typeof value === 'string') return [value];
 	if (Array.isArray(value)) return value.flatMap(stringsIn);
@@ -118,10 +126,22 @@ function privacyChecked(value, subject) {
 	return value;
 }
 
-function assertTreatmentMatches(feature, treatment) {
-	for (const [field, patterns] of Object.entries(treatment.requires)) {
-		if (!patterns.every((pattern) => pattern.test(feature[field]))) {
-			throw new Error(`Authored script for surface "${feature.surface}" no longer matches its ${field} value.`);
+function safeAuthoringPath(value) {
+	const candidate = typeof value === 'string' && value.trim()
+		? value.trim().replaceAll('\\', '/')
+		: 'the per-release changedrop-script.json file';
+	if (candidate.startsWith('/') || /^[a-z]:\//i.test(candidate) || candidate.startsWith('//')
+		|| candidate.split('/').includes('..')) {
+		throw new Error('The changedrop authoring path must be repository-relative.');
+	}
+	return candidate;
+}
+
+function assertTreatmentMatches(feature, treatment, authoringPath) {
+	for (const field of ['before', 'after', 'value']) {
+		if (feature[field] !== treatment.source[field]) {
+			throw new Error(`Authored treatment for surface "${feature.surface}" in ${authoringPath} `
+				+ `no longer matches its ${field} value.`);
 		}
 	}
 }
@@ -134,58 +154,95 @@ function occurrences(text, needle) {
 	return text.split(needle).length - 1;
 }
 
+function segment({ id, kind, surface, text, walkthrough }) {
+	return {
+		id,
+		kind,
+		surface,
+		text,
+		estimated_duration_seconds: Number((wordCount(text) / WORDS_PER_SECOND).toFixed(3)),
+		walkthrough: [...walkthrough],
+	};
+}
+
 function assertScriptContract(script) {
-	const texts = script.segments.map((segment) => segment.text);
+	const texts = script.segments.map((entry) => entry.text);
 	if (texts.some((text) => !text.trim())) throw new Error('Changedrop script contains an empty segment.');
 	if (new Set(texts).size !== texts.length) throw new Error('Changedrop script contains duplicated segment text.');
 	const spoken = texts.join(' ');
-	if (!spoken.startsWith(INTRO) || occurrences(spoken, INTRO) !== 1) {
-		throw new Error('Changedrop script intro must appear exactly once and first.');
+	if (script.segments[0]?.kind !== 'bookend' || script.segments[0]?.text !== INTRO
+		|| occurrences(spoken, INTRO) !== 1) {
+		throw new Error('Changedrop script intro must be a standalone segment exactly once and first.');
 	}
-	if (!spoken.endsWith(OUTRO) || occurrences(spoken, OUTRO) !== 1) {
-		throw new Error('Changedrop script outro must appear exactly once and last.');
+	if (script.segments.at(-1)?.kind !== 'bookend' || script.segments.at(-1)?.text !== OUTRO
+		|| occurrences(spoken, OUTRO) !== 1) {
+		throw new Error('Changedrop script outro must be a standalone segment exactly once and last.');
 	}
-	for (const segment of script.segments) {
-		if (segment.estimated_duration_seconds > MAX_SURFACE_SECONDS) {
-			throw new Error(`Changedrop script surface "${segment.surface}" exceeds the 10.0 second budget.`);
+	for (const entry of script.segments.filter((candidate) => candidate.kind === 'surface')) {
+		if (entry.estimated_duration_seconds > MAX_SURFACE_SECONDS) {
+			throw new Error(`Changedrop script surface "${entry.surface}" exceeds the 10.0 second budget.`);
 		}
 	}
 	return script;
 }
 
 /**
- * Pure stage-2 author. Curated treatments are intentionally tied to source
- * facts; unknown or drifted prose fails rather than inventing narration.
+ * Pure stage-2 author. Human-authored treatments arrive as per-release data;
+ * this function only binds them to source facts and enforces the contract.
  */
-export function authorChangedropScript(summary) {
+export function authorChangedropScript(summary, authoring, { authoringPath: requestedPath } = {}) {
 	validateValueSummary(summary);
 	privacyChecked(summary, 'Changedrop value summary');
 	if (summary.decision === 'skip') return null;
 
-	const segments = summary.features.map((feature, index) => {
-		const treatment = AUTHORED_SURFACES[feature.surface];
-		if (!treatment) {
-			throw new Error(`No authored changedrop treatment exists for surface "${feature.surface}".`);
+	const authoringPath = safeAuthoringPath(requestedPath);
+	validateAuthoring(authoring);
+	privacyChecked(authoring, 'Changedrop script authoring');
+	const treatments = new Map(authoring.treatments.map((treatment) => [treatment.surface, treatment]));
+	const summarySurfaces = new Set(summary.features.map((feature) => feature.surface));
+	for (const treatment of authoring.treatments) {
+		if (!summarySurfaces.has(treatment.surface)) {
+			throw new Error(`Authored surface "${treatment.surface}" in ${authoringPath} is absent from the value summary.`);
 		}
-		assertTreatmentMatches(feature, treatment);
-		const parts = [];
-		if (index === 0) parts.push(INTRO);
-		parts.push(treatment.text);
-		if (index === summary.features.length - 1) parts.push(OUTRO);
-		const text = parts.join(' ');
-		const duration = wordCount(text) / WORDS_PER_SECOND;
-		if (duration > MAX_SURFACE_SECONDS) {
+	}
+
+	const surfaceSegments = summary.features.map((feature) => {
+		const treatment = treatments.get(feature.surface);
+		if (!treatment) {
+			throw new Error(`No authored changedrop treatment exists for surface "${feature.surface}" in ${authoringPath}; `
+				+ 'add the missing entry to that file.');
+		}
+		assertTreatmentMatches(feature, treatment, authoringPath);
+		const authoredSegment = segment({
+			id: feature.surface,
+			kind: 'surface',
+			surface: feature.surface,
+			text: treatment.text,
+			walkthrough: treatment.walkthrough,
+		});
+		if (authoredSegment.estimated_duration_seconds > MAX_SURFACE_SECONDS) {
 			throw new Error(`Changedrop script surface "${feature.surface}" exceeds the 10.0 second budget.`);
 		}
-		return {
-			id: feature.surface,
-			surface: feature.surface,
-			text,
-			estimated_duration_seconds: Number(duration.toFixed(3)),
-			walkthrough: [...treatment.walkthrough],
-		};
+		return authoredSegment;
 	});
 
+	const segments = [
+		segment({
+			id: 'intro',
+			kind: 'bookend',
+			surface: null,
+			text: INTRO,
+			walkthrough: authoring.bookends.intro_walkthrough,
+		}),
+		...surfaceSegments,
+		segment({
+			id: 'outro',
+			kind: 'bookend',
+			surface: null,
+			text: OUTRO,
+			walkthrough: authoring.bookends.outro_walkthrough,
+		}),
+	];
 	return privacyChecked(assertScriptContract({
 		schema_version: OUTPUT_SCHEMA_VERSION,
 		segments,
@@ -196,7 +253,7 @@ function parseArguments(argv) {
 	const values = new Map();
 	for (let index = 0; index < argv.length; index += 1) {
 		const name = argv[index];
-		if (!['--summary', '--out'].includes(name)) {
+		if (!['--summary', '--authoring', '--out'].includes(name)) {
 			throw new Error(`Unknown changedrop script argument: ${name}`);
 		}
 		const value = argv[index + 1];
@@ -208,12 +265,25 @@ function parseArguments(argv) {
 	for (const name of ['--summary', '--out']) {
 		if (!values.has(name)) throw new Error(`${name} is required.`);
 	}
-	return { summary: values.get('--summary'), out: values.get('--out') };
+	return {
+		summary: values.get('--summary'),
+		authoring: values.get('--authoring') ?? null,
+		out: values.get('--out'),
+	};
 }
 
 function pathInsideRoot(root, requested) {
 	const resolved = path.resolve(root, requested);
 	return resolved.startsWith(`${root}${path.sep}`) ? resolved : null;
+}
+
+function repositoryAuthoring(cwd, requested) {
+	const display = safeAuthoringPath(requested);
+	const resolved = path.resolve(cwd, display);
+	if (!resolved.startsWith(`${path.resolve(cwd)}${path.sep}`)) {
+		throw new Error('--authoring must resolve inside the repository.');
+	}
+	return { display, resolved };
 }
 
 async function ensurePrivateParents(root, directory) {
@@ -246,6 +316,7 @@ async function refuseSymlink(file) {
 export async function main({
 	env = process.env,
 	argv = process.argv.slice(2),
+	cwd = process.cwd(),
 	stdout = console.log,
 } = {}) {
 	if (!env[ROOT_VARIABLE]?.trim()) throw new Error(`${ROOT_VARIABLE} is required.`);
@@ -273,8 +344,9 @@ export async function main({
 	} catch {
 		throw new Error('Could not read a changedrop value summary inside EZHUD_CHANGEDROP_ROOT.');
 	}
-	const script = authorChangedropScript(summary);
-	if (script === null) {
+	validateValueSummary(summary);
+	if (summary.decision === 'skip') {
+		authorChangedropScript(summary);
 		try {
 			await rm(output, { force: true });
 		} catch {
@@ -283,6 +355,15 @@ export async function main({
 		stdout('changedrop script: skipped');
 		return null;
 	}
+	if (!args.authoring) throw new Error('--authoring is required for a render summary.');
+	const authoringFile = repositoryAuthoring(cwd, args.authoring);
+	let authoring;
+	try {
+		authoring = JSON.parse(await readFile(authoringFile.resolved, 'utf8'));
+	} catch {
+		throw new Error(`Could not read changedrop script authoring from ${authoringFile.display}.`);
+	}
+	const script = authorChangedropScript(summary, authoring, { authoringPath: authoringFile.display });
 
 	try {
 		await ensurePrivateParents(root, path.dirname(output));

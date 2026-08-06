@@ -10,13 +10,15 @@
       "const": "changedrop-script/1"
     },
     "segments": {
+      "description": "Ordered narration: standalone intro first, one segment per changed surface, standalone outro last.",
       "type": "array",
-      "minItems": 1,
+      "minItems": 3,
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "id",
+          "kind",
           "surface",
           "text",
           "estimated_duration_seconds",
@@ -27,8 +29,13 @@
             "type": "string",
             "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
           },
+          "kind": {
+            "description": "Bookends have their own capture timings and are separate from per-surface budgets.",
+            "enum": ["bookend", "surface"]
+          },
           "surface": {
-            "type": "string",
+            "description": "Changed UI surface key, or null for a standalone bookend.",
+            "type": ["string", "null"],
             "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
           },
           "text": {
@@ -36,6 +43,7 @@
             "minLength": 1
           },
           "estimated_duration_seconds": {
+            "description": "Authoring estimate; the 10-second feature budget applies to kind=surface, while V2 measures all audio.",
             "type": "number",
             "exclusiveMinimum": 0,
             "maximum": 10.0

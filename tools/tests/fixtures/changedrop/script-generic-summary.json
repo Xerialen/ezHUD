@@ -1,0 +1,13 @@
+{
+  "schema_version": "changedrop-value-summary/1",
+  "decision": "render",
+  "skip_reason": null,
+  "features": [
+    {
+      "surface": "snap-magnet",
+      "before": "Placing a HUD element meant nudging it into line by eye.",
+      "after": "A snap magnet pulls the element onto nearby alignment guides.",
+      "value": "Players can build a clean HUD without hunting for individual pixels."
+    }
+  ]
+}

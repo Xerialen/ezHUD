@@ -44,7 +44,7 @@ contract; these are.
 | # | Skill | Command | Emits |
 |---|---|---|---|
 | 1 | value analyzer | `node tools/changedrop/analyze.mjs --release <id> --out <run>/value-summary.json` | `changedrop-value-summary/1` |
-| 2 | script author | `node tools/changedrop/script.mjs --summary <run>/value-summary.json --out <run>/script.json` | `changedrop-script/1` |
+| 2 | script author | `node tools/changedrop/script.mjs --summary <run>/value-summary.json --authoring docs/release-<N>/changedrop-script.json --out <run>/script.json` | `changedrop-script/1` |
 | 3 | capture (first) | `node tools/changedrop/capture.mjs --script <run>/script.json --dist <dist> --out <run>/capture` | `changedrop-timings/1` |
 | 4 | narration order | `node tools/changedrop/voice.mjs --script <run>/script.json --timings <run>/capture/timings.json --out <run>/narration` | `changedrop-narration/1` |
 | 5 | mux | `node tools/changedrop/mux.mjs --capture <run>/capture --narration <run>/narration --out <run>/mux` | `changedrop-manifest/1` |
@@ -78,8 +78,9 @@ to run without it** rather than inventing a location. The root is owner-only
 (`0700` directories, `0600` files). Its value is never committed, never printed
 into a repository file, and never written into a manifest field.
 
-**Git may contain:** the commands, the JSON schemas, the gates, and synthetic
-fixtures. Nothing else.
+**Git may contain:** the commands, the JSON schemas, the gates, synthetic
+fixtures, and reviewed per-release `changedrop-script.json` authoring content.
+Nothing else.
 
 **Privacy rules, enforced by a gate rather than by intention:**
 
@@ -117,9 +118,20 @@ skip video by construction, through the exemption that already exists.
 
 ### Stage 2 — script author (`changedrop-script/1`)
 
+Friendly narration and walkthrough steps are human-authored, reviewable release
+content in `docs/release-<N>/changedrop-script.json` using
+`changedrop-script-authoring/1`. The command is release-agnostic: it joins that
+content to the value summary by surface, requires the authored source
+before/after/value triple to match exactly, and fails naming the release file
+when an entry is stale or missing.
+
 - Exact intro: `Hey guys, it's Xeri with another changedrop.`
 - Exact outro: `Be safe, and don't walk on spawns.`
 - **S1** both bookends match byte-for-byte, appear exactly once, first and last.
+  They are standalone bookend segments with their own walkthroughs and timings.
+  Their durations are not charged to a changed surface's per-surface budget;
+  this lets capture-first time the spoken bookends without stretching a feature
+  walkthrough to host unrelated narration.
 - **S2** one segment per changed UI surface, **≤ 10.0 s per surface**, estimated
   at authoring time from a documented words-per-second constant and re-checked
   against real audio in V2.

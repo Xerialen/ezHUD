@@ -1,0 +1,27 @@
+{
+  "schema_version": "changedrop-script-authoring/1",
+  "bookends": {
+    "intro_walkthrough": [
+      "Establish the editor with an unsnapped HUD element visible."
+    ],
+    "outro_walkthrough": [
+      "Hold on the cleanly aligned HUD."
+    ]
+  },
+  "treatments": [
+    {
+      "surface": "snap-magnet",
+      "source": {
+        "before": "Placing a HUD element meant nudging it into line by eye.",
+        "after": "A snap magnet pulls the element onto nearby alignment guides.",
+        "value": "Players can build a clean HUD without hunting for individual pixels."
+      },
+      "text": "Your HUD elements can now snap cleanly into line, without all the pixel hunting.",
+      "walkthrough": [
+        "Show a HUD element sitting away from an alignment guide.",
+        "Drag the element toward the guide until the snap magnet engages.",
+        "Hold on the element aligned cleanly to the guide."
+      ]
+    }
+  ]
+}

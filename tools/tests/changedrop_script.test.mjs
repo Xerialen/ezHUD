@@ -28,6 +28,13 @@ const occurrences = (text, needle) => text.split(needle).length - 1;
 const spokenText = (script) => script.segments.map((segment) => segment.text).join(' ');
 const wordCount = (text) => text.trim().split(/\s+/u).filter(Boolean).length;
 
+async function renderFixture() {
+	return {
+		summary: await fixture('script-render.json'),
+		authoring: await fixture('script-authoring.json'),
+	};
+}
+
 function schemaErrors(value, schema, at = '$') {
 	const errors = [];
 	const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
@@ -80,23 +87,35 @@ async function privateRoot(t) {
 	return root;
 }
 
-test('case 1: the exact intro appears once at the start of the first surface segment', async () => {
+test('case 1: the exact intro is a standalone segment once and first', async () => {
 	assert.ifError(loadError);
 	assert.equal(typeof authorChangedropScript, 'function', 'authorChangedropScript must be exported');
-	const script = authorChangedropScript(await fixture('script-render.json'));
-	const spoken = spokenText(script);
-	assert.equal(spoken.slice(0, INTRO.length), INTRO);
-	assert.equal(occurrences(spoken, INTRO), 1);
-	assert.ok(script.segments[0].text.startsWith(`${INTRO} `));
+	const { summary, authoring } = await renderFixture();
+	const script = authorChangedropScript(summary, authoring, { authoringPath: 'docs/release-1/changedrop-script.json' });
+	assert.deepEqual(script.segments[0], {
+		id: 'intro',
+		kind: 'bookend',
+		surface: null,
+		text: INTRO,
+		estimated_duration_seconds: Number((wordCount(INTRO) / wordsPerSecond).toFixed(3)),
+		walkthrough: authoring.bookends.intro_walkthrough,
+	});
+	assert.equal(occurrences(spokenText(script), INTRO), 1);
 });
 
-test('case 2: the exact outro appears once at the end of the last surface segment', async () => {
+test('case 2: the exact outro is a standalone segment once and last', async () => {
 	assert.ifError(loadError);
-	const script = authorChangedropScript(await fixture('script-render.json'));
-	const spoken = spokenText(script);
-	assert.equal(spoken.slice(-OUTRO.length), OUTRO);
-	assert.equal(occurrences(spoken, OUTRO), 1);
-	assert.ok(script.segments.at(-1).text.endsWith(` ${OUTRO}`));
+	const { summary, authoring } = await renderFixture();
+	const script = authorChangedropScript(summary, authoring, { authoringPath: 'docs/release-1/changedrop-script.json' });
+	assert.deepEqual(script.segments.at(-1), {
+		id: 'outro',
+		kind: 'bookend',
+		surface: null,
+		text: OUTRO,
+		estimated_duration_seconds: Number((wordCount(OUTRO) / wordsPerSecond).toFixed(3)),
+		walkthrough: authoring.bookends.outro_walkthrough,
+	});
+	assert.equal(occurrences(spokenText(script), OUTRO), 1);
 });
 
 test('case 3: each changed surface has one budgeted segment and a keyed walkthrough', async () => {
@@ -106,45 +125,62 @@ test('case 3: each changed surface has one budgeted segment and a keyed walkthro
 	assert.match(source, /2\.2 words\/(?:second|s)/i);
 	assert.match(source, /132 (?:words\/minute|wpm)/i);
 	assert.match(source, /conservative/i);
+	const spec = await readFile(path.join(repo, 'docs', 'specs', '2026-08-06-changelog-video-pipeline.md'), 'utf8');
+	assert.match(spec, /standalone bookend segments/i);
+	assert.match(spec, /not charged to|outside.*per-surface|separate from.*per-surface/i);
 
-	const summary = await fixture('script-render.json');
-	const script = authorChangedropScript(summary);
-	assert.deepEqual(script.segments.map((segment) => segment.surface),
-		summary.features.map((feature) => feature.surface));
-	assert.equal(new Set(script.segments.map((segment) => segment.surface)).size, summary.features.length);
+	const { summary, authoring } = await renderFixture();
+	const script = authorChangedropScript(summary, authoring, { authoringPath: 'docs/release-1/changedrop-script.json' });
+	const surfaces = script.segments.filter((segment) => segment.kind === 'surface');
+	assert.deepEqual(surfaces.map((segment) => segment.surface), summary.features.map((feature) => feature.surface));
+	assert.equal(surfaces.length, summary.features.length);
+	assert.equal(new Set(surfaces.map((segment) => segment.surface)).size, summary.features.length);
 	for (const segment of script.segments) {
-		assert.equal(segment.id, segment.surface);
 		assert.equal(segment.estimated_duration_seconds,
 			Number((wordCount(segment.text) / wordsPerSecond).toFixed(3)));
 		assert.ok(segment.estimated_duration_seconds > 0);
-		assert.ok(segment.estimated_duration_seconds <= 10.0,
-			`${segment.surface} exceeds 10.0 seconds`);
 		assert.ok(Array.isArray(segment.walkthrough) && segment.walkthrough.length > 0,
-			`${segment.surface} has no walkthrough steps`);
-		for (const step of segment.walkthrough) assert.ok(step.trim(), `${segment.surface} has an empty walkthrough step`);
+			`${segment.id} has no walkthrough steps`);
+		for (const step of segment.walkthrough) assert.ok(step.trim(), `${segment.id} has an empty walkthrough step`);
 	}
-	assert.notDeepEqual(script.segments[0].walkthrough, script.segments[1].walkthrough);
+	for (const segment of surfaces) {
+		assert.equal(segment.id, segment.surface);
+		assert.ok(segment.estimated_duration_seconds <= 10.0, `${segment.surface} exceeds 10.0 seconds`);
+	}
 });
 
-test('case 4: authored segment prose is non-empty, unique, and is not a triple concatenation', async () => {
+test('case 4: authored prose is non-empty, unique, source-bound, and not a triple concatenation', async () => {
 	assert.ifError(loadError);
-	const summary = await fixture('script-render.json');
-	const script = authorChangedropScript(summary);
+	const { summary, authoring } = await renderFixture();
+	const authoringPath = 'docs/release-1/changedrop-script.json';
+	const script = authorChangedropScript(summary, authoring, { authoringPath });
 	assert.deepEqual(script.segments.map((segment) => segment.text), [
-		"Hey guys, it's Xeri with another changedrop. Resizing now keeps your game and HUD aligned.",
-		"Pause keeps engine frames steady for HUD edits. Be safe, and don't walk on spawns.",
+		INTRO,
+		'Resizing now keeps your game and HUD aligned.',
+		'Pause keeps engine frames steady for HUD edits.',
+		OUTRO,
 	]);
 	const texts = script.segments.map((segment) => segment.text.trim());
 	assert.ok(texts.every(Boolean));
 	assert.equal(new Set(texts).size, texts.length);
+	const surfaces = script.segments.filter((segment) => segment.kind === 'surface');
 	for (const [index, feature] of summary.features.entries()) {
-		assert.doesNotMatch(script.segments[index].text, new RegExp([
+		assert.doesNotMatch(surfaces[index].text, new RegExp([
 			feature.before, feature.after, feature.value,
 		].map((text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')));
 	}
+	const drifted = structuredClone(summary);
+	drifted.features[0].before += ' Changed.';
+	assert.throws(
+		() => authorChangedropScript(drifted, authoring, { authoringPath }),
+		/error.*window-follow.*before|window-follow.*before.*changedrop-script\.json/i,
+	);
 	const duplicateSurface = structuredClone(summary);
 	duplicateSurface.features[1].surface = duplicateSurface.features[0].surface;
-	assert.throws(() => authorChangedropScript(duplicateSurface), /duplicate.*window-follow|window-follow.*duplicate/i);
+	assert.throws(
+		() => authorChangedropScript(duplicateSurface, authoring, { authoringPath }),
+		/duplicate.*window-follow|window-follow.*duplicate/i,
+	);
 });
 
 test('case 5: a skip summary returns null and the command leaves no script file', async (t) => {
@@ -168,31 +204,70 @@ test('case 5: a skip summary returns null and the command leaves no script file'
 	await assert.rejects(access(outputPath), (error) => error?.code === 'ENOENT');
 });
 
-test('supporting contract: schema, privacy, private CLI output, input validation, and npm wiring', async (t) => {
+test('reuse contract: a wholly synthetic surface is authored by data, never tool code', async () => {
+	assert.ifError(loadError);
+	const summary = await fixture('script-generic-summary.json');
+	const authoring = await fixture('script-generic-authoring.json');
+	const authoringPath = 'docs/release-2/changedrop-script.json';
+	const script = authorChangedropScript(summary, authoring, { authoringPath });
+	assert.deepEqual(script.segments.map(({ id, kind, surface }) => ({ id, kind, surface })), [
+		{ id: 'intro', kind: 'bookend', surface: null },
+		{ id: 'snap-magnet', kind: 'surface', surface: 'snap-magnet' },
+		{ id: 'outro', kind: 'bookend', surface: null },
+	]);
+	assert.equal(script.segments[1].text, authoring.treatments[0].text);
+	assert.deepEqual(script.segments[1].walkthrough, authoring.treatments[0].walkthrough);
+	const toolSource = await readFile(path.join(repo, 'tools', 'changedrop', 'script.mjs'), 'utf8');
+	assert.doesNotMatch(toolSource, /window-follow|pause-resume|snap-magnet/);
+
+	const missing = structuredClone(authoring);
+	missing.treatments = [];
+	assert.throws(
+		() => authorChangedropScript(summary, missing, { authoringPath }),
+		(error) => {
+			assert.match(error.message, /snap-magnet/);
+			assert.match(error.message, /docs\/release-2\/changedrop-script\.json/);
+			return true;
+		},
+	);
+});
+
+test('supporting contract: schemas, privacy, private CLI output, input validation, and npm wiring', async (t) => {
 	assert.ifError(loadError);
 	const schema = JSON.parse(await readFile(
 		path.join(repo, 'tools', 'changedrop', 'schemas', 'changedrop-script.v1.json'), 'utf8'));
+	const authoringSchema = JSON.parse(await readFile(
+		path.join(repo, 'tools', 'changedrop', 'schemas', 'changedrop-script-authoring.v1.json'), 'utf8'));
 	assert.equal(schema.additionalProperties, false);
 	assert.equal(schema.properties.segments.items.additionalProperties, false);
 	assert.deepEqual(schema.properties.segments.items.required,
-		['id', 'surface', 'text', 'estimated_duration_seconds', 'walkthrough']);
-	const summary = await fixture('script-render.json');
-	const script = authorChangedropScript(summary);
+		['id', 'kind', 'surface', 'text', 'estimated_duration_seconds', 'walkthrough']);
+	assert.equal(authoringSchema.additionalProperties, false);
+	assert.equal(authoringSchema.properties.treatments.items.additionalProperties, false);
+	assert.equal(authoringSchema.properties.treatments.items.properties.source.additionalProperties, false);
+
+	const { summary, authoring } = await renderFixture();
+	const script = authorChangedropScript(summary, authoring, {
+		authoringPath: 'tools/tests/fixtures/changedrop/script-authoring.json',
+	});
 	assert.deepEqual(schemaErrors(script, schema), []);
+	assert.deepEqual(schemaErrors(authoring, authoringSchema), []);
 	for (const value of stringsIn(script)) {
 		assert.equal(path.isAbsolute(value), false, `absolute path escaped into output: ${JSON.stringify(value)}`);
 		assert.doesNotMatch(value, /\/home\/|\/Users\/|\$USER\b|file:\/\//i);
 		if (hostname()) assert.equal(value.includes(hostname()), false, 'hostname escaped into output');
 	}
-
 	for (const privateValue of ['/home/example/private', '/Users/example/private', '/var/private',
 		'C:\\private\\file', '\\\\server\\share', '$USER', 'file:///private', hostname()].filter(Boolean)) {
-		const unsafe = structuredClone(summary);
-		unsafe.features[0].value = privateValue;
-		assert.throws(() => authorChangedropScript(unsafe), /private location/i);
+		const unsafe = structuredClone(authoring);
+		unsafe.treatments[0].text = privateValue;
+		assert.throws(
+			() => authorChangedropScript(summary, unsafe, { authoringPath: 'docs/release-1/changedrop-script.json' }),
+			/private location/i,
+		);
 	}
 	assert.throws(
-		() => authorChangedropScript({ ...summary, unexpected: true }),
+		() => authorChangedropScript({ ...summary, unexpected: true }, authoring),
 		/unexpected.*unexpected|unexpected.*field/i,
 	);
 
@@ -204,6 +279,7 @@ test('supporting contract: schema, privacy, private CLI output, input validation
 	const { stdout, stderr } = await execFileAsync(process.execPath, [
 		path.join(repo, 'tools', 'changedrop', 'script.mjs'),
 		'--summary', 'synthetic/run/value-summary.json',
+		'--authoring', 'tools/tests/fixtures/changedrop/script-authoring.json',
 		'--out', 'synthetic/run/script.json',
 	], { cwd: repo, env: { ...process.env, EZHUD_CHANGEDROP_ROOT: root } });
 	assert.equal(stderr, '');
@@ -220,6 +296,7 @@ test('supporting contract: schema, privacy, private CLI output, input validation
 		execFileAsync(process.execPath, [
 			path.join(repo, 'tools', 'changedrop', 'script.mjs'),
 			'--summary', 'synthetic/run/value-summary.json',
+			'--authoring', 'tools/tests/fixtures/changedrop/script-authoring.json',
 			'--out', 'synthetic/run/script.json',
 		], { cwd: repo, env }),
 		(error) => {

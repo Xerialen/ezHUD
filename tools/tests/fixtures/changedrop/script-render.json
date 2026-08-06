@@ -5,15 +5,15 @@
   "features": [
     {
       "surface": "window-follow",
-      "before": "Resizing could leave the editor view stale.",
-      "after": "The view follows the window.",
-      "value": "Players keep the HUD aligned without reopening the editor."
+      "before": "Resizing the browser could leave the game view at its boot size and overlay handles out of alignment.",
+      "after": "The live game view grows or shrinks with the browser, every overlay handle stays on its element, and the engine reports both virtual console size and true backing-store pixels.",
+      "value": "The editing-size readout and the HUD stay aligned with the picture on screen."
     },
     {
       "surface": "pause-resume",
-      "before": "Lining up a HUD meant waiting for a useful frame.",
-      "after": "Pause and Resume follow engine state.",
-      "value": "Players can make precise edits on a stable frame."
+      "before": "The editor had no Pause or Resume control, so lining up the HUD meant waiting for a useful demo frame.",
+      "after": "Pause and Resume sit beside the demo selector and follow the engine's real state, including console changes and an honest disabled reason on unsupported backends.",
+      "value": "You can stop on a quiet frame and adjust the HUD without losing the moment you wanted."
     }
   ]
 }
