@@ -199,9 +199,13 @@ segment. Stage 4 has two explicit phases around a real fitted recapture:
    verified WAV duration is the natural measurement; no word-rate estimate is
    consulted.
 2. For each segment, fixed action time is its measured Stage 3 duration minus
-   the explicitly marked narration-padding holds. The fitted padding is
-   `natural duration - fixed action time`, rounded to integer milliseconds.
-   Prose and fixed actions are byte-for-byte unchanged. Each hold remains
+   the explicitly marked narration-padding holds. A negative result within
+   25 ms is clamped to zero: pure-padding browser timers can straddle a
+   scheduling boundary, while 25 ms remains well below both the 100 ms minimum
+   hold and the 500 ms final tolerance. A result below -25 ms still fails as a
+   real script/timings disagreement. The fitted padding is `natural duration -
+   fixed action time`, rounded to integer milliseconds. Prose and fixed actions
+   are byte-for-byte unchanged. Each hold remains
    between 100 and 5,000 ms; totals above 5,000 ms are split evenly across
    contiguous bounded holds. The private `changedrop-voice-fit/1` receipt stores
    the calculation, safe request/audio hashes, and a fitted `script.json`.

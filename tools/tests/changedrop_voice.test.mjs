@@ -310,6 +310,30 @@ test('review blocker: natural measurement fits explicit padding while fixed acti
 	]);
 });
 
+test('review blocker: pure-padding timer under-run is clamped within a bounded epsilon', async () => {
+	assert.ifError(loadError);
+	assert.equal(voice.FIXED_ACTION_NEGATIVE_EPSILON_SECONDS, 0.025);
+	const { script, timings } = await inputs();
+	const measurements = [
+		{ id: 'intro', duration_seconds: 3.84 },
+		{ id: 'snap-magnet', duration_seconds: 6.134 },
+		{ id: 'outro', duration_seconds: 3.88 },
+	];
+	const jittered = structuredClone(timings);
+	jittered.segments[2].duration_seconds = 0.599789;
+	const fitted = voice.fitCaptureScript({ script, timings: jittered, measurements });
+	assert.equal(fitted.segments[2].fixed_action_seconds, 0);
+	assert.equal(fitted.segments[2].fitted_padding_ms, 3880);
+	assert.deepEqual(fitted.segments[2].fitted_hold_durations_ms, [3880]);
+
+	const inconsistent = structuredClone(timings);
+	inconsistent.segments[2].duration_seconds = 0.574;
+	assert.throws(
+		() => voice.fitCaptureScript({ script, timings: inconsistent, measurements }),
+		/outro.*negative|negative.*outro|outro.*timings.*disagree/i,
+	);
+});
+
 test('review mechanism: measure phase is offline-injectable and writes a closed private fit handoff', async (t) => {
 	assert.ifError(loadError);
 	const { script, timings } = await inputs();

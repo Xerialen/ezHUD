@@ -33,6 +33,11 @@ const MAX_OUTPUT_BYTES = 1_048_576;
 
 export const DURATION_TOLERANCE_SECONDS = 0.5;
 export const TARGET_DURATION_DECIMALS = 3;
+// Pure-padding holds can measure a fraction under their declared timer because
+// browser clocks are sampled on opposite sides of a scheduling boundary. A
+// 25 ms allowance covers that boundary noise while remaining far below both
+// the 100 ms minimum hold and the 500 ms final duration tolerance.
+export const FIXED_ACTION_NEGATIVE_EPSILON_SECONDS = 0.025;
 
 const ERROR_EXIT_CODES = Object.freeze({
 	E_SCHEMA_INVALID: 2,
@@ -315,8 +320,11 @@ export function fitCaptureScript({ script, timings, measurements } = {}) {
 		const paddingIndices = segment.walkthrough.flatMap((step, stepIndex) => step.fit === 'narration' ? [stepIndex] : []);
 		if (paddingIndices.length === 0) throw new Error(`Segment "${segment.id}" has no narration padding hold.`);
 		const previousPaddingMs = paddingIndices.reduce((sum, stepIndex) => sum + segment.walkthrough[stepIndex].duration_ms, 0);
-		const fixedActionSeconds = Number((timings.segments[index].duration_seconds - previousPaddingMs / 1000).toFixed(6));
-		if (fixedActionSeconds < 0) throw new Error(`Measured fixed action time for segment "${segment.id}" is invalid.`);
+		const rawFixedActionSeconds = timings.segments[index].duration_seconds - previousPaddingMs / 1000;
+		if (rawFixedActionSeconds < -FIXED_ACTION_NEGATIVE_EPSILON_SECONDS) {
+			throw new Error(`Measured fixed action time for segment "${segment.id}" is negative beyond the 25 ms timer-noise epsilon; timings and script disagree.`);
+		}
+		const fixedActionSeconds = rawFixedActionSeconds < 0 ? 0 : Number(rawFixedActionSeconds.toFixed(6));
 		const fittedPaddingMs = Math.round((measurement.duration_seconds - fixedActionSeconds) * 1000);
 		if (fittedPaddingMs < 100) {
 			throw new Error(`Natural narration for segment "${segment.id}" leaves less than 100 ms for padding.`);
