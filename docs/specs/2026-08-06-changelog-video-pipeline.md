@@ -133,7 +133,10 @@ Stage 2 validates and copies those structured steps into `changedrop-script/1`.
   They are standalone bookend segments with their own walkthroughs and timings.
   Their durations are not charged to a changed surface's per-surface budget;
   this lets capture-first time the spoken bookends without stretching a feature
-  walkthrough to host unrelated narration.
+  walkthrough to host unrelated narration. Release 1 holds each fixed bookend
+  for 4.2 seconds: the mandated intro cannot be shortened, and its independently
+  measured 3.840-second render fits that hold within Stage 4's 0.5-second
+  tolerance. The old 3.2-second holds are deliberately retired.
 - **S2** one segment per changed UI surface, **≤ 10.0 s per surface**, estimated
   at authoring time from a documented words-per-second constant and re-checked
   against real audio in V2.
@@ -178,12 +181,13 @@ source and annotated stills; its human instruction is never rendered.
 
 Transport: `voice-order submit --wait`, one order per segment.
 
-Fixed fields: `schema_version: "voice-order/1"`, `voice_profile: "xeri-en-v1"`,
-`mode: "spoken"`, `style: "neutral"`, `language: "en"`, delivery
-`wav / 24000 / 1`. Duration fitting uses the **measured** capture timing:
-`target.duration_seconds` with an explicit `tolerance_seconds`, both fields or
-neither. The service verifies the rendered WAV itself and fails closed out of
-tolerance; the pipeline does not second-guess that decision.
+Fixed fields: `schema_version: "voice-order/1"`, `project: "ezhud"`,
+`voice_profile: "xeri-en-v1"`, `mode: "spoken"`, `style: "neutral"`,
+`language: "en"`, delivery `wav / 24000 / 1`. Duration fitting uses the
+**measured** capture timing: `target.duration_seconds` with a fixed 0.5-second
+`tolerance_seconds`, both fields or neither. Half a second admits normal phrase
+cadence without masking a segment-sized mismatch. The service verifies the
+rendered WAV itself and fails closed; the pipeline does not second-guess it.
 
 Forbidden in a request, by gate: output or reference path, model selection,
 generation settings, seed, extra renderer arguments.
@@ -248,35 +252,19 @@ ffmpeg muxes narration onto the recording aligned to `timings.json`, and runs
 exposes; they are recorded as provenance and are never presented as
 caller-selectable controls.
 
-## 6. External gate — registry prerequisite (Terra coordinates)
+## 6. External gate — open (Terra coordinates)
 
-Measured on 2026-08-06 with the real command. **Both candidate project ids were
-rejected at the project check, before any render:**
+The earlier 2026-08-06 probes correctly stopped with
+`E_PROJECT_NOT_ALLOWED`, exit 3, before rendering. The owner has now opened the
+gate by allowlisting exactly project `ezhud`; `ezhud-changelog` is not used.
+The only profile remains `xeri-en-v1` (revision 1).
 
-```
-$ voice-order submit --wait --request-file <request>     # project: ezhud-changelog
-{"error_code":"E_PROJECT_NOT_ALLOWED","message":"project is not allowed to order voice",
- "request_id":"ezhud-changedrop-probe-001","schema_version":"voice-order/1","status":"failed"}
-exit=3
-
-$ voice-order submit --wait --request-file <request>     # project: ezhud
-{"error_code":"E_PROJECT_NOT_ALLOWED","message":"project is not allowed to order voice",
- "request_id":"ezhud-changedrop-probe-002","schema_version":"voice-order/1","status":"failed"}
-exit=3
-```
-
-`voice-order profiles` returns exactly one profile, `xeri-en-v1` (revision 1),
-so the profile side is already satisfied.
-
-**The one prerequisite:** the owner must allowlist an ezHUD project id in the
-owner-private registry. Neither `ezhud` nor `ezhud-changelog` is allowlisted
-today, so the id itself is an owner decision — once chosen it becomes a single
-constant in the request builder. Until then stage 4 stops at `E_PROJECT_NOT_ALLOWED`,
-which is the designed outcome, not a bug. No agent may add, modify or discover
-registry contents. When the project id is chosen it becomes a constant in the
-request builder; the pipeline needs nothing else.
-
-Stages 1–3 and every offline gate run to completion regardless.
+The owner independently verified a real `voice-order/1` render with those
+identifiers: status `rendered`, exit 0, 3.840 seconds of 24 kHz mono WAV, with
+its hash recomputed and WAV header checked. No agent may inspect or modify the
+owner-private registry. A future `E_PROJECT_NOT_ALLOWED` or
+`E_PROFILE_UNKNOWN` still stops immediately with the prerequisite recorded;
+it never retries, substitutes another voice, or routes around the refusal.
 
 ## 7. Pilot — Release 1
 
