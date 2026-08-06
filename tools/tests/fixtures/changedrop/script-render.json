@@ -1,0 +1,19 @@
+{
+  "schema_version": "changedrop-value-summary/1",
+  "decision": "render",
+  "skip_reason": null,
+  "features": [
+    {
+      "surface": "window-follow",
+      "before": "Resizing could leave the editor view stale.",
+      "after": "The view follows the window.",
+      "value": "Players keep the HUD aligned without reopening the editor."
+    },
+    {
+      "surface": "pause-resume",
+      "before": "Lining up a HUD meant waiting for a useful frame.",
+      "after": "Pause and Resume follow engine state.",
+      "value": "Players can make precise edits on a stable frame."
+    }
+  ]
+}

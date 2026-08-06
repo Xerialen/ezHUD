@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "changedrop:analyze": "node tools/changedrop/analyze.mjs",
+    "changedrop:script": "node tools/changedrop/script.mjs",
     "test:tier1": "bash tools/tests/tier1.sh",
     "test:tier2": "bash tools/tests/tier2.sh",
     "test:tier2:js": "node tools/tests/tier2_bridge.test.js",

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "changedrop-script/1",
+  "title": "ezHUD changedrop script v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "segments"],
+  "properties": {
+    "schema_version": {
+      "const": "changedrop-script/1"
+    },
+    "segments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "surface",
+          "text",
+          "estimated_duration_seconds",
+          "walkthrough"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "surface": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "estimated_duration_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 10.0
+          },
+          "walkthrough": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}
