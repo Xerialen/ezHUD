@@ -22,6 +22,17 @@ function surfaceFromEvidence(evidence) {
 		.replace(/-annotated$/i, '');
 }
 
+function requireStructuredValues(features) {
+	for (const feature of features) {
+		for (const [field, label] of [['before', 'Before'], ['after', 'After'], ['value', 'Value']]) {
+			if (!feature[field]) {
+				throw new Error(`Canonical NOTES.md feature "${feature.title}" is missing the ${label}: field. `
+					+ 'The analyzer cannot state before/after/value without inventing text.');
+			}
+		}
+	}
+}
+
 function summaryStrings(value) {
 	if (typeof value === 'string') return [value];
 	if (Array.isArray(value)) return value.flatMap(summaryStrings);
@@ -61,18 +72,13 @@ export function analyzeRelease({ note, tickets = [], labels = [] } = {}) {
 	}
 
 	const parsed = parseReleaseNoteFeatures(note, { notePath: 'Canonical NOTES.md' });
-	if (!parsed.ok) {
-		const valueDefect = /needs player-facing prose before its evidence mapping/i.test(parsed.reason)
-			? ' The block cannot state before/after/value, and the analyzer will not invent it.'
-			: '';
-		throw new Error(`${parsed.reason}${valueDefect}`);
-	}
+	requireStructuredValues(parsed.features);
+	if (!parsed.ok) throw new Error(parsed.reason);
 	const features = parsed.features.map((feature) => ({
-		id: surfaceFromEvidence(feature.evidence),
-		title: feature.title,
 		surface: surfaceFromEvidence(feature.evidence),
-		value: feature.prose,
-		evidence: feature.evidence,
+		before: feature.before,
+		after: feature.after,
+		value: feature.value,
 	}));
 	const mappedSurfaces = new Set(features.map((feature) => feature.surface));
 	const changedSurfaces = tickets

@@ -72,10 +72,19 @@ test('case 1: two note feature blocks become two ordered evidence-mapped entries
 	assert.equal(result.schema_version, 'changedrop-value-summary/1');
 	assert.equal(result.decision, 'render');
 	assert.equal(result.skip_reason, null);
-	assert.deepEqual(result.features.map(({ surface }) => surface), ['window-follow', 'pause-resume']);
-	assert.deepEqual(result.features.map(({ evidence }) => evidence), [
-		'img/window-follow-focused-annotated.png',
-		'img/pause-resume-focused-annotated.png',
+	assert.deepEqual(result.features, [
+		{
+			surface: 'window-follow',
+			before: 'Resizing could leave the editor view stale.',
+			after: 'The view follows the window.',
+			value: 'Players keep the HUD aligned without reopening the editor.',
+		},
+		{
+			surface: 'pause-resume',
+			before: 'Lining up a HUD meant waiting for a useful frame.',
+			after: 'Pause and Resume follow engine state.',
+			value: 'Players can make precise edits on a stable frame.',
+		},
 	]);
 });
 
@@ -92,16 +101,23 @@ test('case 2: the existing recorded internal-only exemption skips with no featur
 	assert.match(result.skip_reason, /deterministic fixture names only/i);
 });
 
-test('case 3: an unstateable value fails with its feature block named', async () => {
-	const note = await fixture('missing-value.md');
-	assert.throws(
-		() => analyzeRelease({ note, tickets: [], labels: ['release'] }),
-		(error) => {
-			assert.match(error.message, /Unstateable settings panel/);
-			assert.match(error.message, /before\/after\/value/i);
-			return true;
-		},
-	);
+test('case 3: each missing value field fails with its feature block and field named', async () => {
+	const complete = await fixture('two-features.md');
+	const cases = [
+		['Before', complete.replace(/^Before:.*\n/m, ''), 'The window follows its new size'],
+		['After', complete.replace(/^After:.*\n/m, ''), 'The window follows its new size'],
+		['Value', await fixture('missing-value.md'), 'Unstateable settings panel'],
+	];
+	for (const [field, note, block] of cases) {
+		assert.throws(
+			() => analyzeRelease({ note, tickets: [], labels: ['release'] }),
+			(error) => {
+				assert.match(error.message, new RegExp(block, 'i'));
+				assert.match(error.message, new RegExp(`missing.*${field}|${field}.*missing`, 'i'));
+				return true;
+			},
+		);
+	}
 });
 
 test('case 4: a changed surface absent from note evidence fails by surface name', async () => {
@@ -121,6 +137,9 @@ test('case 5: output validates against the committed schema and contains no priv
 		path.join(here, '..', 'changedrop', 'schemas', 'changedrop-value-summary.v1.json'),
 		'utf8',
 	));
+	assert.deepEqual(schema.properties.features.items.required,
+		['surface', 'before', 'after', 'value']);
+	assert.equal(schema.properties.features.items.additionalProperties, false);
 	const result = analyzeRelease({
 		note: await fixture('two-features.md'),
 		tickets: [{ surface: 'window-follow' }, { surface: 'pause-resume' }],
@@ -147,6 +166,18 @@ test('case 5: output validates against the committed schema and contains no priv
 			}),
 			/private location/i,
 		);
+	}
+});
+
+test('pilot contract: Release 1 exposes two real structured value triples', async () => {
+	const note = await readFile(path.join(repo, 'docs', 'release-1', 'NOTES.md'), 'utf8');
+	const result = analyzeRelease({ note, tickets: [], labels: ['release'] });
+	assert.deepEqual(result.features.map((feature) => feature.surface), ['window-follow', 'pause-resume']);
+	for (const feature of result.features) {
+		assert.deepEqual(Object.keys(feature), ['surface', 'before', 'after', 'value']);
+		assert.ok(feature.before);
+		assert.ok(feature.after);
+		assert.ok(feature.value);
 	}
 });
 

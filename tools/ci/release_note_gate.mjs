@@ -70,22 +70,33 @@ export function parseReleaseNoteFeatures(source, { notePath = 'Canonical NOTES.m
 		const end = headings[index + 1]?.index ?? featureBody.length;
 		const block = featureBody.slice(start, end);
 		const evidence = [...block.matchAll(/^Evidence:\s+(\S+)\s*$/gm)];
+		const before = [...block.matchAll(/^Before:[ \t]+(.+?)[ \t]*\r?$/gm)];
+		const after = [...block.matchAll(/^After:[ \t]+(.+?)[ \t]*\r?$/gm)];
+		const value = [...block.matchAll(/^Value:[ \t]+(.+?)[ \t]*\r?$/gm)];
 		const prose = block.replace(/^Evidence:\s+\S+\s*$/gm, '').trim();
+		const parsedFeature = {
+			title: heading[1],
+			prose,
+			evidence: evidence.length === 1 ? evidence[0][1] : null,
+			before: before.length === 1 ? before[0][1] : null,
+			after: after.length === 1 ? after[0][1] : null,
+			value: value.length === 1 ? value[0][1] : null,
+		};
 		if (!prose || /^#/m.test(prose)) {
 			return {
 				ok: false,
 				reason: `${notePath} feature "${heading[1]}" needs player-facing prose before its evidence mapping.`,
-				features: [],
+				features: [parsedFeature],
 			};
 		}
 		if (evidence.length !== 1) {
 			return {
 				ok: false,
 				reason: `${notePath} feature "${heading[1]}" needs exactly one Evidence: img/<file>.png mapping.`,
-				features: [],
+				features: [parsedFeature],
 			};
 		}
-		features.push({ title: heading[1], prose, evidence: evidence[0][1] });
+		features.push(parsedFeature);
 	}
 	return { ok: true, reason: null, features };
 }

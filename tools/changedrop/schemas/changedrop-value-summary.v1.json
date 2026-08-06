@@ -25,27 +25,23 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "title", "surface", "value", "evidence"],
+        "required": ["surface", "before", "after", "value"],
         "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-          },
-          "title": {
-            "type": "string",
-            "minLength": 1
-          },
           "surface": {
             "type": "string",
             "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
           },
-          "value": {
+          "before": {
             "type": "string",
             "minLength": 1
           },
-          "evidence": {
+          "after": {
             "type": "string",
-            "pattern": "^img/[^/\\s]+\\.png$"
+            "minLength": 1
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1
           }
         }
       }
