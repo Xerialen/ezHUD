@@ -136,7 +136,15 @@ Stage 2 validates and copies those structured steps into `changedrop-script/1`.
   walkthrough to host unrelated narration. Release 1 holds each fixed bookend
   for 4.2 seconds: the mandated intro cannot be shortened, and its independently
   measured 3.840-second render fits that hold within Stage 4's 0.5-second
-  tolerance. The old 3.2-second holds are deliberately retired.
+  tolerance. The old 3.2-second holds are deliberately retired. Release 1 keeps
+  the feature walkthrough holds unchanged because they make the resized view
+  and steady paused frame legible. Instead, the two terse feature lines are
+  deliberately lengthened from 8 words to 12 and 15 words. Applied to the
+  owner's natural-render probes (3.08 seconds and roughly 3.5 seconds), that
+  projects to 4.62 and 6.56 seconds against the observed 4.98- and 6.80-second
+  visual windows. Both projected gaps fit the unchanged 0.5-second gate; V2
+  remains the authoritative check after a fresh Stage 3 capture and owner-run
+  order.
 - **S2** one segment per changed UI surface, **≤ 10.0 s per surface**, estimated
   at authoring time from a documented words-per-second constant and re-checked
   against real audio in V2.
@@ -185,9 +193,14 @@ Fixed fields: `schema_version: "voice-order/1"`, `project: "ezhud"`,
 `voice_profile: "xeri-en-v1"`, `mode: "spoken"`, `style: "neutral"`,
 `language: "en"`, delivery `wav / 24000 / 1`. Duration fitting uses the
 **measured** capture timing: `target.duration_seconds` with a fixed 0.5-second
-`tolerance_seconds`, both fields or neither. Half a second admits normal phrase
-cadence without masking a segment-sized mismatch. The service verifies the
-rendered WAV itself and fails closed; the pipeline does not second-guess it.
+`tolerance_seconds`, both fields or neither. Before request hashing or submit,
+the measured target is rounded to millisecond precision (at most three decimal
+places). This removes irrelevant capture-clock noise from ids and avoids a
+known service misclassification of over-precise out-of-tolerance targets;
+`E_DURATION_OUT_OF_TOLERANCE` still remains the authoritative re-author gate.
+Half a second admits normal phrase cadence without masking a segment-sized
+mismatch. The service verifies the rendered WAV itself and fails closed; the
+pipeline does not second-guess it.
 
 Forbidden in a request, by gate: output or reference path, model selection,
 generation settings, seed, extra renderer arguments.
@@ -208,8 +221,9 @@ with `rerendered: false` is a normal success and must not trigger a retry loop.
 | `E_RENDER_FAILED` (7), `E_ARTIFACT_INVALID` (8) | Stop and report; no blind retry. |
 
 - **V1 (offline)** the built request validates against v1, carries none of the
-  forbidden fields, and has both duration fields or neither. Tier 1, fixtures,
-  no service call.
+  forbidden fields, quantises the measured target to millisecond precision
+  before deriving `request_id`, and has both duration fields or neither. Tier 1,
+  fixtures, no service call.
 - **V2 (online)** each narration WAV's measured duration is within tolerance of
   its measured capture segment, and the ≤ 10 s per surface budget holds against
   **real audio**.

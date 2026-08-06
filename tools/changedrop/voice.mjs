@@ -31,6 +31,7 @@ const ORDER_TIMEOUT_MS = 600_000;
 const MAX_OUTPUT_BYTES = 1_048_576;
 
 export const DURATION_TOLERANCE_SECONDS = 0.5;
+export const TARGET_DURATION_DECIMALS = 3;
 
 const ERROR_EXIT_CODES = Object.freeze({
 	E_SCHEMA_INVALID: 2,
@@ -115,6 +116,13 @@ function canonical(value) {
 function requestIdFor(effectiveOrder) {
 	const digest = createHash('sha256').update(JSON.stringify(canonical(effectiveOrder))).digest('hex');
 	return `ezhud-${digest.slice(0, 32)}`;
+}
+
+function quantizedTargetDuration(durationSeconds) {
+	finiteNumber(durationSeconds, 'Measured voice target duration', { positive: true });
+	const quantized = Number(durationSeconds.toFixed(TARGET_DURATION_DECIMALS));
+	if (quantized <= 0) throw new Error('Measured voice target duration is below millisecond precision.');
+	return quantized;
 }
 
 function machineAction(step) {
@@ -216,6 +224,9 @@ export function validateVoiceRequest(request) {
 	if (request.target !== undefined) {
 		exactObject(request.target, ['duration_seconds', 'tolerance_seconds'], 'Voice request target');
 		finiteNumber(request.target.duration_seconds, 'Voice target duration', { positive: true });
+		if (request.target.duration_seconds !== quantizedTargetDuration(request.target.duration_seconds)) {
+			throw new Error('Voice target duration must use millisecond precision (three decimal places at most).');
+		}
 		if (request.target.duration_seconds > 120) throw new Error('Voice target duration exceeds the service maximum.');
 		if (request.target.tolerance_seconds !== DURATION_TOLERANCE_SECONDS) {
 			throw new Error('Voice target duration_seconds and tolerance_seconds must both use the fixed fitting contract.');
@@ -239,7 +250,7 @@ export function buildVoiceRequests({ script, timings } = {}) {
 			text: segment.text,
 			delivery: { container: 'wav', sample_rate: 24_000, channels: 1 },
 			target: {
-				duration_seconds: timings.segments[index].duration_seconds,
+				duration_seconds: quantizedTargetDuration(timings.segments[index].duration_seconds),
 				tolerance_seconds: DURATION_TOLERANCE_SECONDS,
 			},
 		};

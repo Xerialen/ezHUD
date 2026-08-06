@@ -160,8 +160,8 @@ test('case 4: authored prose is non-empty, unique, source-bound, and not a tripl
 	const script = authorChangedropScript(summary, authoring, { authoringPath });
 	assert.deepEqual(script.segments.map((segment) => segment.text), [
 		INTRO,
-		'Resizing now keeps your game and HUD aligned.',
-		'Pause keeps engine frames steady for HUD edits.',
+		'Resizing the browser now keeps your game view and HUD controls aligned.',
+		'Pause now holds frames steady, so you can edit the HUD without losing your moment.',
 		OUTRO,
 	]);
 	const texts = script.segments.map((segment) => segment.text.trim());

@@ -38,7 +38,7 @@
         "after": "The live game view grows or shrinks with the browser, every overlay handle stays on its element, and the engine reports both virtual console size and true backing-store pixels.",
         "value": "The editing-size readout and the HUD stay aligned with the picture on screen."
       },
-      "text": "Resizing now keeps your game and HUD aligned.",
+      "text": "Resizing the browser now keeps your game view and HUD controls aligned.",
       "walkthrough": [
         {
           "instruction": "Show the game view at the smaller browser size.",
@@ -84,7 +84,7 @@
         "after": "Pause and Resume sit beside the demo selector and follow the engine's real state, including console changes and an honest disabled reason on unsupported backends.",
         "value": "You can stop on a quiet frame and adjust the HUD without losing the moment you wanted."
       },
-      "text": "Pause keeps engine frames steady for HUD edits.",
+      "text": "Pause now holds frames steady, so you can edit the HUD without losing your moment.",
       "walkthrough": [
         {
           "instruction": "Pause the running demo from the editor control.",

@@ -163,7 +163,8 @@ test('case 2: duration target is measured, paired with tolerance, and corrected 
 	const requests = voice.buildVoiceRequests({ script, timings });
 	for (const [index, request] of requests.entries()) {
 		assert.deepEqual(Object.keys(request.target), ['duration_seconds', 'tolerance_seconds']);
-		assert.equal(request.target.duration_seconds, timings.segments[index].duration_seconds);
+		assert.equal(request.target.duration_seconds,
+			Number(timings.segments[index].duration_seconds.toFixed(3)));
 		assert.equal(request.target.tolerance_seconds, 0.5);
 	}
 	const unpaired = structuredClone(requests[0]);
@@ -184,6 +185,46 @@ test('case 2: duration target is measured, paired with tolerance, and corrected 
 	staleCapture.segments[0].actions[0].duration_ms -= 1000;
 	assert.throws(() => voice.buildVoiceRequests({ script, timings: staleCapture }),
 		/intro.*stale.*capture|action sequence.*intro.*capture/i);
+});
+
+test('review blocker: target duration is quantised to millisecond precision before hashing', async () => {
+	assert.ifError(loadError);
+	assert.equal(voice.TARGET_DURATION_DECIMALS, 3);
+	const { script, timings } = await inputs();
+	const noisy = structuredClone(timings);
+	noisy.segments[1].duration_seconds = 4.980055691;
+	noisy.segments[2].start_seconds = 6.2;
+	noisy.recording.duration_seconds = 7;
+	const rounded = structuredClone(noisy);
+	rounded.segments[1].duration_seconds = 4.98;
+	const noisyRequests = voice.buildVoiceRequests({ script, timings: noisy });
+	const roundedRequests = voice.buildVoiceRequests({ script, timings: rounded });
+	assert.equal(noisyRequests[1].target.duration_seconds, 4.98);
+	assert.equal(noisyRequests[1].request_id, roundedRequests[1].request_id,
+		'sub-millisecond capture noise changed the effective request hash');
+	const overPrecise = structuredClone(noisyRequests[1]);
+	overPrecise.target.duration_seconds = 4.980055691;
+	assert.throws(() => voice.validateVoiceRequest(overPrecise), /millisecond|three decimal|precision/i);
+});
+
+test('review blocker: release-1 narration is lengthened to measured visual windows without changing holds', async () => {
+	const authoring = JSON.parse(await readFile(path.join(repo, 'docs', 'release-1', 'changedrop-script.json'), 'utf8'));
+	const treatments = Object.fromEntries(authoring.treatments.map((treatment) => [treatment.surface, treatment]));
+	assert.equal(treatments['window-follow'].text,
+		'Resizing the browser now keeps your game view and HUD controls aligned.');
+	assert.equal(treatments['pause-resume'].text,
+		'Pause now holds frames steady, so you can edit the HUD without losing your moment.');
+	assert.deepEqual(treatments['window-follow'].walkthrough
+		.filter((step) => step.action === 'hold').map((step) => step.duration_ms), [500, 3000]);
+	assert.deepEqual(treatments['pause-resume'].walkthrough
+		.filter((step) => step.action === 'hold').map((step) => step.duration_ms), [3000]);
+	const wordCount = (text) => text.trim().split(/\s+/u).length;
+	assert.equal(wordCount(treatments['window-follow'].text), 12);
+	assert.equal(wordCount(treatments['pause-resume'].text), 15);
+	assert.ok(Math.abs(4.98 - (3.08 * 12 / 8)) <= 0.5,
+		'window-follow line does not reconcile with its measured visual window');
+	assert.ok(Math.abs(6.8 - (3.5 * 15 / 8)) <= 0.5,
+		'pause-resume line does not reconcile with its measured visual window');
 });
 
 test('case 3: every documented error code maps by code to its specified action', async () => {
