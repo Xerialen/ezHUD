@@ -219,12 +219,18 @@ caller-selectable controls.
 
 ## 6. External gate — registry prerequisite (Terra coordinates)
 
-Measured on 2026-08-06 with the real command, no render performed:
+Measured on 2026-08-06 with the real command. **Both candidate project ids were
+rejected at the project check, before any render:**
 
 ```
 $ voice-order submit --wait --request-file <request>     # project: ezhud-changelog
 {"error_code":"E_PROJECT_NOT_ALLOWED","message":"project is not allowed to order voice",
  "request_id":"ezhud-changedrop-probe-001","schema_version":"voice-order/1","status":"failed"}
+exit=3
+
+$ voice-order submit --wait --request-file <request>     # project: ezhud
+{"error_code":"E_PROJECT_NOT_ALLOWED","message":"project is not allowed to order voice",
+ "request_id":"ezhud-changedrop-probe-002","schema_version":"voice-order/1","status":"failed"}
 exit=3
 ```
 
@@ -232,7 +238,9 @@ exit=3
 so the profile side is already satisfied.
 
 **The one prerequisite:** the owner must allowlist an ezHUD project id in the
-owner-private registry. Until then stage 4 stops at `E_PROJECT_NOT_ALLOWED`,
+owner-private registry. Neither `ezhud` nor `ezhud-changelog` is allowlisted
+today, so the id itself is an owner decision — once chosen it becomes a single
+constant in the request builder. Until then stage 4 stops at `E_PROJECT_NOT_ALLOWED`,
 which is the designed outcome, not a bug. No agent may add, modify or discover
 registry contents. When the project id is chosen it becomes a constant in the
 request builder; the pipeline needs nothing else.
