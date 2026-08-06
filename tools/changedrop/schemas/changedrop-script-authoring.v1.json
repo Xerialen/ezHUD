@@ -4,28 +4,17 @@
   "title": "ezHUD per-release changedrop script authoring v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "bookends", "treatments"],
+  "required": ["schema_version", "setup", "bookends", "treatments"],
   "properties": {
-    "schema_version": {
-      "const": "changedrop-script-authoring/1"
-    },
+    "schema_version": {"const": "changedrop-script-authoring/1"},
+    "setup": {"$ref": "#/$defs/walkthrough"},
     "bookends": {
       "type": "object",
       "additionalProperties": false,
       "required": ["intro_walkthrough", "outro_walkthrough"],
       "properties": {
-        "intro_walkthrough": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {"type": "string", "minLength": 1}
-        },
-        "outro_walkthrough": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {"type": "string", "minLength": 1}
-        }
+        "intro_walkthrough": {"$ref": "#/$defs/walkthrough"},
+        "outro_walkthrough": {"$ref": "#/$defs/walkthrough"}
       }
     },
     "treatments": {
@@ -36,10 +25,7 @@
         "additionalProperties": false,
         "required": ["surface", "source", "text", "walkthrough"],
         "properties": {
-          "surface": {
-            "type": "string",
-            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-          },
+          "surface": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
           "source": {
             "type": "object",
             "additionalProperties": false,
@@ -50,18 +36,87 @@
               "value": {"type": "string", "minLength": 1}
             }
           },
-          "text": {
-            "type": "string",
-            "minLength": 1
-          },
-          "walkthrough": {
-            "type": "array",
-            "minItems": 1,
-            "uniqueItems": true,
-            "items": {"type": "string", "minLength": 1}
-          }
+          "text": {"type": "string", "minLength": 1},
+          "walkthrough": {"$ref": "#/$defs/walkthrough"}
         }
       }
+    }
+  },
+  "$defs": {
+    "selector": {
+      "type": "string",
+      "pattern": "^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\\[data-changedrop=\"[a-z0-9]+(?:-[a-z0-9]+)*\"\\])$"
+    },
+    "walkthrough": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/step"}
+    },
+    "step": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["instruction", "action", "selector", "state"],
+          "properties": {
+            "instruction": {"type": "string", "minLength": 1},
+            "action": {"const": "wait-for"},
+            "selector": {"$ref": "#/$defs/selector"},
+            "state": {"enum": ["visible", "enabled", "pressed", "unpressed"]}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["instruction", "action", "width", "height"],
+          "properties": {
+            "instruction": {"type": "string", "minLength": 1},
+            "action": {"const": "resize"},
+            "width": {"type": "integer", "minimum": 320, "maximum": 3840},
+            "height": {"type": "integer", "minimum": 240, "maximum": 2160}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["instruction", "action", "selector"],
+          "properties": {
+            "instruction": {"type": "string", "minLength": 1},
+            "action": {"const": "click"},
+            "selector": {"$ref": "#/$defs/selector"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["instruction", "action", "duration_ms"],
+          "properties": {
+            "instruction": {"type": "string", "minLength": 1},
+            "action": {"const": "hold"},
+            "duration_ms": {"type": "integer", "minimum": 100, "maximum": 5000}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["instruction", "action", "selector", "badge", "crop"],
+          "properties": {
+            "instruction": {"type": "string", "minLength": 1},
+            "action": {"const": "highlight"},
+            "selector": {"$ref": "#/$defs/selector"},
+            "badge": {"type": "integer", "minimum": 1, "maximum": 99},
+            "crop": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["width", "height"],
+              "properties": {
+                "width": {"type": "integer", "minimum": 320, "maximum": 1200},
+                "height": {"type": "integer", "minimum": 180, "maximum": 800}
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

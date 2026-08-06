@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "changedrop-timings/1",
+  "title": "ezHUD changedrop measured capture timings v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "recording", "setup_actions", "segments"],
+  "properties": {
+    "schema_version": {"const": "changedrop-timings/1"},
+    "recording": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["basename", "bytes", "duration_seconds"],
+      "properties": {
+        "basename": {"const": "walkthrough.webm"},
+        "bytes": {"type": "integer", "minimum": 1},
+        "duration_seconds": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "setup_actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/machine_action"}
+    },
+    "segments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "surface",
+          "start_seconds",
+          "duration_seconds",
+          "actions",
+          "highlights"
+        ],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+          "kind": {"enum": ["bookend", "surface"]},
+          "surface": {
+            "type": ["string", "null"],
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "start_seconds": {"type": "number", "minimum": 0},
+          "duration_seconds": {"type": "number", "exclusiveMinimum": 0},
+          "actions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"$ref": "#/$defs/machine_action"}
+          },
+          "highlights": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "timestamp_seconds",
+                "selector",
+                "badge",
+                "source_basename",
+                "source_bytes",
+                "basename",
+                "bytes"
+              ],
+              "properties": {
+                "timestamp_seconds": {"type": "number", "minimum": 0},
+                "selector": {
+                  "type": "string",
+                  "pattern": "^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\\[data-changedrop=\"[a-z0-9]+(?:-[a-z0-9]+)*\"\\])$"
+                },
+                "badge": {"type": "integer", "minimum": 1, "maximum": 99},
+                "source_basename": {
+                  "type": "string",
+                  "pattern": "^stills/sources/[a-z0-9]+(?:-[a-z0-9]+)*-[1-9][0-9]*\\.png$"
+                },
+                "source_bytes": {"type": "integer", "minimum": 1},
+                "basename": {
+                  "type": "string",
+                  "pattern": "^stills/[a-z0-9]+(?:-[a-z0-9]+)*-[1-9][0-9]*\\.png$"
+                },
+                "bytes": {"type": "integer", "minimum": 1}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "selector": {
+      "type": "string",
+      "pattern": "^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\\[data-changedrop=\"[a-z0-9]+(?:-[a-z0-9]+)*\"\\])$"
+    },
+    "machine_action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "selector", "state"],
+          "properties": {
+            "action": {"const": "wait-for"},
+            "selector": {"$ref": "#/$defs/selector"},
+            "state": {"enum": ["visible", "enabled", "pressed", "unpressed"]}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "width", "height"],
+          "properties": {
+            "action": {"const": "resize"},
+            "width": {"type": "integer", "minimum": 320, "maximum": 3840},
+            "height": {"type": "integer", "minimum": 240, "maximum": 2160}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "selector"],
+          "properties": {
+            "action": {"const": "click"},
+            "selector": {"$ref": "#/$defs/selector"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "duration_ms"],
+          "properties": {
+            "action": {"const": "hold"},
+            "duration_ms": {"type": "integer", "minimum": 100, "maximum": 5000}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "selector", "badge", "crop"],
+          "properties": {
+            "action": {"const": "highlight"},
+            "selector": {"$ref": "#/$defs/selector"},
+            "badge": {"type": "integer", "minimum": 1, "maximum": 99},
+            "crop": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["width", "height"],
+              "properties": {
+                "width": {"type": "integer", "minimum": 320, "maximum": 1200},
+                "height": {"type": "integer", "minimum": 180, "maximum": 800}
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

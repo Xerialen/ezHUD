@@ -1,11 +1,27 @@
 {
   "schema_version": "changedrop-script-authoring/1",
+  "setup": [
+    {
+      "instruction": "Wait for the synthetic editor.",
+      "action": "wait-for",
+      "selector": "[data-changedrop=\"editor-ready\"]",
+      "state": "visible"
+    }
+  ],
   "bookends": {
     "intro_walkthrough": [
-      "Establish the editor with an unsnapped HUD element visible."
+      {
+        "instruction": "Establish the editor with an unsnapped HUD element visible.",
+        "action": "hold",
+        "duration_ms": 600
+      }
     ],
     "outro_walkthrough": [
-      "Hold on the cleanly aligned HUD."
+      {
+        "instruction": "Hold on the cleanly aligned HUD.",
+        "action": "hold",
+        "duration_ms": 600
+      }
     ]
   },
   "treatments": [
@@ -18,9 +34,29 @@
       },
       "text": "Your HUD elements can now snap cleanly into line, without all the pixel hunting.",
       "walkthrough": [
-        "Show a HUD element sitting away from an alignment guide.",
-        "Drag the element toward the guide until the snap magnet engages.",
-        "Hold on the element aligned cleanly to the guide."
+        {
+          "instruction": "Show a HUD element away from an alignment guide.",
+          "action": "resize",
+          "width": 960,
+          "height": 540
+        },
+        {
+          "instruction": "Enable the synthetic snap magnet.",
+          "action": "click",
+          "selector": "[data-changedrop=\"snap-magnet\"]"
+        },
+        {
+          "instruction": "Ring the element aligned cleanly to the guide.",
+          "action": "highlight",
+          "selector": "[data-changedrop=\"snap-magnet\"]",
+          "badge": 1,
+          "crop": {"width": 550, "height": 300}
+        },
+        {
+          "instruction": "Hold on the snapped result.",
+          "action": "hold",
+          "duration_ms": 900
+        }
       ]
     }
   ]

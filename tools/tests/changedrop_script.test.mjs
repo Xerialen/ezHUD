@@ -131,6 +131,7 @@ test('case 3: each changed surface has one budgeted segment and a keyed walkthro
 
 	const { summary, authoring } = await renderFixture();
 	const script = authorChangedropScript(summary, authoring, { authoringPath: 'docs/release-1/changedrop-script.json' });
+	assert.deepEqual(script.setup, authoring.setup);
 	const surfaces = script.segments.filter((segment) => segment.kind === 'surface');
 	assert.deepEqual(surfaces.map((segment) => segment.surface), summary.features.map((feature) => feature.surface));
 	assert.equal(surfaces.length, summary.features.length);
@@ -141,7 +142,10 @@ test('case 3: each changed surface has one budgeted segment and a keyed walkthro
 		assert.ok(segment.estimated_duration_seconds > 0);
 		assert.ok(Array.isArray(segment.walkthrough) && segment.walkthrough.length > 0,
 			`${segment.id} has no walkthrough steps`);
-		for (const step of segment.walkthrough) assert.ok(step.trim(), `${segment.id} has an empty walkthrough step`);
+		for (const step of segment.walkthrough) {
+			assert.ok(step.instruction.trim(), `${segment.id} has an empty walkthrough instruction`);
+			assert.match(step.action, /^(?:wait-for|resize|click|hold|highlight)$/);
+		}
 	}
 	for (const segment of surfaces) {
 		assert.equal(segment.id, segment.surface);
@@ -210,6 +214,7 @@ test('reuse contract: a wholly synthetic surface is authored by data, never tool
 	const authoring = await fixture('script-generic-authoring.json');
 	const authoringPath = 'docs/release-2/changedrop-script.json';
 	const script = authorChangedropScript(summary, authoring, { authoringPath });
+	assert.deepEqual(script.setup, authoring.setup);
 	assert.deepEqual(script.segments.map(({ id, kind, surface }) => ({ id, kind, surface })), [
 		{ id: 'intro', kind: 'bookend', surface: null },
 		{ id: 'snap-magnet', kind: 'surface', surface: 'snap-magnet' },
@@ -239,12 +244,20 @@ test('supporting contract: schemas, privacy, private CLI output, input validatio
 	const authoringSchema = JSON.parse(await readFile(
 		path.join(repo, 'tools', 'changedrop', 'schemas', 'changedrop-script-authoring.v1.json'), 'utf8'));
 	assert.equal(schema.additionalProperties, false);
+	assert.deepEqual(schema.required, ['schema_version', 'setup', 'segments']);
 	assert.equal(schema.properties.segments.items.additionalProperties, false);
 	assert.deepEqual(schema.properties.segments.items.required,
 		['id', 'kind', 'surface', 'text', 'estimated_duration_seconds', 'walkthrough']);
 	assert.equal(authoringSchema.additionalProperties, false);
+	assert.deepEqual(authoringSchema.required, ['schema_version', 'setup', 'bookends', 'treatments']);
 	assert.equal(authoringSchema.properties.treatments.items.additionalProperties, false);
 	assert.equal(authoringSchema.properties.treatments.items.properties.source.additionalProperties, false);
+	const authoredActions = authoringSchema.$defs.step.oneOf.map((branch) => branch.properties.action.const);
+	const emittedActions = schema.$defs.step.oneOf.map((branch) => branch.properties.action.const);
+	assert.deepEqual(authoredActions, ['wait-for', 'resize', 'click', 'hold', 'highlight']);
+	assert.deepEqual(emittedActions, authoredActions);
+	assert.ok(authoringSchema.$defs.step.oneOf.every((branch) => branch.additionalProperties === false));
+	assert.ok(schema.$defs.step.oneOf.every((branch) => branch.additionalProperties === false));
 
 	const { summary, authoring } = await renderFixture();
 	const script = authorChangedropScript(summary, authoring, {

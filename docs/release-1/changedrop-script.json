@@ -1,11 +1,33 @@
 {
   "schema_version": "changedrop-script-authoring/1",
+  "setup": [
+    {
+      "instruction": "Wait for the editing-size readout.",
+      "action": "wait-for",
+      "selector": "#readout",
+      "state": "visible"
+    },
+    {
+      "instruction": "Wait for demo controls to become interactive.",
+      "action": "wait-for",
+      "selector": "#fte-pause",
+      "state": "enabled"
+    }
+  ],
   "bookends": {
     "intro_walkthrough": [
-      "Establish the editor with the game view and HUD visible."
+      {
+        "instruction": "Establish the editor with the game view and HUD visible.",
+        "action": "hold",
+        "duration_ms": 3200
+      }
     ],
     "outro_walkthrough": [
-      "Hold on the completed editor view."
+      {
+        "instruction": "Hold on the completed editor view.",
+        "action": "hold",
+        "duration_ms": 3200
+      }
     ]
   },
   "treatments": [
@@ -18,9 +40,41 @@
       },
       "text": "Resizing now keeps your game and HUD aligned.",
       "walkthrough": [
-        "Show the game view before changing the browser size.",
-        "Resize the browser while keeping the game view and HUD handles visible.",
-        "Hold on the resized view with a HUD handle aligned to its element."
+        {
+          "instruction": "Show the game view at the smaller browser size.",
+          "action": "resize",
+          "width": 1280,
+          "height": 720
+        },
+        {
+          "instruction": "Hold briefly on the smaller game view.",
+          "action": "hold",
+          "duration_ms": 500
+        },
+        {
+          "instruction": "Resize the browser and let the game view follow.",
+          "action": "resize",
+          "width": 1536,
+          "height": 864
+        },
+        {
+          "instruction": "Wait for the resized editing-size readout.",
+          "action": "wait-for",
+          "selector": "#readout",
+          "state": "visible"
+        },
+        {
+          "instruction": "Ring the changed editing-size readout.",
+          "action": "highlight",
+          "selector": "#readout",
+          "badge": 1,
+          "crop": {"width": 500, "height": 270}
+        },
+        {
+          "instruction": "Hold on the aligned resized view.",
+          "action": "hold",
+          "duration_ms": 3000
+        }
       ]
     },
     {
@@ -32,9 +86,40 @@
       },
       "text": "Pause keeps engine frames steady for HUD edits.",
       "walkthrough": [
-        "Load a demo with Pause visible beside the demo selector.",
-        "Pause on a quiet frame and hold while the demo clock stays still.",
-        "Resume and hold while the demo clock advances again."
+        {
+          "instruction": "Pause the running demo from the editor control.",
+          "action": "click",
+          "selector": "#fte-pause"
+        },
+        {
+          "instruction": "Wait for engine readback to confirm the pause.",
+          "action": "wait-for",
+          "selector": "#fte-pause",
+          "state": "pressed"
+        },
+        {
+          "instruction": "Ring the changed Pause control.",
+          "action": "highlight",
+          "selector": "#fte-pause",
+          "badge": 1,
+          "crop": {"width": 550, "height": 300}
+        },
+        {
+          "instruction": "Hold on the steady demo frame.",
+          "action": "hold",
+          "duration_ms": 3000
+        },
+        {
+          "instruction": "Resume demo playback from the same control.",
+          "action": "click",
+          "selector": "#fte-pause"
+        },
+        {
+          "instruction": "Wait for engine readback to confirm playback.",
+          "action": "wait-for",
+          "selector": "#fte-pause",
+          "state": "unpressed"
+        }
       ]
     }
   ]

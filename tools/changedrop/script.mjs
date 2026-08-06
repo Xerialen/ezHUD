@@ -13,6 +13,9 @@ const ROOT_VARIABLE = 'EZHUD_CHANGEDROP_ROOT';
 const INTRO = "Hey guys, it's Xeri with another changedrop.";
 const OUTRO = "Be safe, and don't walk on spawns.";
 const MAX_SURFACE_SECONDS = 10.0;
+const MAX_HOLD_MS = 5_000;
+const ACTIONS = new Set(['wait-for', 'resize', 'click', 'hold', 'highlight']);
+const SELECTOR_PATTERN = /^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\[data-changedrop="[a-z0-9]+(?:-[a-z0-9]+)*"\])$/;
 
 // 2.2 words/s is 132 wpm: a deliberately conservative planning rate near the
 // low end of clear conversational narration. It leaves room for natural pauses;
@@ -71,20 +74,82 @@ function validateValueSummary(summary) {
 	return summary;
 }
 
-function nonEmptyStringArray(value, at) {
+function validateSelector(value, at) {
+	if (typeof value !== 'string' || !SELECTOR_PATTERN.test(value)) {
+		throw new Error(`${at} selector must be id-style (#name) or [data-changedrop="kebab-name"].`);
+	}
+}
+
+function validateWalkthrough(value, at, { setup = false } = {}) {
 	if (!Array.isArray(value) || value.length === 0) throw new Error(`${at} must be a non-empty array.`);
-	for (const [index, entry] of value.entries()) nonEmptyString(entry, `${at} step ${index + 1}`);
-	if (new Set(value).size !== value.length) throw new Error(`${at} contains duplicate steps.`);
+	for (const [index, step] of value.entries()) {
+		const label = `${at} step ${index + 1}`;
+		if (!step || typeof step !== 'object' || Array.isArray(step)) throw new Error(`${label} must be an object.`);
+		nonEmptyString(step.instruction, `${label} instruction`);
+		if (!ACTIONS.has(step.action)) throw new Error(`${label} has unknown action "${String(step.action)}".`);
+		switch (step.action) {
+		case 'wait-for':
+			exactObject(step, ['instruction', 'action', 'selector', 'state'], label);
+			validateSelector(step.selector, label);
+			if (!['visible', 'enabled', 'pressed', 'unpressed'].includes(step.state)) {
+				throw new Error(`${label} wait-for state is not allowed.`);
+			}
+			break;
+		case 'resize':
+			exactObject(step, ['instruction', 'action', 'width', 'height'], label);
+			if (!Number.isInteger(step.width) || step.width < 320 || step.width > 3840
+				|| !Number.isInteger(step.height) || step.height < 240 || step.height > 2160) {
+				throw new Error(`${label} resize dimensions are outside 320x240 to 3840x2160.`);
+			}
+			break;
+		case 'click':
+			exactObject(step, ['instruction', 'action', 'selector'], label);
+			validateSelector(step.selector, label);
+			break;
+		case 'hold':
+			exactObject(step, ['instruction', 'action', 'duration_ms'], label);
+			if (!Number.isInteger(step.duration_ms) || step.duration_ms < 100 || step.duration_ms > MAX_HOLD_MS) {
+				throw new Error(`${label} hold duration must be between 100 and 5000 ms.`);
+			}
+			break;
+		case 'highlight': {
+			exactObject(step, ['instruction', 'action', 'selector', 'badge', 'crop'], label);
+			if (setup) throw new Error(`${label} highlight is not allowed during setup.`);
+			validateSelector(step.selector, label);
+			if (!Number.isInteger(step.badge) || step.badge < 1 || step.badge > 99) {
+				throw new Error(`${label} highlight badge must be an integer from 1 to 99.`);
+			}
+			exactObject(step.crop, ['width', 'height'], `${label} crop`);
+			if (!Number.isInteger(step.crop.width) || step.crop.width < 320 || step.crop.width > 1200
+				|| !Number.isInteger(step.crop.height) || step.crop.height < 180 || step.crop.height > 800) {
+				throw new Error(`${label} highlight crop dimensions are outside the allowed bounds.`);
+			}
+			const ratio = step.crop.width / step.crop.height;
+			if (ratio < 1.6 || ratio > 2.2) throw new Error(`${label} highlight crop must be between 1.6:1 and 2.2:1.`);
+			break;
+		}
+		default:
+			throw new Error(`${label} has unknown action "${String(step.action)}".`);
+		}
+	}
+}
+
+function copyWalkthrough(walkthrough) {
+	return walkthrough.map((step) => ({
+		...step,
+		...(step.crop ? { crop: { ...step.crop } } : {}),
+	}));
 }
 
 function validateAuthoring(authoring) {
-	exactObject(authoring, ['schema_version', 'bookends', 'treatments'], 'Changedrop script authoring');
+	exactObject(authoring, ['schema_version', 'setup', 'bookends', 'treatments'], 'Changedrop script authoring');
 	if (authoring.schema_version !== AUTHORING_SCHEMA_VERSION) {
 		throw new Error(`Changedrop script authoring must use ${AUTHORING_SCHEMA_VERSION}.`);
 	}
+	validateWalkthrough(authoring.setup, 'Changedrop capture setup', { setup: true });
 	exactObject(authoring.bookends, ['intro_walkthrough', 'outro_walkthrough'], 'Changedrop script authoring bookends');
-	nonEmptyStringArray(authoring.bookends.intro_walkthrough, 'Changedrop intro walkthrough');
-	nonEmptyStringArray(authoring.bookends.outro_walkthrough, 'Changedrop outro walkthrough');
+	validateWalkthrough(authoring.bookends.intro_walkthrough, 'Changedrop intro walkthrough');
+	validateWalkthrough(authoring.bookends.outro_walkthrough, 'Changedrop outro walkthrough');
 	if (!Array.isArray(authoring.treatments)) throw new Error('Changedrop script authoring treatments must be an array.');
 
 	const surfaces = new Set();
@@ -102,7 +167,7 @@ function validateAuthoring(authoring) {
 			nonEmptyString(treatment.source[field], `Authored source for surface "${treatment.surface}" ${field}`);
 		}
 		nonEmptyString(treatment.text, `Authored narration for surface "${treatment.surface}"`);
-		nonEmptyStringArray(treatment.walkthrough, `Authored walkthrough for surface "${treatment.surface}"`);
+		validateWalkthrough(treatment.walkthrough, `Authored walkthrough for surface "${treatment.surface}"`);
 	}
 	return authoring;
 }
@@ -161,7 +226,7 @@ function segment({ id, kind, surface, text, walkthrough }) {
 		surface,
 		text,
 		estimated_duration_seconds: Number((wordCount(text) / WORDS_PER_SECOND).toFixed(3)),
-		walkthrough: [...walkthrough],
+		walkthrough: copyWalkthrough(walkthrough),
 	};
 }
 
@@ -245,6 +310,7 @@ export function authorChangedropScript(summary, authoring, { authoringPath: requ
 	];
 	return privacyChecked(assertScriptContract({
 		schema_version: OUTPUT_SCHEMA_VERSION,
+		setup: copyWalkthrough(authoring.setup),
 		segments,
 	}), 'Changedrop script');
 }

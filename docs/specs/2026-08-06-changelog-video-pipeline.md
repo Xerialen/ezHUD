@@ -123,7 +123,9 @@ content in `docs/release-<N>/changedrop-script.json` using
 `changedrop-script-authoring/1`. The command is release-agnostic: it joins that
 content to the value summary by surface, requires the authored source
 before/after/value triple to match exactly, and fails naming the release file
-when an entry is stale or missing.
+when an entry is stale or missing. Every walkthrough step retains a required
+human `instruction` and carries one machine action from the closed Stage 3 DSL;
+Stage 2 validates and copies those structured steps into `changedrop-script/1`.
 
 - Exact intro: `Hey guys, it's Xeri with another changedrop.`
 - Exact outro: `Be safe, and don't walk on spawns.`
@@ -144,16 +146,33 @@ Capture-first is **mandatory**, not a preference: the walkthrough is recorded
 for real and the **measured** durations are what narration is fitted to. That
 ordering is why audio and video cannot desync.
 
+The capture command is a release-agnostic interpreter for a closed declarative
+DSL: `wait-for`, `resize`, `click`, `hold`, and `highlight`. There is no
+evaluate, run-script, arbitrary-JS, or unknown-action fallback. Selectors are
+restricted to `#id-style` or `[data-changedrop="lower-kebab"]`; descendant,
+class, pseudo-class, role and general attribute selectors are refused. Release
+readiness actions live in `script.setup` and run before segment timing starts.
+
+A single `hold` is bounded to five seconds: enough to host any current segment
+or let a changed control read clearly, but too short to hang a run accidentally.
+The complete browser capture has a hard three-minute (180 second) deadline:
+this leaves the existing WebAssembly/demo boot up to two minutes plus ample time
+for the short walkthrough, while making a stalled selector or browser finite.
+
 Annotations follow the ring-only convention proven in Release 1
 (`docs/release-1/ANNOTATION-CONVENTION.md`): focused crop, ring on the changed
-control only, small badge, no inset, no prose inside the image.
+control only, small badge, no inset, no prose inside the image. A `highlight`
+derives ring geometry from its validated selector and writes separate focused
+source and annotated stills; its human instruction is never rendered.
 
 - **C1** recording exists, non-empty, duration > 0.
 - **C2** exactly one timing entry per script segment; starts strictly
   monotonic; every duration > 0.
 - **C3** every highlight timestamp lies inside its segment's interval.
-- **C4** a second run yields the same segment count and ordering; wall-clock
-  durations differ, so the gate asserts structure and tolerance, never bytes.
+- **C4** a second run yields the same setup and per-segment action sequence,
+  segment count and ordering; wall-clock durations differ, so the gate asserts
+  structure and a two-second per-segment tolerance, never bytes. Two seconds
+  admits real engine-readback jitter while still catching a lost wait or hold.
 
 ### Stage 4 — narration order (`changedrop-narration/1`)
 

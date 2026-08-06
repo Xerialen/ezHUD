@@ -1,0 +1,30 @@
+[
+  {
+    "id": "intro",
+    "start_seconds": 0.46,
+    "duration_seconds": 0.72,
+    "highlights": []
+  },
+  {
+    "id": "snap-magnet",
+    "start_seconds": 1.2,
+    "duration_seconds": 1.91,
+    "highlights": [
+      {
+        "timestamp_seconds": 2.13,
+        "selector": "[data-changedrop=\"snap-magnet\"]",
+        "badge": 1,
+        "source_basename": "stills/sources/snap-magnet-1.png",
+        "source_bytes": 2051,
+        "basename": "stills/snap-magnet-1.png",
+        "bytes": 2310
+      }
+    ]
+  },
+  {
+    "id": "outro",
+    "start_seconds": 3.14,
+    "duration_seconds": 0.63,
+    "highlights": []
+  }
+]

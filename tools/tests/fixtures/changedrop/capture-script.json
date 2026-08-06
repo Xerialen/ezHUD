@@ -1,0 +1,79 @@
+{
+  "schema_version": "changedrop-script/1",
+  "setup": [
+    {
+      "instruction": "Wait for the synthetic editor to become visible.",
+      "action": "wait-for",
+      "selector": "#editor-ready",
+      "state": "visible"
+    }
+  ],
+  "segments": [
+    {
+      "id": "intro",
+      "kind": "bookend",
+      "surface": null,
+      "text": "Hey guys, it's Xeri with another changedrop.",
+      "estimated_duration_seconds": 3.182,
+      "walkthrough": [
+        {
+          "instruction": "Establish the synthetic editor.",
+          "action": "hold",
+          "duration_ms": 700
+        }
+      ]
+    },
+    {
+      "id": "snap-magnet",
+      "kind": "surface",
+      "surface": "snap-magnet",
+      "text": "Your HUD elements can now snap cleanly into line, without all the pixel hunting.",
+      "estimated_duration_seconds": 5.909,
+      "walkthrough": [
+        {
+          "instruction": "Start with the compact synthetic viewport.",
+          "action": "resize",
+          "width": 960,
+          "height": 540
+        },
+        {
+          "instruction": "Wait for the snap control to be enabled.",
+          "action": "wait-for",
+          "selector": "#snap-toggle",
+          "state": "enabled"
+        },
+        {
+          "instruction": "Enable snapping.",
+          "action": "click",
+          "selector": "#snap-toggle"
+        },
+        {
+          "instruction": "Ring the changed snap control.",
+          "action": "highlight",
+          "selector": "[data-changedrop=\"snap-magnet\"]",
+          "badge": 1,
+          "crop": {"width": 550, "height": 300}
+        },
+        {
+          "instruction": "Hold on the aligned result.",
+          "action": "hold",
+          "duration_ms": 900
+        }
+      ]
+    },
+    {
+      "id": "outro",
+      "kind": "bookend",
+      "surface": null,
+      "text": "Be safe, and don't walk on spawns.",
+      "estimated_duration_seconds": 3.182,
+      "walkthrough": [
+        {
+          "instruction": "Hold on the finished synthetic HUD.",
+          "action": "hold",
+          "duration_ms": 600
+        }
+      ]
+    }
+  ]
+}
