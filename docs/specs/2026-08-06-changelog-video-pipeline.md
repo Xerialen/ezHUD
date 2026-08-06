@@ -1,64 +1,68 @@
-# Spec — changelog video pipeline (specification only)
+# Spec — changelog video pipeline (operational)
 
-Status: **specification only.** No implementation, no voice render, no capture,
-no publish, no registry or credential change is authorised by this document.
-Coordinator/reviewer: Opus 5. Implementer: Sol (GPT-5.6-sol). No implementation
-author reviews its own work.
+Coordinator and independent reviewer: **Opus 5** (reviews the current head SHA).
+Implementer: **Sol** (GPT-5.6-sol, TDD). External gates: **Terra**.
+No implementation author reviews its own work.
 
-Sources: the owner's pipeline skill spec (Drive) and the Voice Order API v1
-document. Both are owner-supplied inputs; neither is vendored here.
+Pilot: **Release 1 (#39, closed)** — its canonical note, its evidence, and the
+merged `main` baseline.
 
 ---
 
 ## 0. What this pipeline is subordinate to
 
-The owner mandate stands unchanged: **after two releases the player-facing
-deliverable is a canonical change log with annotated screenshots.** That is
-`docs/release-<N>/NOTES.md` plus its focused ring-only evidence, gated by
-`tools/ci/release_note_gate.mjs`.
+The owner mandate stands: **after two releases the player-facing deliverable is
+a canonical change log with annotated screenshots** — `docs/release-<N>/NOTES.md`
+plus focused ring-only evidence, gated by `tools/ci/release_note_gate.mjs`.
 
-This pipeline may add **a short video drop, and only when the user value is
-clear.** A release with no user-facing value produces no video, and that is a
-success, not a degraded run. The change log is never replaced, never
-regenerated from the video, and never blocked by a video failure.
+This pipeline adds **a short video drop, and only when the user value is clear.**
+A release with no user-facing value produces no video, and that is a success.
+The change log is never replaced, never regenerated from the video, and never
+blocked by a video failure.
 
-Consequence for every gate below: a video-stage failure must leave the change
-log publishable on its own.
+## 1. Voice policy — one path, no alternatives
 
-## 1. Role mapping — the five skills as ezHUD roles
+**ezHUD never uses a microphone.** There is no recording session, no capture of
+human speech, no Audacity step, and no "voice sample" work of any kind in this
+project.
 
-| Source skill | ezHUD role | Reads | Writes |
+The **only** voice path is the existing local Chatterbox narration service via
+the Voice Order API: `voice-order/1`, profile **`xeri-en-v1`**, as it is today.
+
+- No microphone, ever.
+- No fallback voice, no substitute engine, no synthesized stand-in.
+- No model selection, generation settings, seed, reference path or output path
+  in a request — the service resolves those privately.
+- If the service refuses the order, the pipeline **stops** and records the exact
+  prerequisite. It never routes around a refusal.
+
+## 2. Roles and the five skills as concrete commands
+
+Each skill is a real command with a versioned JSON handoff. Prose is not a
+contract; these are.
+
+| # | Skill | Command | Emits |
 |---|---|---|---|
-| 1 Analyzer | **value analyzer** | `docs/release-<N>/NOTES.md`, its ticket bodies, PR labels | `value-summary.json` |
-| 2 Scriptwriter | **script author** | `value-summary.json` | `script.json` |
-| 3 Capture | **walkthrough capturer** (capture-first) | `script.json`, assembled dist | `walkthrough.webm`, `timings.json`, annotated stills |
-| 4 Voice | **narration orderer** | `script.json`, `timings.json` | `narration/*.wav` (outside Git), order receipts |
-| 5 Mux | **muxer** | recording + narration | `changedrop.mp4` (outside Git), destination **pending owner approval** |
+| 1 | value analyzer | `node tools/changedrop/analyze.mjs --release <id> --out <run>/value-summary.json` | `changedrop-value-summary/1` |
+| 2 | script author | `node tools/changedrop/script.mjs --summary <run>/value-summary.json --out <run>/script.json` | `changedrop-script/1` |
+| 3 | capture (first) | `node tools/changedrop/capture.mjs --script <run>/script.json --dist <dist> --out <run>/capture` | `changedrop-timings/1` |
+| 4 | narration order | `node tools/changedrop/voice.mjs --script <run>/script.json --timings <run>/capture/timings.json --out <run>/narration` | `changedrop-narration/1` |
+| 5 | mux | `node tools/changedrop/mux.mjs --capture <run>/capture --narration <run>/narration --out <run>/mux` | `changedrop-manifest/1` |
+| — | orchestrator | `node tools/changedrop/run.mjs --release <id>` | chains 1–5, writes the manifest |
 
-### 1.1 The analyzer reads the note, not the diff
+Schemas are committed under `tools/changedrop/schemas/<name>.v1.json`. Every
+stage validates its input against the previous stage's schema and refuses to
+guess at a malformed handoff.
 
-This is the single most important adaptation. The source spec has the analyzer
-read the code diff; ezHUD already has a better input. `NOTES.md` is *authored*
-as before/after/why-you-care per feature, is evidence-mapped, and is enforced by
-an existing deterministic gate. A diff summariser would regress to exactly the
-"list of changes" the owner rejected.
+Wired as `npm run changedrop:analyze|script|capture|voice|mux|run`.
 
-So: **the canonical note is the analyzer's input, and the diff is only used to
-detect drift** — if a user-visible surface changed with no corresponding feature
-block, that is a *note* defect and must fail the note gate, not be papered over
-by the video pipeline.
+## 3. Artifact locations, and the privacy line
 
-The skip rule maps to machinery that already exists: a change carrying the
-`internal-only` label with a recorded exemption produces `decision: "skip"` and
-no further stage runs. Pure internal changes skip video, by construction.
-
-## 2. Artifact locations, and the privacy line
-
-**Nothing generated by stages 3–5 enters Git.** Media, narration WAVs, order
-receipts and manifests live in a run directory outside the repository:
+**Nothing generated by any stage enters Git.** Working media, narration, order
+receipts and manifests live in an **owner-only data root**:
 
 ```
-<VIDEO_WORK_ROOT>/<release>/<run-id>/
+$EZHUD_CHANGEDROP_ROOT/<release>/<run-id>/
   value-summary.json
   script.json
   capture/walkthrough.webm
@@ -69,35 +73,132 @@ receipts and manifests live in a run directory outside the repository:
   manifest.json
 ```
 
-`VIDEO_WORK_ROOT` is supplied by the environment. It is never committed, never
-printed into a repository file, and never embedded in a manifest field.
+`EZHUD_CHANGEDROP_ROOT` is supplied by the environment; every command **refuses
+to run without it** rather than inventing a location. The root is owner-only
+(`0700` directories, `0600` files). Its value is never committed, never printed
+into a repository file, and never written into a manifest field.
 
-**What Git may contain:** the tools, the JSON *schemas*, the gates and their
-fixtures. Fixtures use synthetic text and synthetic timings only.
+**Git may contain:** the commands, the JSON schemas, the gates, and synthetic
+fixtures. Nothing else.
 
-**Privacy rules, enforced by a gate, not by intention:**
+**Privacy rules, enforced by a gate rather than by intention:**
 
-- No absolute paths, `/home/`, `/Users/`, `$USER`, hostname or `file://` in any
-  committed file or in `manifest.json`.
-- `voice-order` returns `audio.path` as an absolute private outbox path. It is
-  the only caller-visible path and it **must be stripped** before anything is
-  written to the manifest; record `sha256` and basename instead.
-- Never commit a request or result JSON containing real ids from a live order.
-- No secrets, tokens or registry contents anywhere, ever.
+- No absolute path, `/home/`, `/Users/`, `$USER`, hostname or `file://` in any
+  committed file or in any manifest.
+- `voice-order` returns `audio.path`, an absolute private outbox path and the
+  only caller-visible path. It is **stripped before any manifest write**;
+  record `sha256` and basename instead.
+- No real order ids, receipts, registry contents, tokens or secrets in Git.
 
-## 3. Deterministic manifest
+## 4. Stage contracts and gates
 
-`manifest.json` is the run's provenance record and the muxer's only input
-contract. Every field must be reproducible from the run itself:
+Offline gates run in tier 1. **Nothing in CI calls the voice service, renders
+audio, launches a browser recording, or runs ffmpeg.**
+
+### Stage 1 — value analyzer (`changedrop-value-summary/1`)
+
+Reads the canonical note, **not the diff**. `NOTES.md` is already authored as
+before/after/why per feature and is evidence-mapped, and
+`tools/ci/release_note_gate.mjs` already parses that exact shape — reuse its
+parsing. A diff summariser would regress to the list-of-changes the owner
+rejected. The diff is consulted only to detect drift: a user-visible surface
+that changed with no feature block is a *note* defect, surfaced, never papered
+over.
+
+Skip rule: `internal-only` with a recorded exemption ⇒ `decision: "skip"`,
+zero features, stated reason, and no later stage runs. Pure internal changes
+skip video by construction, through the exemption that already exists.
+
+- **A1** every feature block yields exactly one entry, in note order, naming a
+  surface present in that note's evidence mapping.
+- **A2** the skip rule holds and stops the run.
+- **A3** an entry whose before/after/value cannot be stated fails with the block
+  named. Text is never invented to fill a gap.
+
+### Stage 2 — script author (`changedrop-script/1`)
+
+- Exact intro: `Hey guys, it's Xeri with another changedrop.`
+- Exact outro: `Be safe, and don't walk on spawns.`
+- **S1** both bookends match byte-for-byte, appear exactly once, first and last.
+- **S2** one segment per changed UI surface, **≤ 10.0 s per surface**, estimated
+  at authoring time from a documented words-per-second constant and re-checked
+  against real audio in V2.
+- **S3** no empty segment, no duplicated segment text.
+- Tone — personal, friendly, before/after/why, no filler — is reviewed as prose.
+
+### Stage 3 — capture, and it runs first (`changedrop-timings/1`)
+
+Capture-first is **mandatory**, not a preference: the walkthrough is recorded
+for real and the **measured** durations are what narration is fitted to. That
+ordering is why audio and video cannot desync.
+
+Annotations follow the ring-only convention proven in Release 1
+(`docs/release-1/ANNOTATION-CONVENTION.md`): focused crop, ring on the changed
+control only, small badge, no inset, no prose inside the image.
+
+- **C1** recording exists, non-empty, duration > 0.
+- **C2** exactly one timing entry per script segment; starts strictly
+  monotonic; every duration > 0.
+- **C3** every highlight timestamp lies inside its segment's interval.
+- **C4** a second run yields the same segment count and ordering; wall-clock
+  durations differ, so the gate asserts structure and tolerance, never bytes.
+
+### Stage 4 — narration order (`changedrop-narration/1`)
+
+Transport: `voice-order submit --wait`, one order per segment.
+
+Fixed fields: `schema_version: "voice-order/1"`, `voice_profile: "xeri-en-v1"`,
+`mode: "spoken"`, `style: "neutral"`, `language: "en"`, delivery
+`wav / 24000 / 1`. Duration fitting uses the **measured** capture timing:
+`target.duration_seconds` with an explicit `tolerance_seconds`, both fields or
+neither. The service verifies the rendered WAV itself and fails closed out of
+tolerance; the pipeline does not second-guess that decision.
+
+Forbidden in a request, by gate: output or reference path, model selection,
+generation settings, seed, extra renderer arguments.
+
+`request_id` derives from the effective order content. `status: "duplicate"`
+with `rerendered: false` is a normal success and must not trigger a retry loop.
+
+**Failure handling — branch on `error_code`, never on message text:**
+
+| `error_code` | Action |
+|---|---|
+| `E_PROJECT_NOT_ALLOWED`, `E_PROFILE_UNKNOWN` (3) | **Stop the run before rendering.** Record the prerequisite (§6). Owner/Terra action; never retried, never routed around, never substituted with another voice. |
+| `E_SCHEMA_INVALID`, `E_UNKNOWN_FIELD` (2) | Request-builder bug; fix the builder. |
+| `E_TEXT_UNSAFE`, `E_TEXT_TOO_LONG`, `E_OVERRIDE_INVALID` (4) | Script defect; return to stage 2. Never auto-trim. |
+| `E_DURATION_OUT_OF_TOLERANCE` (9) | Re-author that segment to fit measured time, then a **new** `request_id`. |
+| `E_REQUEST_ID_CONFLICT` (5) | Effective order changed under a reused id — builder bug. |
+| `E_LOCK_TIMEOUT` (6), `E_INTERNAL` (10) | Bounded retry of the identical order; exact retries are safe by design. |
+| `E_RENDER_FAILED` (7), `E_ARTIFACT_INVALID` (8) | Stop and report; no blind retry. |
+
+- **V1 (offline)** the built request validates against v1, carries none of the
+  forbidden fields, and has both duration fields or neither. Tier 1, fixtures,
+  no service call.
+- **V2 (online)** each narration WAV's measured duration is within tolerance of
+  its measured capture segment, and the ≤ 10 s per surface budget holds against
+  **real audio**.
+
+### Stage 5 — mux (`changedrop-manifest/1`)
+
+ffmpeg muxes narration onto the recording aligned to `timings.json`, and runs
+**only after valid voice output exists**. No narration ⇒ no mux.
+
+- **M1** output duration equals capture duration within tolerance.
+- **M2** exactly one audio and one video stream.
+- **M3** `publish.state: "withheld"`, `destination: null`. **No stage uploads
+  anything.** The destination is pending owner approval.
+
+## 5. Manifest (`changedrop-manifest/1`)
 
 ```json
 {
-  "schema_version": "ezhud-changedrop/1",
-  "release": "release-2",
-  "run_id": "<opaque, no host or user data>",
-  "source_note": { "path": "docs/release-2/NOTES.md", "sha256": "…" },
-  "decision": "render | skip",
-  "skip_reason": null,
+  "schema_version": "changedrop-manifest/1",
+  "release": "release-1",
+  "run_id": "<opaque; no host or user data>",
+  "source_note": { "path": "docs/release-1/NOTES.md", "sha256": "…" },
+  "decision": "render | skip | blocked",
+  "blocked_reason": null,
   "segments": [
     { "id": "…", "surface": "…", "script_sha256": "…",
       "measured_start_s": 0.0, "measured_duration_s": 0.0,
@@ -112,168 +213,56 @@ contract. Every field must be reproducible from the run itself:
 }
 ```
 
-`engine.name/t3_model/cli_sha256` are provenance the API exposes and are
-recorded as such — they are not caller-selectable controls and must never be
-presented as knobs. `profile_revision` matters: a re-clone from a new voice
-sample bumps it, and a manifest that cannot say which revision spoke is not
-provenance.
+`engine.name/t3_model/cli_sha256` and `profile_revision` are provenance the API
+exposes; they are recorded as provenance and are never presented as
+caller-selectable controls.
 
-## 4. Stage contracts and gates
+## 6. External gate — registry prerequisite (Terra coordinates)
 
-Each gate is deterministic and offline unless explicitly marked. Offline gates
-run in tier 1; nothing in CI may call the voice service or launch a render.
+Measured on 2026-08-06 with the real command, no render performed:
 
-### Stage 1 — value analyzer
+```
+$ voice-order submit --wait --request-file <request>     # project: ezhud-changelog
+{"error_code":"E_PROJECT_NOT_ALLOWED","message":"project is not allowed to order voice",
+ "request_id":"ezhud-changedrop-probe-001","schema_version":"voice-order/1","status":"failed"}
+exit=3
+```
 
-- **Input:** `docs/release-<N>/NOTES.md`, referenced tickets, PR labels.
-- **Output:** `value-summary.json`: per feature `{ surface, before, after, value }`
-  plus a top-level `decision`.
-- **Gate A1:** every feature block in the note yields exactly one summary entry,
-  and every entry names a surface that exists in the note's evidence mapping.
-- **Gate A2:** `internal-only` with a recorded exemption ⇒ `decision: "skip"`,
-  no segments, and later stages refuse to run.
-- **Gate A3:** an entry whose `before`, `after` or `value` is empty fails. A
-  value the analyzer cannot state is a note defect surfaced, not text invented.
+`voice-order profiles` returns exactly one profile, `xeri-en-v1` (revision 1),
+so the profile side is already satisfied.
 
-### Stage 2 — script author
+**The one prerequisite:** the owner must allowlist an ezHUD project id in the
+owner-private registry. Until then stage 4 stops at `E_PROJECT_NOT_ALLOWED`,
+which is the designed outcome, not a bug. No agent may add, modify or discover
+registry contents. When the project id is chosen it becomes a constant in the
+request builder; the pipeline needs nothing else.
 
-- **Exact intro:** `Hey guys, it's Xeri with another changedrop.`
-- **Exact outro:** `Be safe, and don't walk on spawns.`
-- **Gate S1:** intro and outro match byte-for-byte, appear exactly once, first
-  and last.
-- **Gate S2:** one segment per changed UI surface; **budget ≤ 10.0 s per
-  surface**, enforced at authoring time as an estimate from a documented
-  words-per-second constant, and re-checked against measured audio in Gate V2.
-- **Gate S3:** no segment text is empty; no segment repeats another's text.
-- Tone is a review judgement, not a gate: personal, friendly, before/after/why,
-  no filler. Opus reviews it as prose.
+Stages 1–3 and every offline gate run to completion regardless.
 
-### Stage 3 — capture, and it runs first
+## 7. Pilot — Release 1
 
-Capture-first is not a preference; it is why the video cannot desync. The
-walkthrough is recorded for real, and the **measured** durations are what the
-narration is later fitted to.
+The pilot consumes **Release 1's canonical note and evidence**
+(`docs/release-1/NOTES.md`, `docs/release-1/img/*`) on the merged `main`
+baseline, and runs every applicable stage.
 
-- **Input:** `script.json` step list, an assembled dist (`BASE_PATH=/ezHUD/`).
-- **Output:** `walkthrough.webm`, `timings.json` (per segment: real start,
-  real duration, highlight timestamps), annotated stills.
-- Annotation follows the ring-only convention already proven in Release 1
-  (`docs/release-1/ANNOTATION-CONVENTION.md`): focused crop, ring on the changed
-  control only, small badge, no inset and no prose inside the image.
-- **Gate C1:** the recording exists, is non-empty, and its duration is > 0.
-- **Gate C2:** exactly one timing entry per script segment, starts strictly
-  monotonic, every duration > 0.
-- **Gate C3:** every highlight timestamp lies inside its segment's interval.
-- **Gate C4:** the capture is reproducible in structure: a second run yields the
-  same segment count and ordering. Wall-clock durations will differ; the gate
-  asserts structure and tolerance, never byte identity.
+It produces a **private draft** only: artifacts in the owner-only data root and
+a manifest. **No merge, no Pages change, no release or tag, no Discord message,
+no external publishing.**
 
-### Stage 4 — narration order (local Voice Order API v1)
+The pilot is complete only with **real command output** for each stage and
+**independent SHA review by Opus**. If stage 4 stops on the registry
+prerequisite, the pilot is reported as *blocked at stage 4* with stages 1–3
+complete — never as complete, and never with a substituted voice.
 
-Only after the two preconditions in §5 are satisfied.
+## 8. Ticket order
 
-- **Transport:** `voice-order submit --wait` with a `voice-order/1` request.
-- **Fixed fields:** `voice_profile: "xeri-en-v1"`, `mode: "spoken"`,
-  `style: "neutral"`, `language: "en"`, delivery `wav / 24000 / 1`.
-- **Duration fitting:** send `target.duration_seconds` from the **measured**
-  capture timing with an explicit `tolerance_seconds`; both fields or neither.
-  The service verifies the rendered WAV itself and fails closed out of
-  tolerance — the pipeline must not second-guess that decision.
-- **Forbidden in the request, by gate:** any output or reference path, model
-  selection, generation settings, seed, extra renderer arguments. The service
-  resolves those privately. A request carrying them is a bug, not a feature.
-- **Idempotency:** `request_id` is derived from the effective order content.
-  `status: "duplicate"` with `rerendered: false` is a normal, successful
-  outcome and must not trigger a retry loop.
-- **Failure handling — branch on `error_code`, never on message text:**
+1. **#68** analyzer + skip rule (offline)
+2. **#69** scriptwriter (offline)
+3. **#70** capture-first (local media)
+4. **#71** voice request builder + offline contract gate
+5. **#72** mux + withheld destination
+6. **#73** orchestrator + manifest + privacy gate
 
-| `error_code` | Pipeline action |
-|---|---|
-| `E_PROJECT_NOT_ALLOWED`, `E_PROFILE_UNKNOWN` (3) | Stop the run. Owner action required; not retryable by an agent. |
-| `E_SCHEMA_INVALID`, `E_UNKNOWN_FIELD` (2) | Pipeline bug. Fail the gate, fix the request builder. |
-| `E_TEXT_UNSAFE`, `E_TEXT_TOO_LONG`, `E_OVERRIDE_INVALID` (4) | Script defect. Return to stage 2; never auto-trim. |
-| `E_DURATION_OUT_OF_TOLERANCE` (9) | Re-author that segment's text to fit measured time, then a **new** `request_id`. |
-| `E_REQUEST_ID_CONFLICT` (5) | Effective order changed under a reused id — a builder bug. |
-| `E_LOCK_TIMEOUT` (6), `E_INTERNAL` (10) | Bounded retry of the identical order; exact retries are safe by design. |
-| `E_RENDER_FAILED` (7), `E_ARTIFACT_INVALID` (8) | Stop and report; do not retry blindly. |
-
-- **Gate V1 (offline):** the built request validates against the v1 request
-  shape, contains none of the forbidden fields, and carries both duration
-  fields or neither. Runs in tier 1 against fixtures, with no service call.
-- **Gate V2 (online, owner-run):** each narration WAV's measured duration is
-  within tolerance of its measured capture segment, and the ≤10 s per surface
-  budget holds **against real audio**, not the estimate.
-
-### Stage 5 — mux, and a withheld destination
-
-- ffmpeg muxes narration onto the recording, aligned to `timings.json`.
-- **Gate M1:** output duration equals capture duration within tolerance.
-- **Gate M2:** output carries exactly one audio and one video stream.
-- **Gate M3:** `publish.state` is `withheld` and `destination` is `null` until
-  the owner approves a destination. **No stage may upload anything.** Skill 5 of
-  the source spec is explicitly a draft pending review, and this spec keeps it
-  that way.
-
-## 5. Preconditions the pipeline cannot satisfy for itself
-
-### 5.1 Project allowlisting — unknown, and not to be assumed
-
-`voice-order profiles` currently returns exactly one profile, `xeri-en-v1`
-(revision 1). **Whether an ezHUD project is allowlisted is unknown and must not
-be inferred.** SSH access does not authorise a project; the owner allowlists it.
-Until then, stage 4 is expected to fail with `E_PROJECT_NOT_ALLOWED` (exit 3),
-and that is the correct, designed outcome — not a bug to work around.
-
-No agent may attempt to add, modify or discover registry contents.
-
-### 5.2 The public-quality voice gate is a physical act
-
-Two different things must not be conflated:
-
-**Engineering smoke voice** — *if and only if* a project is allowlisted: one
-short synthetic sentence to prove request shape, duration gating and error
-branching. Its output is never published, never muxed into anything
-player-facing, and is deleted with the run. It says nothing about voice quality.
-
-**Public-quality gate** — required before any video reaches a player:
-a **fresh, clean 15–30 minute varied speech recording made by the owner** with
-the RØDE microphone in Audacity: quiet room, microphone about a hand-span away,
-pop filter with speech slightly off-axis, soft furnishings to damp echo.
-
-This capture is a physical act in a room. **No agent can perform, simulate or
-substitute it**, and no amount of processing turns the older sample into it.
-Until the owner has recorded it and a profile revision built from it exists, the
-pipeline may run end-to-end for engineering purposes only, and every output
-stays internal. A manifest whose `profile_revision` predates that recording is
-by definition not publishable.
-
-## 6. First vertical slice — against a *future* Release 2 candidate
-
-**Release 2 is not complete.** At the time of writing: #25 is in a review-fix
-round, #32 and #24 are not started, and PRs #63 and #65 are open and unmerged.
-The slice is therefore specified against a *candidate* `docs/release-2/NOTES.md`
-that does not exist yet, and must be demonstrable against a **fixture** note so
-that no stage depends on Release 2 landing.
-
-Slice scope: stages 1 → 2 → 3 producing `value-summary.json`, `script.json`,
-`walkthrough.webm` and `timings.json` for one surface, with stages 4 and 5
-specified and gate-tested offline but **not executed**.
-
-## 7. Staged ticket order
-
-1. **Analyzer + skip rule** (offline, no media) — smallest honest starting point.
-2. **Scriptwriter** (offline) — bookends, per-surface budget.
-3. **Capture-first** (media, local only) — real durations and timestamps.
-4. **Voice request builder + offline contract gate** — no service call in CI.
-5. **Mux + withheld destination** — no publish.
-6. **Orchestrator + manifest + privacy gate** — chains 1–5, enforces §2 and §3.
-
-Each ticket: spec → RED gate → Sol implements → **Opus reviews the current head
-SHA** → green CI → owner decision. Same flow as
-`docs/RELEASE-NOTE-WORKFLOW.md`; the video pipeline does not get a weaker one.
-
-## 8. Explicitly out of scope here
-
-Implementation of any stage, any voice render, any screen or audio capture,
-merging, deployment, external publication, and any credential or registry
-change.
+Each: spec → RED gate → Sol implements → Opus reviews the current head SHA →
+green CI → owner decision. The video pipeline does not get a weaker flow than
+`docs/RELEASE-NOTE-WORKFLOW.md`.
