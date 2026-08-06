@@ -37,7 +37,7 @@
             "exclusiveMinimum": 0,
             "maximum": 10.0
           },
-          "walkthrough": {"$ref": "#/$defs/walkthrough"}
+          "walkthrough": {"$ref": "#/$defs/fitWalkthrough"}
         }
       }
     }
@@ -51,6 +51,22 @@
       "type": "array",
       "minItems": 1,
       "items": {"$ref": "#/$defs/step"}
+    },
+    "fitWalkthrough": {
+      "allOf": [
+        {"$ref": "#/$defs/walkthrough"},
+        {
+          "contains": {
+            "type": "object",
+            "required": ["action", "fit"],
+            "properties": {
+              "action": {"const": "hold"},
+              "fit": {"const": "narration"}
+            }
+          },
+          "minContains": 1
+        }
+      ]
     },
     "step": {
       "oneOf": [
@@ -93,7 +109,8 @@
           "properties": {
             "instruction": {"type": "string", "minLength": 1},
             "action": {"const": "hold"},
-            "duration_ms": {"type": "integer", "minimum": 100, "maximum": 5000}
+            "duration_ms": {"type": "integer", "minimum": 100, "maximum": 5000},
+            "fit": {"const": "narration"}
           }
         },
         {

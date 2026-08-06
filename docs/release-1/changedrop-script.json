@@ -19,14 +19,16 @@
       {
         "instruction": "Establish the editor with the game view and HUD visible.",
         "action": "hold",
-        "duration_ms": 4200
+        "duration_ms": 4200,
+        "fit": "narration"
       }
     ],
     "outro_walkthrough": [
       {
         "instruction": "Hold on the completed editor view.",
         "action": "hold",
-        "duration_ms": 4200
+        "duration_ms": 4200,
+        "fit": "narration"
       }
     ]
   },
@@ -73,7 +75,8 @@
         {
           "instruction": "Hold on the aligned resized view.",
           "action": "hold",
-          "duration_ms": 3000
+          "duration_ms": 3000,
+          "fit": "narration"
         }
       ]
     },
@@ -107,7 +110,8 @@
         {
           "instruction": "Hold on the steady demo frame.",
           "action": "hold",
-          "duration_ms": 3000
+          "duration_ms": 3000,
+          "fit": "narration"
         },
         {
           "instruction": "Resume demo playback from the same control.",

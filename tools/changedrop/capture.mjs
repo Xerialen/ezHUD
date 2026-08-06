@@ -100,10 +100,16 @@ function validateWalkthrough(value, at, { setup = false } = {}) {
 			validateSelector(step.selector, label);
 			break;
 		case 'hold':
-			exactObject(step, ['instruction', 'action', 'duration_ms'], label);
+			exactObject(step, step.fit === undefined
+				? ['instruction', 'action', 'duration_ms']
+				: ['instruction', 'action', 'duration_ms', 'fit'], label);
 			if (!Number.isInteger(step.duration_ms) || step.duration_ms < 100 || step.duration_ms > MAX_HOLD_MS) {
 				throw new Error(`${label} hold duration must be between 100 and 5000 ms.`);
 			}
+			if (step.fit !== undefined && step.fit !== 'narration') {
+				throw new Error(`${label} hold fit must be narration.`);
+			}
+			if (setup && step.fit !== undefined) throw new Error(`${label} cannot fit narration during setup.`);
 			break;
 		case 'highlight': {
 			exactObject(step, ['instruction', 'action', 'selector', 'badge', 'crop'], label);
@@ -124,6 +130,14 @@ function validateWalkthrough(value, at, { setup = false } = {}) {
 		default:
 			throw new Error(`${label} has unknown action "${String(step.action)}".`);
 		}
+	}
+}
+
+function assertNarrationPadding(walkthrough, at) {
+	const indices = walkthrough.flatMap((step, index) => step.fit === 'narration' ? [index] : []);
+	if (indices.length === 0) throw new Error(`${at} must contain a narration-fitted hold.`);
+	if (indices.some((index, offset) => offset > 0 && index !== indices[offset - 1] + 1)) {
+		throw new Error(`${at} narration-fitted holds must be contiguous.`);
 	}
 }
 
@@ -175,6 +189,7 @@ export function validateCaptureScript(script) {
 		finiteNumber(segment.estimated_duration_seconds, `Changedrop segment "${segment.id}" estimate`, { positive: true });
 		if (segment.estimated_duration_seconds > 10) throw new Error(`Changedrop segment "${segment.id}" exceeds 10 seconds.`);
 		validateWalkthrough(segment.walkthrough, `Changedrop segment "${segment.id}" walkthrough`);
+		assertNarrationPadding(segment.walkthrough, `Changedrop segment "${segment.id}" walkthrough`);
 	}
 	const first = script.segments[0];
 	const last = script.segments.at(-1);

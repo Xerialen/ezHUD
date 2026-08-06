@@ -146,6 +146,9 @@ test('case 3: each changed surface has one budgeted segment and a keyed walkthro
 			assert.ok(step.instruction.trim(), `${segment.id} has an empty walkthrough instruction`);
 			assert.match(step.action, /^(?:wait-for|resize|click|hold|highlight)$/);
 		}
+		const padding = segment.walkthrough.filter((step) => step.fit === 'narration');
+		assert.ok(padding.length >= 1, `${segment.id} has no narration padding`);
+		assert.ok(padding.every((step) => step.action === 'hold'));
 	}
 	for (const segment of surfaces) {
 		assert.equal(segment.id, segment.surface);
@@ -258,6 +261,13 @@ test('supporting contract: schemas, privacy, private CLI output, input validatio
 	assert.deepEqual(emittedActions, authoredActions);
 	assert.ok(authoringSchema.$defs.step.oneOf.every((branch) => branch.additionalProperties === false));
 	assert.ok(schema.$defs.step.oneOf.every((branch) => branch.additionalProperties === false));
+	assert.equal(authoringSchema.properties.bookends.properties.intro_walkthrough.$ref, '#/$defs/fitWalkthrough');
+	assert.equal(authoringSchema.properties.treatments.items.properties.walkthrough.$ref, '#/$defs/fitWalkthrough');
+	assert.equal(schema.properties.segments.items.properties.walkthrough.$ref, '#/$defs/fitWalkthrough');
+	const authoredHold = authoringSchema.$defs.step.oneOf.find((branch) => branch.properties.action.const === 'hold');
+	const emittedHold = schema.$defs.step.oneOf.find((branch) => branch.properties.action.const === 'hold');
+	assert.equal(authoredHold.properties.fit.const, 'narration');
+	assert.equal(emittedHold.properties.fit.const, 'narration');
 
 	const { summary, authoring } = await renderFixture();
 	const script = authorChangedropScript(summary, authoring, {

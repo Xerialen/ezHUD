@@ -17,12 +17,13 @@ import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
-import { validateCaptureScript } from './capture.mjs';
+import { MAX_HOLD_MS, validateCaptureScript } from './capture.mjs';
 
 const SCRIPT_SCHEMA_VERSION = 'changedrop-script/1';
 const TIMINGS_SCHEMA_VERSION = 'changedrop-timings/1';
 const REQUEST_SCHEMA_VERSION = 'voice-order/1';
 const OUTPUT_SCHEMA_VERSION = 'changedrop-narration/1';
+const FIT_SCHEMA_VERSION = 'changedrop-voice-fit/1';
 const ROOT_VARIABLE = 'EZHUD_CHANGEDROP_ROOT';
 const PROJECT = 'ezhud';
 const VOICE_PROFILE = 'xeri-en-v1';
@@ -57,7 +58,7 @@ const ERROR_POLICIES = Object.freeze({
 	E_TEXT_UNSAFE: Object.freeze({ action: 'script-defect', retry: false }),
 	E_TEXT_TOO_LONG: Object.freeze({ action: 'script-defect', retry: false }),
 	E_OVERRIDE_INVALID: Object.freeze({ action: 'script-defect', retry: false }),
-	E_DURATION_OUT_OF_TOLERANCE: Object.freeze({ action: 'reauthor-segment', retry: false }),
+	E_DURATION_OUT_OF_TOLERANCE: Object.freeze({ action: 'refit-padding', retry: false }),
 	E_REQUEST_ID_CONFLICT: Object.freeze({ action: 'request-builder-bug', retry: false }),
 	E_LOCK_TIMEOUT: Object.freeze({ action: 'retry-identical', retry: true }),
 	E_INTERNAL: Object.freeze({ action: 'retry-identical', retry: true }),
@@ -235,38 +236,125 @@ export function validateVoiceRequest(request) {
 	return privacyChecked(request, 'Voice request');
 }
 
-export function buildVoiceRequests({ script, timings } = {}) {
+function voiceRequest(segment, target) {
+	const effectiveOrder = {
+		schema_version: REQUEST_SCHEMA_VERSION,
+		project: PROJECT,
+		voice_profile: VOICE_PROFILE,
+		mode: 'spoken',
+		style: 'neutral',
+		language: 'en',
+		text: segment.text,
+		delivery: { container: 'wav', sample_rate: 24_000, channels: 1 },
+		...(target ? { target } : {}),
+	};
+	return validateVoiceRequest({
+		schema_version: effectiveOrder.schema_version,
+		request_id: requestIdFor(effectiveOrder),
+		project: effectiveOrder.project,
+		voice_profile: effectiveOrder.voice_profile,
+		mode: effectiveOrder.mode,
+		style: effectiveOrder.style,
+		language: effectiveOrder.language,
+		text: effectiveOrder.text,
+		delivery: effectiveOrder.delivery,
+		...(target ? { target: effectiveOrder.target } : {}),
+	});
+}
+
+function validatedVoiceInputs(script, timings) {
 	validateCaptureScript(script);
 	if (script.schema_version !== SCRIPT_SCHEMA_VERSION) throw new Error(`Changedrop script must use ${SCRIPT_SCHEMA_VERSION}.`);
 	validateTimingReceipt(script, timings);
-	return script.segments.map((segment, index) => {
-		const effectiveOrder = {
-			schema_version: REQUEST_SCHEMA_VERSION,
-			project: PROJECT,
-			voice_profile: VOICE_PROFILE,
-			mode: 'spoken',
-			style: 'neutral',
-			language: 'en',
-			text: segment.text,
-			delivery: { container: 'wav', sample_rate: 24_000, channels: 1 },
-			target: {
-				duration_seconds: quantizedTargetDuration(timings.segments[index].duration_seconds),
-				tolerance_seconds: DURATION_TOLERANCE_SECONDS,
-			},
-		};
-		return validateVoiceRequest({
-			schema_version: effectiveOrder.schema_version,
-			request_id: requestIdFor(effectiveOrder),
-			project: effectiveOrder.project,
-			voice_profile: effectiveOrder.voice_profile,
-			mode: effectiveOrder.mode,
-			style: effectiveOrder.style,
-			language: effectiveOrder.language,
-			text: effectiveOrder.text,
-			delivery: effectiveOrder.delivery,
-			target: effectiveOrder.target,
+}
+
+export function buildMeasurementRequests({ script, timings } = {}) {
+	validatedVoiceInputs(script, timings);
+	return script.segments.map((segment) => voiceRequest(segment, null));
+}
+
+export function buildVoiceRequests({ script, timings } = {}) {
+	validatedVoiceInputs(script, timings);
+	return script.segments.map((segment, index) => voiceRequest(segment, {
+		duration_seconds: quantizedTargetDuration(timings.segments[index].duration_seconds),
+		tolerance_seconds: DURATION_TOLERANCE_SECONDS,
+	}));
+}
+
+function splitPadding(totalMilliseconds) {
+	const count = Math.ceil(totalMilliseconds / MAX_HOLD_MS);
+	const base = Math.floor(totalMilliseconds / count);
+	const remainder = totalMilliseconds % count;
+	const holds = Array.from({ length: count }, (_, index) => base + (index < remainder ? 1 : 0));
+	if (holds.some((duration) => duration < 100 || duration > MAX_HOLD_MS)) {
+		throw new Error('Narration padding cannot be represented by bounded hold actions.');
+	}
+	return holds;
+}
+
+function copiedStep(step) {
+	return { ...step, ...(step.crop ? { crop: { ...step.crop } } : {}) };
+}
+
+export function fitCaptureScript({ script, timings, measurements } = {}) {
+	validatedVoiceInputs(script, timings);
+	if (!Array.isArray(measurements) || measurements.length !== script.segments.length) {
+		throw new Error('Natural narration measurements must contain exactly one entry per segment.');
+	}
+	const fittedScript = {
+		...script,
+		setup: script.setup.map(copiedStep),
+		segments: [],
+	};
+	const fittedSegments = [];
+	for (const [index, segment] of script.segments.entries()) {
+		const measurement = measurements[index];
+		exactObject(measurement, ['id', 'duration_seconds'], `Natural narration measurement ${index + 1}`);
+		if (measurement.id !== segment.id) throw new Error(`Natural narration measurement order is stale at "${segment.id}".`);
+		finiteNumber(measurement.duration_seconds, `Natural narration "${segment.id}" duration`, { positive: true });
+		const paddingIndices = segment.walkthrough.flatMap((step, stepIndex) => step.fit === 'narration' ? [stepIndex] : []);
+		if (paddingIndices.length === 0) throw new Error(`Segment "${segment.id}" has no narration padding hold.`);
+		const previousPaddingMs = paddingIndices.reduce((sum, stepIndex) => sum + segment.walkthrough[stepIndex].duration_ms, 0);
+		const fixedActionSeconds = Number((timings.segments[index].duration_seconds - previousPaddingMs / 1000).toFixed(6));
+		if (fixedActionSeconds < 0) throw new Error(`Measured fixed action time for segment "${segment.id}" is invalid.`);
+		const fittedPaddingMs = Math.round((measurement.duration_seconds - fixedActionSeconds) * 1000);
+		if (fittedPaddingMs < 100) {
+			throw new Error(`Natural narration for segment "${segment.id}" leaves less than 100 ms for padding.`);
+		}
+		const fittedHoldDurationsMs = splitPadding(fittedPaddingMs);
+		const firstPaddingIndex = paddingIndices[0];
+		const paddingIndexSet = new Set(paddingIndices);
+		const paddingInstruction = segment.walkthrough[firstPaddingIndex].instruction;
+		const walkthrough = segment.walkthrough.flatMap((step, stepIndex) => {
+			if (stepIndex === firstPaddingIndex) {
+				return fittedHoldDurationsMs.map((duration_ms) => ({
+					instruction: paddingInstruction,
+					action: 'hold',
+					duration_ms,
+					fit: 'narration',
+				}));
+			}
+			if (paddingIndexSet.has(stepIndex)) return [];
+			return [copiedStep(step)];
 		});
-	});
+		const projectedDurationSeconds = Number((fixedActionSeconds + fittedPaddingMs / 1000).toFixed(6));
+		if (segment.kind === 'surface' && projectedDurationSeconds > 10) {
+			throw new Error(`Fitted segment "${segment.id}" exceeds the 10-second surface budget.`);
+		}
+		fittedScript.segments.push({ ...segment, walkthrough });
+		fittedSegments.push({
+			id: segment.id,
+			natural_duration_seconds: measurement.duration_seconds,
+			measured_window_seconds: timings.segments[index].duration_seconds,
+			fixed_action_seconds: fixedActionSeconds,
+			previous_padding_ms: previousPaddingMs,
+			fitted_padding_ms: fittedPaddingMs,
+			fitted_hold_durations_ms: fittedHoldDurationsMs,
+			projected_duration_seconds: projectedDurationSeconds,
+		});
+	}
+	validateCaptureScript(fittedScript);
+	return privacyChecked({ script: fittedScript, segments: fittedSegments }, 'Changedrop voice fit');
 }
 
 export function policyForError(errorCode, _messageIgnored) {
@@ -276,17 +364,23 @@ export function policyForError(errorCode, _messageIgnored) {
 }
 
 class VoiceOrderFailure extends Error {
-	constructor(errorCode, policy) {
+	constructor(errorCode, policy, { segmentId, request } = {}) {
 		const prerequisite = errorCode === 'E_PROJECT_NOT_ALLOWED'
 			? `Owner must allow project ${PROJECT}.`
 			: errorCode === 'E_PROFILE_UNKNOWN'
 				? `Owner must provide profile ${VOICE_PROFILE}.`
 				: null;
-		super(`Voice order stopped with ${errorCode} (${policy.action}).`);
+		const segment = segmentId ? ` for segment "${segmentId}"` : '';
+		const target = request?.target
+			? `; target ${request.target.duration_seconds.toFixed(3)}s, tolerance ${request.target.tolerance_seconds.toFixed(3)}s`
+			: '; untargeted natural measurement';
+		super(`Voice order${segment} stopped with ${errorCode} (${policy.action})${target}.`);
 		this.name = 'VoiceOrderFailure';
 		this.errorCode = errorCode;
 		this.action = policy.action;
 		this.prerequisite = prerequisite;
+		this.segmentId = segmentId ?? null;
+		this.target = request?.target ? { ...request.target } : null;
 	}
 }
 
@@ -320,11 +414,13 @@ function parseTransportResult(request, transportResult) {
 }
 
 function validateSuccessResult(request, result) {
-	exactObject(result, [
+	const successKeys = [
 		'schema_version', 'status', 'request_id', 'request_hash', 'project', 'voice_profile',
-		'profile_revision', 'pronunciation_profile', 'pronunciation_revision', 'audio', 'target',
+		'profile_revision', 'pronunciation_profile', 'pronunciation_revision', 'audio',
+		...(request.target ? ['target'] : []),
 		'normalized_text', 'normalized_text_sha256', 'engine', 'rendered_at', 'rerendered',
-	], 'Voice success result');
+	];
+	exactObject(result, successKeys, 'Voice success result');
 	if (result.schema_version !== REQUEST_SCHEMA_VERSION || result.request_id !== request.request_id
 		|| !['rendered', 'duplicate'].includes(result.status)) throw new Error('Voice success identity is invalid.');
 	if (result.status === 'duplicate' && result.rerendered !== false) {
@@ -353,12 +449,14 @@ function validateSuccessResult(request, result) {
 		throw new Error('Voice audio result is invalid.');
 	}
 	finiteNumber(result.audio.duration_seconds, 'Voice audio duration', { positive: true });
-	exactObject(result.target, ['duration_seconds', 'tolerance_seconds', 'delta_seconds'], 'Voice result target');
-	if (result.target.duration_seconds !== request.target.duration_seconds
-		|| result.target.tolerance_seconds !== request.target.tolerance_seconds) {
-		throw new Error('Voice service target does not match the measured request target.');
+	if (request.target) {
+		exactObject(result.target, ['duration_seconds', 'tolerance_seconds', 'delta_seconds'], 'Voice result target');
+		if (result.target.duration_seconds !== request.target.duration_seconds
+			|| result.target.tolerance_seconds !== request.target.tolerance_seconds) {
+			throw new Error('Voice service target does not match the measured request target.');
+		}
+		finiteNumber(result.target.delta_seconds, 'Voice target delta');
 	}
-	finiteNumber(result.target.delta_seconds, 'Voice target delta');
 	exactObject(result.engine, ['name', 't3_model', 'cli_sha256'], 'Voice engine result');
 	if (result.engine.name !== 'chatterbox-multilingual' || !/^[0-9a-f]{64}$/.test(result.engine.cli_sha256)) {
 		throw new Error('Voice engine provenance is invalid.');
@@ -369,7 +467,7 @@ function validateSuccessResult(request, result) {
 	return result;
 }
 
-export async function submitWithPolicy(request, transport) {
+export async function submitWithPolicy(request, transport, context = {}) {
 	validateVoiceRequest(request);
 	if (typeof transport !== 'function') throw new Error('Voice transport must be a function.');
 	for (let attempts = 1; attempts <= MAX_IDENTICAL_ATTEMPTS; attempts += 1) {
@@ -378,7 +476,7 @@ export async function submitWithPolicy(request, transport) {
 			return { result: validateSuccessResult(request, parsed.result), attempts };
 		}
 		if (parsed.policy.retry && attempts < MAX_IDENTICAL_ATTEMPTS) continue;
-		throw new VoiceOrderFailure(parsed.result.error_code, parsed.policy);
+		throw new VoiceOrderFailure(parsed.result.error_code, parsed.policy, { ...context, request });
 	}
 	throw new Error('Voice order retry bound is unreachable.');
 }
@@ -386,6 +484,7 @@ export async function submitWithPolicy(request, transport) {
 export function sanitizeVoiceResult({ segment, request, result, basename } = {}) {
 	validateVoiceRequest(request);
 	validateSuccessResult(request, result);
+	if (!request.target) throw new Error('Final narration requires a duration-gated voice result.');
 	if (!segment || typeof segment.id !== 'string' || basename !== `${segment.id}.wav`) {
 		throw new Error('Voice narration basename must derive from its segment id.');
 	}
@@ -410,6 +509,49 @@ export function sanitizeVoiceResult({ segment, request, result, basename } = {})
 		engine: { ...result.engine },
 		rendered_at: result.rendered_at,
 	}, 'Changedrop narration entry');
+}
+
+function contentHash(value) {
+	return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
+}
+
+export function buildFitReceipt({ fitted, script, requests, results } = {}) {
+	if (!fitted || !script || !Array.isArray(requests) || !Array.isArray(results)
+		|| requests.length !== script.segments.length || results.length !== script.segments.length) {
+		throw new Error('Changedrop voice fit receipt inputs are incomplete.');
+	}
+	const segments = fitted.segments.map((fit, index) => {
+		const request = requests[index];
+		const result = validateSuccessResult(request, results[index]);
+		if (request.target) throw new Error('Natural narration measurement requests must not carry a target.');
+		if (fit.id !== script.segments[index].id || result.audio.duration_seconds !== fit.natural_duration_seconds) {
+			throw new Error(`Natural narration fit result is stale at "${fit.id}".`);
+		}
+		return {
+			id: fit.id,
+			kind: script.segments[index].kind,
+			surface: script.segments[index].surface,
+			request_id: result.request_id,
+			request_hash: result.request_hash,
+			status: result.status,
+			rerendered: result.rerendered,
+			audio: { basename: `${fit.id}.wav`, sha256: result.audio.sha256 },
+			natural_duration_seconds: fit.natural_duration_seconds,
+			measured_window_seconds: fit.measured_window_seconds,
+			fixed_action_seconds: fit.fixed_action_seconds,
+			previous_padding_ms: fit.previous_padding_ms,
+			fitted_padding_ms: fit.fitted_padding_ms,
+			fitted_hold_durations_ms: [...fit.fitted_hold_durations_ms],
+			projected_duration_seconds: fit.projected_duration_seconds,
+		};
+	});
+	return privacyChecked({
+		schema_version: FIT_SCHEMA_VERSION,
+		project: PROJECT,
+		voice_profile: VOICE_PROFILE,
+		script: { basename: 'script.json', sha256: contentHash(fitted.script) },
+		segments,
+	}, 'Changedrop voice fit receipt');
 }
 
 function spawnVoiceOrder(request) {
@@ -444,17 +586,23 @@ function parseArguments(argv) {
 	const values = new Map();
 	for (let index = 0; index < argv.length; index += 1) {
 		const name = argv[index];
-		if (!['--script', '--timings', '--out'].includes(name)) throw new Error(`Unknown changedrop voice argument: ${name}`);
+		if (!['--phase', '--script', '--timings', '--out'].includes(name)) throw new Error(`Unknown changedrop voice argument: ${name}`);
 		const value = argv[index + 1];
 		if (!value || value.startsWith('--')) throw new Error(`${name} requires a value.`);
 		if (values.has(name)) throw new Error(`${name} may be supplied only once.`);
 		values.set(name, value);
 		index += 1;
 	}
-	for (const name of ['--script', '--timings', '--out']) {
+	for (const name of ['--phase', '--script', '--timings', '--out']) {
 		if (!values.has(name)) throw new Error(`${name} is required.`);
 	}
-	return { script: values.get('--script'), timings: values.get('--timings'), out: values.get('--out') };
+	if (!['measure', 'gate'].includes(values.get('--phase'))) throw new Error('--phase must be measure or gate.');
+	return {
+		phase: values.get('--phase'),
+		script: values.get('--script'),
+		timings: values.get('--timings'),
+		out: values.get('--out'),
+	};
 }
 
 function pathInsideRoot(root, requested) {
@@ -473,7 +621,7 @@ async function ensurePrivateParents(root, directory) {
 			if (error?.code !== 'EEXIST') throw error;
 		}
 		const metadata = await lstat(cursor);
-		if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error('narration parent is not a private directory');
+		if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error('voice output parent is not a private directory');
 		await chmod(cursor, 0o700);
 	}
 }
@@ -531,37 +679,70 @@ export async function main({
 	} catch {
 		throw new Error('Could not read changedrop voice inputs inside EZHUD_CHANGEDROP_ROOT.');
 	}
-	const requests = buildVoiceRequests({ script, timings });
+	const requests = args.phase === 'measure'
+		? buildMeasurementRequests({ script, timings })
+		: buildVoiceRequests({ script, timings });
 	await ensurePrivateParents(root, path.dirname(output));
 	const staging = `${output}.staging-${process.pid}`;
 	await rm(staging, { recursive: true, force: true });
 	await mkdir(staging, { mode: 0o700 });
 	await chmod(staging, 0o700);
 	try {
-		const segments = [];
-		for (const [index, request] of requests.entries()) {
-			const { result } = await submitWithPolicy(request, transport);
-			const basename = `${script.segments[index].id}.wav`;
-			const bytes = await verifiedAudioBytes(result);
-			const target = path.join(staging, basename);
-			await writeFile(target, bytes, { mode: 0o600 });
-			await chmod(target, 0o600);
-			segments.push(sanitizeVoiceResult({ segment: script.segments[index], request, result, basename }));
+		let outputReceipt;
+		if (args.phase === 'measure') {
+			const results = [];
+			for (const [index, request] of requests.entries()) {
+				const segment = script.segments[index];
+				const { result } = await submitWithPolicy(request, transport, { segmentId: segment.id });
+				const basename = `${segment.id}.wav`;
+				const bytes = await verifiedAudioBytes(result);
+				const audioFile = path.join(staging, basename);
+				await writeFile(audioFile, bytes, { mode: 0o600 });
+				await chmod(audioFile, 0o600);
+				results.push(result);
+			}
+			const fitted = fitCaptureScript({
+				script,
+				timings,
+				measurements: results.map((result, index) => ({
+					id: script.segments[index].id,
+					duration_seconds: result.audio.duration_seconds,
+				})),
+			});
+			outputReceipt = buildFitReceipt({ fitted, script, requests, results });
+			const fittedScriptFile = path.join(staging, 'script.json');
+			const fitManifest = path.join(staging, 'fit.json');
+			await writeFile(fittedScriptFile, `${JSON.stringify(fitted.script, null, 2)}\n`, { mode: 0o600 });
+			await writeFile(fitManifest, `${JSON.stringify(outputReceipt, null, 2)}\n`, { mode: 0o600 });
+			await chmod(fittedScriptFile, 0o600);
+			await chmod(fitManifest, 0o600);
+		} else {
+			const segments = [];
+			for (const [index, request] of requests.entries()) {
+				const segment = script.segments[index];
+				const { result } = await submitWithPolicy(request, transport, { segmentId: segment.id });
+				const basename = `${segment.id}.wav`;
+				const bytes = await verifiedAudioBytes(result);
+				const audioFile = path.join(staging, basename);
+				await writeFile(audioFile, bytes, { mode: 0o600 });
+				await chmod(audioFile, 0o600);
+				segments.push(sanitizeVoiceResult({ segment, request, result, basename }));
+			}
+			outputReceipt = privacyChecked({
+				schema_version: OUTPUT_SCHEMA_VERSION,
+				project: PROJECT,
+				voice_profile: VOICE_PROFILE,
+				segments,
+			}, 'Changedrop narration');
+			const manifest = path.join(staging, 'narration.json');
+			await writeFile(manifest, `${JSON.stringify(outputReceipt, null, 2)}\n`, { mode: 0o600 });
+			await chmod(manifest, 0o600);
 		}
-		const narration = privacyChecked({
-			schema_version: OUTPUT_SCHEMA_VERSION,
-			project: PROJECT,
-			voice_profile: VOICE_PROFILE,
-			segments,
-		}, 'Changedrop narration');
-		const manifest = path.join(staging, 'narration.json');
-		await writeFile(manifest, `${JSON.stringify(narration, null, 2)}\n`, { mode: 0o600 });
-		await chmod(manifest, 0o600);
 		await rm(output, { recursive: true, force: true });
 		await rename(staging, output);
 		await chmod(output, 0o700);
-		stdout(JSON.stringify(narration));
-		return narration;
+		stdout(JSON.stringify(outputReceipt));
+		return outputReceipt;
 	} catch (error) {
 		await rm(staging, { recursive: true, force: true });
 		throw error;
@@ -573,7 +754,7 @@ if (invokedPath === import.meta.url) {
 	main().catch((error) => {
 		if (error instanceof VoiceOrderFailure) {
 			const prerequisite = error.prerequisite ? ` Prerequisite: ${error.prerequisite}` : '';
-			console.error(`changedrop voice: ${error.errorCode} (${error.action}).${prerequisite}`);
+			console.error(`changedrop voice: ${error.message}${prerequisite}`);
 		} else {
 			console.error(`changedrop voice: ${String(error.message ?? error)}`);
 		}

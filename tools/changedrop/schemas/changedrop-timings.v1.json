@@ -131,7 +131,8 @@
           "required": ["action", "duration_ms"],
           "properties": {
             "action": {"const": "hold"},
-            "duration_ms": {"type": "integer", "minimum": 100, "maximum": 5000}
+            "duration_ms": {"type": "integer", "minimum": 100, "maximum": 5000},
+            "fit": {"const": "narration"}
           }
         },
         {

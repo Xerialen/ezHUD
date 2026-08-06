@@ -18,8 +18,8 @@ const ACTIONS = new Set(['wait-for', 'resize', 'click', 'hold', 'highlight']);
 const SELECTOR_PATTERN = /^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\[data-changedrop="[a-z0-9]+(?:-[a-z0-9]+)*"\])$/;
 
 // 2.2 words/s is 132 wpm: a deliberately conservative planning rate near the
-// low end of clear conversational narration. It leaves room for natural pauses;
-// Stage V2 remains authoritative because it checks the measured audio duration.
+// low end of clear conversational narration. It is only an early 10-second
+// budget check; Stage 4 measures natural audio and fits explicit hold padding.
 export const WORDS_PER_SECOND = 2.2;
 
 function exactObject(value, expectedKeys, at) {
@@ -107,10 +107,16 @@ function validateWalkthrough(value, at, { setup = false } = {}) {
 			validateSelector(step.selector, label);
 			break;
 		case 'hold':
-			exactObject(step, ['instruction', 'action', 'duration_ms'], label);
+			exactObject(step, step.fit === undefined
+				? ['instruction', 'action', 'duration_ms']
+				: ['instruction', 'action', 'duration_ms', 'fit'], label);
 			if (!Number.isInteger(step.duration_ms) || step.duration_ms < 100 || step.duration_ms > MAX_HOLD_MS) {
 				throw new Error(`${label} hold duration must be between 100 and 5000 ms.`);
 			}
+			if (step.fit !== undefined && step.fit !== 'narration') {
+				throw new Error(`${label} hold fit must be narration.`);
+			}
+			if (setup && step.fit !== undefined) throw new Error(`${label} cannot fit narration during setup.`);
 			break;
 		case 'highlight': {
 			exactObject(step, ['instruction', 'action', 'selector', 'badge', 'crop'], label);
@@ -134,6 +140,14 @@ function validateWalkthrough(value, at, { setup = false } = {}) {
 	}
 }
 
+function assertNarrationPadding(walkthrough, at) {
+	const indices = walkthrough.flatMap((step, index) => step.fit === 'narration' ? [index] : []);
+	if (indices.length === 0) throw new Error(`${at} must contain a narration-fitted hold.`);
+	if (indices.some((index, offset) => offset > 0 && index !== indices[offset - 1] + 1)) {
+		throw new Error(`${at} narration-fitted holds must be contiguous.`);
+	}
+}
+
 function copyWalkthrough(walkthrough) {
 	return walkthrough.map((step) => ({
 		...step,
@@ -150,6 +164,8 @@ function validateAuthoring(authoring) {
 	exactObject(authoring.bookends, ['intro_walkthrough', 'outro_walkthrough'], 'Changedrop script authoring bookends');
 	validateWalkthrough(authoring.bookends.intro_walkthrough, 'Changedrop intro walkthrough');
 	validateWalkthrough(authoring.bookends.outro_walkthrough, 'Changedrop outro walkthrough');
+	assertNarrationPadding(authoring.bookends.intro_walkthrough, 'Changedrop intro walkthrough');
+	assertNarrationPadding(authoring.bookends.outro_walkthrough, 'Changedrop outro walkthrough');
 	if (!Array.isArray(authoring.treatments)) throw new Error('Changedrop script authoring treatments must be an array.');
 
 	const surfaces = new Set();
@@ -168,6 +184,7 @@ function validateAuthoring(authoring) {
 		}
 		nonEmptyString(treatment.text, `Authored narration for surface "${treatment.surface}"`);
 		validateWalkthrough(treatment.walkthrough, `Authored walkthrough for surface "${treatment.surface}"`);
+		assertNarrationPadding(treatment.walkthrough, `Authored walkthrough for surface "${treatment.surface}"`);
 	}
 	return authoring;
 }

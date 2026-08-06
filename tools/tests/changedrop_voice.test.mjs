@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { buildTimingReceipt } from '../changedrop/capture.mjs';
+import { authorChangedropScript } from '../changedrop/script.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtureDir = path.join(here, 'fixtures', 'changedrop');
@@ -37,6 +38,7 @@ async function inputs() {
 
 function resultFor(request, audioPath, {
 	status = 'rendered', rerendered = true, sha256 = HASH, bytes = 48_044,
+	durationSeconds = request.target?.duration_seconds ?? 3.84,
 } = {}) {
 	return {
 		schema_version: 'voice-order/1',
@@ -56,13 +58,15 @@ function resultFor(request, audioPath, {
 			sample_rate: 24_000,
 			channels: 1,
 			sample_width_bits: 16,
-			duration_seconds: request.target.duration_seconds,
+			duration_seconds: durationSeconds,
 		},
-		target: {
-			duration_seconds: request.target.duration_seconds,
-			tolerance_seconds: request.target.tolerance_seconds,
-			delta_seconds: 0,
-		},
+		...(request.target ? {
+			target: {
+				duration_seconds: request.target.duration_seconds,
+				tolerance_seconds: request.target.tolerance_seconds,
+				delta_seconds: 0,
+			},
+		} : {}),
 		normalized_text: request.text,
 		normalized_text_sha256: HASH,
 		engine: {
@@ -207,24 +211,180 @@ test('review blocker: target duration is quantised to millisecond precision befo
 	assert.throws(() => voice.validateVoiceRequest(overPrecise), /millisecond|three decimal|precision/i);
 });
 
-test('review blocker: release-1 narration is lengthened to measured visual windows without changing holds', async () => {
-	const authoring = JSON.parse(await readFile(path.join(repo, 'docs', 'release-1', 'changedrop-script.json'), 'utf8'));
-	const treatments = Object.fromEntries(authoring.treatments.map((treatment) => [treatment.surface, treatment]));
-	assert.equal(treatments['window-follow'].text,
-		'Resizing the browser now keeps your game view and HUD controls aligned.');
-	assert.equal(treatments['pause-resume'].text,
-		'Pause now holds frames steady, so you can edit the HUD without losing your moment.');
-	assert.deepEqual(treatments['window-follow'].walkthrough
-		.filter((step) => step.action === 'hold').map((step) => step.duration_ms), [500, 3000]);
-	assert.deepEqual(treatments['pause-resume'].walkthrough
-		.filter((step) => step.action === 'hold').map((step) => step.duration_ms), [3000]);
-	const wordCount = (text) => text.trim().split(/\s+/u).length;
-	assert.equal(wordCount(treatments['window-follow'].text), 12);
-	assert.equal(wordCount(treatments['pause-resume'].text), 15);
-	assert.ok(Math.abs(4.98 - (3.08 * 12 / 8)) <= 0.5,
-		'window-follow line does not reconcile with its measured visual window');
-	assert.ok(Math.abs(6.8 - (3.5 * 15 / 8)) <= 0.5,
-		'pause-resume line does not reconcile with its measured visual window');
+test('review blocker: natural measurement fits explicit padding while fixed actions and prose stay unchanged', async () => {
+	assert.ifError(loadError);
+	assert.equal(typeof voice.buildMeasurementRequests, 'function');
+	assert.equal(typeof voice.fitCaptureScript, 'function');
+	const { script, timings } = await inputs();
+	for (const segment of script.segments) {
+		const padding = segment.walkthrough.filter((step) => step.fit === 'narration');
+		assert.ok(padding.length >= 1, `${segment.id} has no explicit narration padding hold`);
+		assert.ok(padding.every((step) => step.action === 'hold'));
+	}
+	const measurementRequests = voice.buildMeasurementRequests({ script, timings });
+	const gateRequests = voice.buildVoiceRequests({ script, timings });
+	assert.equal(measurementRequests.length, script.segments.length);
+	for (const [index, request] of measurementRequests.entries()) {
+		assert.equal('target' in request, false);
+		assert.deepEqual(Object.keys(request), [
+			'schema_version', 'request_id', 'project', 'voice_profile', 'mode', 'style',
+			'language', 'text', 'delivery',
+		]);
+		assert.equal(voice.validateVoiceRequest(request), request);
+		assert.notEqual(request.request_id, gateRequests[index].request_id);
+		assert.doesNotMatch(JSON.stringify(request),
+			/output|reference|model|generation|seed|renderer|extra[_-]?args/i);
+	}
+	const fitted = voice.fitCaptureScript({
+		script,
+		timings,
+		measurements: [
+			{ id: 'intro', duration_seconds: 3.84 },
+			{ id: 'snap-magnet', duration_seconds: 6.134 },
+			{ id: 'outro', duration_seconds: 3.88 },
+		],
+	});
+	assert.deepEqual(fitted.script.segments.map((segment) => segment.text),
+		script.segments.map((segment) => segment.text));
+	assert.deepEqual(fitted.segments.map(({ id, fixed_action_seconds, fitted_padding_ms, fitted_hold_durations_ms }) => ({
+		id, fixed_action_seconds, fitted_padding_ms, fitted_hold_durations_ms,
+	})), [
+		{ id: 'intro', fixed_action_seconds: 0.01, fitted_padding_ms: 3830, fitted_hold_durations_ms: [3830] },
+		{ id: 'snap-magnet', fixed_action_seconds: 0.96, fitted_padding_ms: 5174, fitted_hold_durations_ms: [2587, 2587] },
+		{ id: 'outro', fixed_action_seconds: 0.01, fitted_padding_ms: 3870, fitted_hold_durations_ms: [3870] },
+	]);
+	for (const [index, segment] of fitted.script.segments.entries()) {
+		const originalFixed = script.segments[index].walkthrough.filter((step) => step.fit !== 'narration');
+		const fittedFixed = segment.walkthrough.filter((step) => step.fit !== 'narration');
+		assert.deepEqual(fittedFixed, originalFixed, `${segment.id} changed a fixed visual action`);
+		assert.ok(segment.walkthrough.filter((step) => step.fit === 'narration')
+			.every((step) => step.duration_ms >= 100 && step.duration_ms <= 5000));
+	}
+	assert.throws(() => voice.buildVoiceRequests({ script: fitted.script, timings }), /stale.*capture|action sequence/i);
+
+	const releaseAuthoring = JSON.parse(await readFile(path.join(repo, 'docs', 'release-1', 'changedrop-script.json'), 'utf8'));
+	const releaseScript = authorChangedropScript(await fixture('script-render.json'), releaseAuthoring, {
+		authoringPath: 'docs/release-1/changedrop-script.json',
+	});
+	const releaseTimings = buildTimingReceipt({
+		script: releaseScript,
+		recording: { basename: 'walkthrough.webm', bytes: 1024, duration_seconds: 19.6 },
+		observations: [
+			{ id: 'intro', start_seconds: 0.1, duration_seconds: 4.201, highlights: [] },
+			{
+				id: 'window-follow', start_seconds: 4.4, duration_seconds: 4.813,
+				highlights: [{
+					timestamp_seconds: 6, selector: '#readout', badge: 1,
+					source_basename: 'stills/sources/window-follow-1.png', source_bytes: 512,
+					basename: 'stills/window-follow-1.png', bytes: 640,
+				}],
+			},
+			{
+				id: 'pause-resume', start_seconds: 9.4, duration_seconds: 5.706,
+				highlights: [{
+					timestamp_seconds: 10.5, selector: '#fte-pause', badge: 1,
+					source_basename: 'stills/sources/pause-resume-1.png', source_bytes: 512,
+					basename: 'stills/pause-resume-1.png', bytes: 640,
+				}],
+			},
+			{ id: 'outro', start_seconds: 15.3, duration_seconds: 4.201, highlights: [] },
+		],
+	});
+	const releaseFit = voice.fitCaptureScript({
+		script: releaseScript,
+		timings: releaseTimings,
+		measurements: [
+			{ id: 'intro', duration_seconds: 3.84 },
+			{ id: 'window-follow', duration_seconds: 3.64 },
+			{ id: 'pause-resume', duration_seconds: 7.88 },
+			{ id: 'outro', duration_seconds: 3.88 },
+		],
+	});
+	assert.deepEqual(releaseFit.segments.map(({ id, fixed_action_seconds, fitted_padding_ms, fitted_hold_durations_ms }) => ({
+		id, fixed_action_seconds, fitted_padding_ms, fitted_hold_durations_ms,
+	})), [
+		{ id: 'intro', fixed_action_seconds: 0.001, fitted_padding_ms: 3839, fitted_hold_durations_ms: [3839] },
+		{ id: 'window-follow', fixed_action_seconds: 1.813, fitted_padding_ms: 1827, fitted_hold_durations_ms: [1827] },
+		{ id: 'pause-resume', fixed_action_seconds: 2.706, fitted_padding_ms: 5174, fitted_hold_durations_ms: [2587, 2587] },
+		{ id: 'outro', fixed_action_seconds: 0.001, fitted_padding_ms: 3879, fitted_hold_durations_ms: [3879] },
+	]);
+});
+
+test('review mechanism: measure phase is offline-injectable and writes a closed private fit handoff', async (t) => {
+	assert.ifError(loadError);
+	const { script, timings } = await inputs();
+	const root = await mkdtemp(path.join(path.dirname(repo), '.voice-fit-offline-'));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	await chmod(root, 0o700);
+	await mkdir(path.join(root, 'release', 'run'), { recursive: true, mode: 0o700 });
+	await chmod(path.join(root, 'release'), 0o700);
+	await chmod(path.join(root, 'release', 'run'), 0o700);
+	await writeFile(path.join(root, 'release', 'run', 'script.json'), `${JSON.stringify(script)}\n`, { mode: 0o600 });
+	await writeFile(path.join(root, 'release', 'run', 'timings.json'), `${JSON.stringify(timings)}\n`, { mode: 0o600 });
+	const requests = voice.buildMeasurementRequests({ script, timings });
+	const durations = [3.84, 6.134, 3.88];
+	const results = new Map();
+	for (const [index, request] of requests.entries()) {
+		const bytes = Buffer.from(`offline natural audio ${request.request_id}`);
+		const audioPath = path.join(root, 'release', 'run', `${request.request_id}.source.wav`);
+		await writeFile(audioPath, bytes, { mode: 0o600 });
+		const sha256 = (await import('node:crypto')).createHash('sha256').update(bytes).digest('hex');
+		results.set(request.request_id, resultFor(request, audioPath, {
+			sha256, bytes: bytes.length, durationSeconds: durations[index],
+		}));
+	}
+	const seen = [];
+	let printed = '';
+	const receipt = await voice.main({
+		env: { ...process.env, EZHUD_CHANGEDROP_ROOT: root },
+		argv: [
+			'--phase', 'measure',
+			'--script', 'release/run/script.json',
+			'--timings', 'release/run/timings.json',
+			'--out', 'release/run/fit',
+		],
+		transport: async (request) => {
+			seen.push(structuredClone(request));
+			return { exitCode: 0, stdout: JSON.stringify(results.get(request.request_id)), stderr: '' };
+		},
+		stdout: (line) => { printed += line; },
+	});
+	assert.equal(seen.length, script.segments.length);
+	assert.ok(seen.every((request) => !('target' in request)));
+	assert.equal(printed.includes(root), false);
+	const fitDir = path.join(root, 'release', 'run', 'fit');
+	const fitText = await readFile(path.join(fitDir, 'fit.json'), 'utf8');
+	assert.equal(fitText.includes(root), false);
+	assert.deepEqual(JSON.parse(fitText), receipt);
+	const schema = JSON.parse(await readFile(
+		path.join(repo, 'tools', 'changedrop', 'schemas', 'changedrop-voice-fit.v1.json'), 'utf8'));
+	assert.deepEqual(schemaErrors(receipt, schema), []);
+	assert.equal(schema.properties.segments.items.properties.audio.additionalProperties, false);
+	assert.equal('path' in schema.properties.segments.items.properties.audio.properties, false);
+	assert.deepEqual(Object.keys(receipt.segments[0].audio), ['basename', 'sha256']);
+	const names = await readdir(fitDir);
+	assert.deepEqual(names.sort(), ['fit.json', 'intro.wav', 'outro.wav', 'script.json', 'snap-magnet.wav']);
+	for (const name of names) assert.equal((await stat(path.join(fitDir, name))).mode & 0o777, 0o600);
+});
+
+test('review blocker: duration failure names segment target and tolerance', async () => {
+	assert.ifError(loadError);
+	const { script, timings } = await inputs();
+	const request = voice.buildVoiceRequests({ script, timings })[1];
+	await assert.rejects(
+		voice.submitWithPolicy(request, async () => ({
+			exitCode: 9,
+			stdout: JSON.stringify(failed(request, 'E_DURATION_OUT_OF_TOLERANCE')),
+			stderr: '',
+		}), { segmentId: script.segments[1].id }),
+		(error) => {
+			assert.equal(error.errorCode, 'E_DURATION_OUT_OF_TOLERANCE');
+			assert.match(error.message, /snap-magnet/);
+			assert.match(error.message, new RegExp(request.target.duration_seconds.toFixed(3).replace('.', '\\.'), 'i'));
+			assert.match(error.message, /tolerance[^\n]*0\.500/i);
+			return true;
+		},
+	);
 });
 
 test('case 3: every documented error code maps by code to its specified action', async () => {
@@ -237,7 +397,7 @@ test('case 3: every documented error code maps by code to its specified action',
 		E_TEXT_UNSAFE: 'script-defect',
 		E_TEXT_TOO_LONG: 'script-defect',
 		E_OVERRIDE_INVALID: 'script-defect',
-		E_DURATION_OUT_OF_TOLERANCE: 'reauthor-segment',
+		E_DURATION_OUT_OF_TOLERANCE: 'refit-padding',
 		E_REQUEST_ID_CONFLICT: 'request-builder-bug',
 		E_LOCK_TIMEOUT: 'retry-identical',
 		E_INTERNAL: 'retry-identical',
@@ -318,7 +478,7 @@ test('case 5: duplicate with rerendered false succeeds once and never retries', 
 	);
 });
 
-test('case 6: tier-1 command contract is offline and refuses before any service call', async () => {
+test('case 6: tier-1 command contract is offline and refuses before any service call', async (t) => {
 	assert.ifError(loadError);
 	const packageJson = JSON.parse(await readFile(path.join(repo, 'package.json'), 'utf8'));
 	assert.equal(packageJson.scripts?.['changedrop:voice'], 'node tools/changedrop/voice.mjs');
@@ -329,6 +489,7 @@ test('case 6: tier-1 command contract is offline and refuses before any service 
 	delete env.EZHUD_CHANGEDROP_ROOT;
 	await assert.rejects(execFileAsync(process.execPath, [
 		path.join(repo, 'tools', 'changedrop', 'voice.mjs'),
+		'--phase', 'gate',
 		'--script', 'release-1/run/script.json',
 		'--timings', 'release-1/run/capture/timings.json',
 		'--out', 'release-1/run/narration',
@@ -337,6 +498,21 @@ test('case 6: tier-1 command contract is offline and refuses before any service 
 		assert.match(error.stderr, /EZHUD_CHANGEDROP_ROOT/);
 		return true;
 	});
+	const root = await mkdtemp(path.join(path.dirname(repo), '.voice-phase-offline-'));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	await chmod(root, 0o700);
+	let calls = 0;
+	await assert.rejects(voice.main({
+		env: { ...process.env, EZHUD_CHANGEDROP_ROOT: root },
+		argv: [
+			'--script', 'release/run/script.json',
+			'--timings', 'release/run/timings.json',
+			'--out', 'release/run/narration',
+		],
+		transport: async () => { calls += 1; },
+	}), /--phase is required/i);
+	assert.equal(calls, 0);
+
 });
 
 test('case 7: sanitized narration strips audio.path and validates with basename and sha256 only', async (t) => {
@@ -395,6 +571,7 @@ test('case 7: sanitized narration strips audio.path and validates with basename 
 	const written = await voice.main({
 		env: { ...process.env, EZHUD_CHANGEDROP_ROOT: root },
 		argv: [
+			'--phase', 'gate',
 			'--script', 'release/run/script.json',
 			'--timings', 'release/run/timings.json',
 			'--out', 'release/run/narration',

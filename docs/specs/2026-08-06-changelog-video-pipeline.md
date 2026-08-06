@@ -46,8 +46,10 @@ contract; these are.
 | 1 | value analyzer | `node tools/changedrop/analyze.mjs --release <id> --out <run>/value-summary.json` | `changedrop-value-summary/1` |
 | 2 | script author | `node tools/changedrop/script.mjs --summary <run>/value-summary.json --authoring docs/release-<N>/changedrop-script.json --out <run>/script.json` | `changedrop-script/1` |
 | 3 | capture (first) | `node tools/changedrop/capture.mjs --script <run>/script.json --dist <dist> --out <run>/capture` | `changedrop-timings/1` |
-| 4 | narration order | `node tools/changedrop/voice.mjs --script <run>/script.json --timings <run>/capture/timings.json --out <run>/narration` | `changedrop-narration/1` |
-| 5 | mux | `node tools/changedrop/mux.mjs --capture <run>/capture --narration <run>/narration --out <run>/mux` | `changedrop-manifest/1` |
+| 4a | natural narration measure + padding fit | `node tools/changedrop/voice.mjs --phase measure --script <run>/script.json --timings <run>/capture/timings.json --out <run>/fit` | `changedrop-voice-fit/1` + fitted `changedrop-script/1` |
+| 3b | fitted recapture | `node tools/changedrop/capture.mjs --script <run>/fit/script.json --dist <dist> --out <run>/capture-fitted` | `changedrop-timings/1` |
+| 4b | duration-gated narration order | `node tools/changedrop/voice.mjs --phase gate --script <run>/fit/script.json --timings <run>/capture-fitted/timings.json --out <run>/narration` | `changedrop-narration/1` |
+| 5 | mux | `node tools/changedrop/mux.mjs --capture <run>/capture-fitted --narration <run>/narration --out <run>/mux` | `changedrop-manifest/1` |
 | — | orchestrator | `node tools/changedrop/run.mjs --release <id>` | chains 1–5, writes the manifest |
 
 Schemas are committed under `tools/changedrop/schemas/<name>.v1.json`. Every
@@ -68,6 +70,11 @@ $EZHUD_CHANGEDROP_ROOT/<release>/<run-id>/
   capture/walkthrough.webm
   capture/timings.json
   capture/stills/<surface>.png
+  fit/fit.json
+  fit/script.json
+  fit/<segment-id>.wav
+  capture-fitted/walkthrough.webm
+  capture-fitted/timings.json
   narration/<segment-id>.wav
   mux/changedrop.mp4
   manifest.json
@@ -136,18 +143,16 @@ Stage 2 validates and copies those structured steps into `changedrop-script/1`.
   walkthrough to host unrelated narration. Release 1 holds each fixed bookend
   for 4.2 seconds: the mandated intro cannot be shortened, and its independently
   measured 3.840-second render fits that hold within Stage 4's 0.5-second
-  tolerance. The old 3.2-second holds are deliberately retired. Release 1 keeps
-  the feature walkthrough holds unchanged because they make the resized view
-  and steady paused frame legible. Instead, the two terse feature lines are
-  deliberately lengthened from 8 words to 12 and 15 words. Applied to the
-  owner's natural-render probes (3.08 seconds and roughly 3.5 seconds), that
-  projects to 4.62 and 6.56 seconds against the observed 4.98- and 6.80-second
-  visual windows. Both projected gaps fit the unchanged 0.5-second gate; V2
-  remains the authoritative check after a fresh Stage 3 capture and owner-run
-  order.
+  tolerance. The old 3.2-second holds are deliberately retired. Each segment
+  identifies at least one contiguous `hold` with `fit: "narration"`. This is
+  generated padding, not a claim about speaking rate; other holds and every
+  resize, click, wait and highlight remain fixed visual actions. A fitted total
+  above the five-second per-hold bound is split into contiguous bounded holds.
 - **S2** one segment per changed UI surface, **≤ 10.0 s per surface**, estimated
   at authoring time from a documented words-per-second constant and re-checked
-  against real audio in V2.
+  against real audio in V2. The estimate is only an early budget check. Live
+  observations ranged from 1.82 to 3.30 words/second, so word count is never
+  used to fit a narration window.
 - **S3** no empty segment, no duplicated segment text.
 - Tone — personal, friendly, before/after/why, no filler — is reviewed as prose.
 
@@ -185,9 +190,27 @@ source and annotated stills; its human instruction is never rendered.
   structure and a two-second per-segment tolerance, never bytes. Two seconds
   admits real engine-readback jitter while still catching a lost wait or hold.
 
-### Stage 4 — narration order (`changedrop-narration/1`)
+### Stage 4 — natural measure, padding fit, then gated narration
 
-Transport: `voice-order submit --wait`, one order per segment.
+Transport is always `voice-order submit --wait`, one ordered request per
+segment. Stage 4 has two explicit phases around a real fitted recapture:
+
+1. `--phase measure` submits each segment **without `target`**. The service's
+   verified WAV duration is the natural measurement; no word-rate estimate is
+   consulted.
+2. For each segment, fixed action time is its measured Stage 3 duration minus
+   the explicitly marked narration-padding holds. The fitted padding is
+   `natural duration - fixed action time`, rounded to integer milliseconds.
+   Prose and fixed actions are byte-for-byte unchanged. Each hold remains
+   between 100 and 5,000 ms; totals above 5,000 ms are split evenly across
+   contiguous bounded holds. The private `changedrop-voice-fit/1` receipt stores
+   the calculation, safe request/audio hashes, and a fitted `script.json`.
+3. Stage 3 captures that fitted script for real. This preserves capture-first:
+   app-driven resize/click/wait timing is observed, never predicted, and only
+   explicit padding was changed.
+4. `--phase gate` orders the same narration again, now with the fitted capture's
+   measured target. Sampling can drift; the existing 0.5-second tolerance
+   absorbs small drift and remains the fail-closed gate. It is not widened.
 
 Fixed fields: `schema_version: "voice-order/1"`, `project: "ezhud"`,
 `voice_profile: "xeri-en-v1"`, `mode: "spoken"`, `style: "neutral"`,
@@ -197,7 +220,7 @@ Fixed fields: `schema_version: "voice-order/1"`, `project: "ezhud"`,
 the measured target is rounded to millisecond precision (at most three decimal
 places). This removes irrelevant capture-clock noise from ids and avoids a
 known service misclassification of over-precise out-of-tolerance targets;
-`E_DURATION_OUT_OF_TOLERANCE` still remains the authoritative re-author gate.
+`E_DURATION_OUT_OF_TOLERANCE` still remains the authoritative refit gate.
 Half a second admits normal phrase cadence without masking a segment-sized
 mismatch. The service verifies the rendered WAV itself and fails closed; the
 pipeline does not second-guess it.
@@ -215,22 +238,27 @@ with `rerendered: false` is a normal success and must not trigger a retry loop.
 | `E_PROJECT_NOT_ALLOWED`, `E_PROFILE_UNKNOWN` (3) | **Stop the run before rendering.** Record the prerequisite (§6). Owner/Terra action; never retried, never routed around, never substituted with another voice. |
 | `E_SCHEMA_INVALID`, `E_UNKNOWN_FIELD` (2) | Request-builder bug; fix the builder. |
 | `E_TEXT_UNSAFE`, `E_TEXT_TOO_LONG`, `E_OVERRIDE_INVALID` (4) | Script defect; return to stage 2. Never auto-trim. |
-| `E_DURATION_OUT_OF_TOLERANCE` (9) | Re-author that segment to fit measured time, then a **new** `request_id`. |
+| `E_DURATION_OUT_OF_TOLERANCE` (9) | Re-run natural measurement and padding fit for the named segment, then recapture and use a **new** `request_id`. The error names segment, target and tolerance. |
 | `E_REQUEST_ID_CONFLICT` (5) | Effective order changed under a reused id — builder bug. |
 | `E_LOCK_TIMEOUT` (6), `E_INTERNAL` (10) | Bounded retry of the identical order; exact retries are safe by design. |
 | `E_RENDER_FAILED` (7), `E_ARTIFACT_INVALID` (8) | Stop and report; no blind retry. |
 
-- **V1 (offline)** the built request validates against v1, carries none of the
-  forbidden fields, quantises the measured target to millisecond precision
-  before deriving `request_id`, and has both duration fields or neither. Tier 1,
+- **V1 (offline)** both request forms validate against v1 and carry none of the
+  forbidden fields. Measure requests omit `target`; gate requests quantise the
+  fitted capture target to millisecond precision before deriving `request_id`
+  and carry both duration fields. The pure fitter changes only marked padding,
+  splits long padding into bounded holds, and makes old timings stale. Tier 1,
   fixtures, no service call.
+- **V1F (operator error)** any failed order names its segment. A duration-gate
+  failure also prints the exact target and tolerance without exposing the
+  service message or private paths.
 - **V2 (online)** each narration WAV's measured duration is within tolerance of
   its measured capture segment, and the ≤ 10 s per surface budget holds against
   **real audio**.
 
 ### Stage 5 — mux (`changedrop-manifest/1`)
 
-ffmpeg muxes narration onto the recording aligned to `timings.json`, and runs
+ffmpeg muxes narration onto the fitted recapture aligned to its `timings.json`, and runs
 **only after valid voice output exists**. No narration ⇒ no mux.
 
 - **M1** output duration equals capture duration within tolerance.
