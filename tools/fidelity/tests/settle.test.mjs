@@ -106,12 +106,37 @@ test('the layout is recalculated last — ezHUD caches parsed enums until it is'
 test('config comments and blank lines are not sent to the engine', async () => {
 	const bridge = stubBridge();
 	await settle(bridge, { freeze: [], configText: '// a comment\n\n   \nhud_health_pos_x 10\n' });
-	assert.deepEqual(bridge.sent.filter((l) => l !== 'hud_recalculate'), ['set hud_health_pos_x 10']);
+	assert.deepEqual(bridge.sent.filter((l) => l !== 'hud_recalculate'), ['hud_health_pos_x 10']);
 });
 
-test('a config line that already says set is not double-prefixed', async () => {
+// A real ezQuake config is not a list of `set` lines. The owner's own
+// config.cfg is 1575 lines of which 341 are `alias`, 80 are `bind`, 46 are
+// `set_tp` and the overwhelming majority of the cvar lines are bare
+// `name "value"` pairs. Prefixing every one of them with `set` turned `bind`
+// and `alias` lines into nonsense, and prefixing was never needed: a bare
+// cvar name and value assigns in both engines.
+test('config lines are sent verbatim — a bare cvar pair is not rewritten', async () => {
 	const bridge = stubBridge();
-	await settle(bridge, { freeze: [], configText: 'set hud_health_pos_x 10\n' });
-	assert.ok(bridge.sent.includes('set hud_health_pos_x 10'));
+	await settle(bridge, { freeze: [], configText: 'hud_health_pos_x   "35.34293"\n' });
+	assert.ok(bridge.sent.includes('hud_health_pos_x   "35.34293"'));
+	assert.equal(bridge.sent.some((l) => l.startsWith('set ')), false);
+});
+
+test('a config line that already says set is passed through unchanged', async () => {
+	const bridge = stubBridge();
+	await settle(bridge, { freeze: [], configText: 'set cl_hud 0\n' });
+	assert.ok(bridge.sent.includes('set cl_hud 0'));
 	assert.equal(bridge.sent.some((l) => l.startsWith('set set ')), false);
+});
+
+test('non-cvar config commands reach both engines intact rather than as junk cvars', async () => {
+	const bridge = stubBridge();
+	await settle(bridge, {
+		freeze: [],
+		configText: 'alias +foo "echo bar"\nbind SPACE "+jump"\nset_tp name "x"\n',
+	});
+	assert.ok(bridge.sent.includes('alias +foo "echo bar"'));
+	assert.ok(bridge.sent.includes('bind SPACE "+jump"'));
+	assert.ok(bridge.sent.includes('set_tp name "x"'));
+	assert.equal(bridge.sent.some((l) => /^set (alias|bind|set_tp)\b/.test(l)), false);
 });

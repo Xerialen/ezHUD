@@ -75,10 +75,17 @@ export async function settle(bridge, { configText, freeze, consoleSize }) {
 		await bridge.cmd(`set vid_conheight ${consoleSize.height}`).catch(() => {});
 	}
 	if (configText) {
+		// Verbatim, deliberately. A real ezQuake config is not a list of `set`
+		// lines: the owner's own config.cfg is 1575 lines of which 341 are
+		// `alias`, 80 `bind`, 46 `set_tp`, and nearly every cvar line is a bare
+		// `name "value"` pair. Prefixing `set` turned the command lines into
+		// junk cvar writes, and it bought nothing -- a bare name and value
+		// assigns in both engines. Whatever a line means, both engines are
+		// handed the same one and disagree or agree on their own merits.
 		for (const raw of configText.split('\n')) {
 			const line = raw.trim();
 			if (!line || line.startsWith('//')) continue;
-			await bridge.cmd(line.startsWith('set ') ? line : `set ${line}`).catch(() => {});
+			await bridge.cmd(line).catch(() => {});
 		}
 	}
 	await bridge.cmd('hud_recalculate').catch(() => {});
@@ -123,8 +130,14 @@ async function fileDigest(file) {
 function repoRevision() {
 	try {
 		const rev = execFileSync('git', ['-C', REPO_DIR, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
-		const dirty = execFileSync('git', ['-C', REPO_DIR, 'status', '--porcelain'], { encoding: 'utf8' }).trim();
-		return dirty ? `${rev} (working tree dirty)` : rev;
+		// Tracked files only. The run writes its own report into the tree, so an
+		// untracked-file check would mark every report "dirty" including because
+		// of itself -- which tells the reader nothing about whether the code that
+		// produced the verdicts was modified. That is the question this line
+		// exists to answer.
+		const dirty = execFileSync('git',
+			['-C', REPO_DIR, 'status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8' }).trim();
+		return dirty ? `${rev} (tracked files modified)` : rev;
 	} catch {
 		return 'unknown';
 	}
@@ -175,6 +188,11 @@ export async function measure({
 			? await fileDigest(process.env.EZHUD_FIDELITY_DEMO)
 			: 'whatever each engine was already playing',
 		'freeze point': freeze.length ? freeze.join(' ; ') : 'not frozen',
+		// Evidence that the freeze took, on each side separately. Issuing the
+		// command is not the same as the engine being frozen, and an unfrozen
+		// engine makes every content-derived size a coin flip.
+		'demo speed (reference / preview)':
+			`${first.reference?.demo?.cl_demospeed ?? 'not reported'} / ${first.preview?.demo?.cl_demospeed ?? 'not reported'}`,
 		'console size': result.comparable ? `${result.console.width}x${result.console.height}` : 'mismatched',
 		'console size requested': consoleSize
 			? `${consoleSize.width}x${consoleSize.height}` + (consoleFailures.length ? ' — NOT HONOURED' : '')

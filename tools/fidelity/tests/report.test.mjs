@@ -99,6 +99,12 @@ test('the report refuses to generalize beyond its inputs, in words', () => {
 	assert.match(markdown, /`texture` and `colour` are not measured/i);
 });
 
+test('the report states that it cannot prove the two engines share a demo frame', () => {
+	const markdown = render(compareStates({ reference: state([]), preview: state([]) }));
+	assert.match(markdown, /cannot prove the two engines sit on the same demo frame/i);
+	assert.match(markdown, /as a question, not a verdict/i);
+});
+
 test('an incomparable pair prints no element table at all', () => {
 	const result = compareStates({
 		reference: state([el('health', { x: 1, y: 1, w: 1, h: 1 })], 640),

@@ -97,6 +97,14 @@ export function renderReport({ result, carried = [], provenance = {}, date }) {
 		'renderers is not a verdict this run can make honestly, so those dimensions are',
 		'carried as dated, sourced claims and go stale on their own when the element',
 		'they describe stops being drawn.',
+		'',
+		'**The run cannot prove the two engines sit on the same demo frame.** Neither',
+		'bridge reports a demo time, so what is established is weaker: both engines were',
+		'frozen (the provenance table records each one\'s demo speed) and two consecutive',
+		'reads judged identically. Elements whose size tracks their content — score and',
+		'frag digits, ping, item timers — can therefore differ by a frame\'s worth of game',
+		'state rather than by a real fidelity gap. Read a `size` divergence on a',
+		'content-derived element as a question, not a verdict.',
 	].join('\n');
 
 	const header = result.comparable
