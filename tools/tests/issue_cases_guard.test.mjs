@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
 	GUARD_COMMENT_MARKER,
 	decideIssueCasesGuard,
+	main,
 } from '../ci/issue_cases_guard.mjs';
 
 // --- Case 1: enhancement without Cases adds label and comment ---
@@ -141,8 +142,61 @@ test('guard comment references the test-plan convention doc', () => {
 		body: 'No plan.',
 		labels: ['enhancement'],
 		hasGuardComment: false,
+		repo: 'Xerialen/ezHUD',
 	});
 
 	assert.match(actions.comment, /docs\/TESTING\.md/);
 	assert.match(actions.comment, /Test-plan convention/);
+});
+
+// --- Integration: main() boundary with workflow-produced encoding ---
+
+const ISSUE_WITH_CASES = [
+	'Some description.',
+	'',
+	'## Cases',
+	'',
+	'1. operate → result',
+].join('\n');
+
+const BASE_ENV = { REPO: 'o/r', ISSUE_NUMBER: '1', GITHUB_TOKEN: 't' };
+
+function stubFetch(commentPages = [[]]) {
+	const calls = [];
+	const realFetch = globalThis.fetch;
+	globalThis.fetch = async (url, options = {}) => {
+		const method = options.method ?? 'GET';
+		calls.push({ method, url: String(url) });
+		if (method === 'GET' && String(url).includes('/comments')) {
+			const pageMatch = /[?&]page=(\d+)/.exec(String(url));
+			const index = pageMatch ? Number(pageMatch[1]) - 1 : 0;
+			const body = commentPages[index] ?? [];
+			const headers = new globalThis.Headers();
+			if (index + 1 < commentPages.length) {
+				headers.set('link',
+					`<https://api.github.com/repos/o/r/issues/1/comments?per_page=100&page=${index + 2}>; rel="next"`);
+			}
+			return new Response(JSON.stringify(body), { status: 200, headers });
+		}
+		return new Response('{}', { status: 200, headers: new globalThis.Headers() });
+	};
+	return { calls, restore: () => { globalThis.fetch = realFetch; } };
+}
+
+test('main() with raw ISSUE_BODY (workflow github.event.issue.body) recognises existing Cases', async () => {
+	// After the fix: ISSUE_BODY is passed raw, matching cases-gate.yml and
+	// release-note-gate.yml convention. An enhancement issue with ## Cases
+	// must produce no actions.
+	const stub = stubFetch();
+	try {
+		const actions = await main({
+			...BASE_ENV,
+			ISSUE_BODY: ISSUE_WITH_CASES,
+			ISSUE_LABELS: JSON.stringify(['enhancement']),
+		});
+		assert.deepEqual(actions, {},
+			`guard acted on an issue that already has Cases: ${JSON.stringify(actions)}`);
+	} finally {
+		stub.restore();
+	}
 });

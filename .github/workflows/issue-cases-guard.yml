@@ -20,7 +20,7 @@ jobs:
       - name: Enforce Cases on enhancement issues
         run: node tools/ci/issue_cases_guard.mjs
         env:
-          ISSUE_BODY: ${{ toJSON(github.event.issue.body) }}
+          ISSUE_BODY: ${{ github.event.issue.body || '' }}
           ISSUE_LABELS: ${{ toJSON(github.event.issue.labels.*.name) }}
           REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}

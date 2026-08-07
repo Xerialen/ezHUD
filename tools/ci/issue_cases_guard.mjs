@@ -9,19 +9,21 @@ import { pathToFileURL } from 'node:url';
 import { CASES_HEADING_RE } from './cases_gate.mjs';
 
 export const GUARD_COMMENT_MARKER = '<!-- needs-cases-guard -->';
-export const NEEDS_CASES_COMMENT = [
-	GUARD_COMMENT_MARKER,
-	'This enhancement needs its test plan at the source. Please add this section to the issue body:',
-	'',
-	'```markdown',
-	'## Cases',
-	'',
-	'1. <operate the control/feature> → <observable result: engine cvar readback, export line, or pixel change>',
-	'```',
-	'',
-	'See [docs/TESTING.md](../blob/main/docs/TESTING.md), '
-		+ '**Test-plan convention: issue → Cases → PR**.',
-].join('\n');
+export function needsCasesComment(repo = 'Xerialen/ezHUD') {
+	return [
+		GUARD_COMMENT_MARKER,
+		'This enhancement needs its test plan at the source. Please add this section to the issue body:',
+		'',
+		'```markdown',
+		'## Cases',
+		'',
+		'1. <operate the control/feature> → <observable result: engine cvar readback, export line, or pixel change>',
+		'```',
+		'',
+		`See [docs/TESTING.md](https://github.com/${repo}/blob/main/docs/TESTING.md), `
+			+ '**Test-plan convention: issue → Cases → PR**.',
+	].join('\n');
+}
 
 function normalizedLabelNames(labels) {
 	return (Array.isArray(labels) ? labels : [])
@@ -44,7 +46,7 @@ function normalizedLabelNames(labels) {
  * Non-enhancement:           only clean up stale `needs-cases` label.
  * Idempotent:                a second run sees the same actions as the first.
  */
-export function decideIssueCasesGuard({ body = '', labels = [], hasGuardComment = false } = {}) {
+export function decideIssueCasesGuard({ body = '', labels = [], hasGuardComment = false, repo = 'Xerialen/ezHUD' } = {}) {
 	const names = normalizedLabelNames(labels);
 	const isEnhancement = names.includes('enhancement');
 	const isIdea = names.includes('idea');
@@ -69,7 +71,7 @@ export function decideIssueCasesGuard({ body = '', labels = [], hasGuardComment 
 	// Enhancement without Cases — add label and/or comment as needed.
 	const actions = {};
 	if (!needsCases) actions.addLabel = 'needs-cases';
-	if (!hasGuardComment) actions.comment = NEEDS_CASES_COMMENT;
+	if (!hasGuardComment) actions.comment = needsCasesComment(repo);
 	return actions;
 }
 
@@ -152,6 +154,7 @@ export async function main(env = process.env) {
 		body,
 		labels,
 		hasGuardComment: priorComment != null,
+		repo,
 	});
 	const issueUrl = `https://api.github.com/repos/${repo}/issues/${issueNumber}`;
 
