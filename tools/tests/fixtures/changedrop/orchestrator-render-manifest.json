@@ -1,0 +1,87 @@
+{
+  "schema_version": "changedrop-manifest/1",
+  "release": "release-1",
+  "run_id": "synthetic-run",
+  "source_note": {
+    "path": "docs/release-1/NOTES.md",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "decision": "render",
+  "blocked_reason": null,
+  "segments": [
+    {
+      "id": "intro",
+      "surface": null,
+      "script_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "measured_start_s": 0.4,
+      "measured_duration_s": 4.088,
+      "narration": {
+        "basename": "intro.wav",
+        "sha256": "2111111111111111111111111111111111111111111111111111111111111111",
+        "duration_s": 3.84,
+        "voice_profile": "xeri-en-v1",
+        "profile_revision": 7,
+        "request_status": "rendered",
+        "engine": {
+          "name": "chatterbox-multilingual",
+          "t3_model": "synthetic-t3",
+          "cli_sha256": "3111111111111111111111111111111111111111111111111111111111111111"
+        }
+      }
+    },
+    {
+      "id": "snap-magnet",
+      "surface": "snap-magnet",
+      "script_sha256": "1222222222222222222222222222222222222222222222222222222222222222",
+      "measured_start_s": 4.6,
+      "measured_duration_s": 6.7,
+      "narration": {
+        "basename": "snap-magnet.wav",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "duration_s": 6.134,
+        "voice_profile": "xeri-en-v1",
+        "profile_revision": 7,
+        "request_status": "duplicate",
+        "engine": {
+          "name": "chatterbox-multilingual",
+          "t3_model": "synthetic-t3",
+          "cli_sha256": "3222222222222222222222222222222222222222222222222222222222222222"
+        }
+      }
+    },
+    {
+      "id": "outro",
+      "surface": null,
+      "script_sha256": "1333333333333333333333333333333333333333333333333333333333333333",
+      "measured_start_s": 11.4,
+      "measured_duration_s": 4.131,
+      "narration": {
+        "basename": "outro.wav",
+        "sha256": "2333333333333333333333333333333333333333333333333333333333333333",
+        "duration_s": 3.88,
+        "voice_profile": "xeri-en-v1",
+        "profile_revision": 7,
+        "request_status": "rendered",
+        "engine": {
+          "name": "chatterbox-multilingual",
+          "t3_model": "synthetic-t3",
+          "cli_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+        }
+      }
+    }
+  ],
+  "capture": {
+    "basename": "walkthrough.webm",
+    "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+    "duration_s": 15.7
+  },
+  "output": {
+    "basename": "changedrop.mp4",
+    "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+    "duration_s": 15.716
+  },
+  "publish": {
+    "state": "withheld",
+    "destination": null
+  }
+}

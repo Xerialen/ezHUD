@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "changedrop-manifest/1",
-  "title": "ezHUD changedrop mux manifest v1",
+  "title": "ezHUD changedrop pipeline manifest v1",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -33,7 +33,7 @@
     "blocked_reason": {"type": ["string", "null"], "minLength": 1},
     "segments": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 0,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -89,7 +89,7 @@
       }
     },
     "capture": {
-      "type": "object",
+      "type": ["object", "null"],
       "additionalProperties": false,
       "required": ["basename", "sha256", "duration_s"],
       "properties": {
@@ -99,7 +99,7 @@
       }
     },
     "output": {
-      "type": "object",
+      "type": ["object", "null"],
       "additionalProperties": false,
       "required": ["basename", "sha256", "duration_s"],
       "properties": {

@@ -531,15 +531,24 @@ function validateSuccessResult(request, result) {
 	return result;
 }
 
-export async function submitWithPolicy(request, transport, context = {}) {
+export async function submitWithPolicy(
+	request,
+	transport,
+	context = {},
+	maxIdenticalAttempts = MAX_IDENTICAL_ATTEMPTS,
+) {
 	validateVoiceRequest(request);
 	if (typeof transport !== 'function') throw new Error('Voice transport must be a function.');
-	for (let attempts = 1; attempts <= MAX_IDENTICAL_ATTEMPTS; attempts += 1) {
+	if (!Number.isInteger(maxIdenticalAttempts) || maxIdenticalAttempts < 1
+		|| maxIdenticalAttempts > MAX_IDENTICAL_ATTEMPTS) {
+		throw new Error(`Voice identical-attempt bound must be between 1 and ${MAX_IDENTICAL_ATTEMPTS}.`);
+	}
+	for (let attempts = 1; attempts <= maxIdenticalAttempts; attempts += 1) {
 		const parsed = parseTransportResult(request, await transport(request));
 		if (parsed.result.status !== 'failed') {
 			return { result: validateSuccessResult(request, parsed.result), attempts };
 		}
-		if (parsed.policy.retry && attempts < MAX_IDENTICAL_ATTEMPTS) continue;
+		if (parsed.policy.retry && attempts < maxIdenticalAttempts) continue;
 		throw new VoiceOrderFailure(parsed.result.error_code, parsed.policy, { ...context, request });
 	}
 	throw new Error('Voice order retry bound is unreachable.');
@@ -788,6 +797,7 @@ export async function main({
 	argv = process.argv.slice(2),
 	transport = spawnVoiceOrder,
 	stdout = console.log,
+	maxAttempts = MAX_IDENTICAL_ATTEMPTS,
 } = {}) {
 	if (!env[ROOT_VARIABLE]?.trim()) throw new Error(`${ROOT_VARIABLE} is required.`);
 	const root = path.resolve(env[ROOT_VARIABLE]);
@@ -849,7 +859,8 @@ export async function main({
 		const narrationSegments = [];
 		for (const [index, request] of requests.entries()) {
 			const segment = script.segments[index];
-			const { result } = await submitWithPolicy(request, transport, { segmentId: segment.id });
+			const { result } = await submitWithPolicy(
+				request, transport, { segmentId: segment.id }, maxAttempts);
 			const basename = `${segment.id}.wav`;
 			const delivered = await verifiedDeliveredAudio(result);
 			const audioFile = path.join(staging, basename);

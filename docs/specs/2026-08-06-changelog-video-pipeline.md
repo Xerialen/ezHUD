@@ -284,6 +284,31 @@ anchored to the original content clock.
 - **M3** every segment's narration is the natural measure-phase artifact,
   matched by SHA-256; a re-rendered or substituted file fails the run.
 
+### Stage 6 — orchestrator (`changedrop-manifest/1`)
+
+The orchestrator owns `$EZHUD_CHANGEDROP_ROOT/<release>/<run-id>` before any
+stage runs and supplies every handoff path beneath that one directory. A run id
+is generated unless the operator supplies an opaque `--run-id`; `--dist`
+defaults to `dist`. The data root must be owner-only, outside the repository,
+and the owned release/run directories may not be symbolic links. No stage
+discovers or relocates the layout.
+
+It runs analyze → script → initial capture → natural narration delivery and fit
+→ fitted capture → local narration validation → mux. A skip decision stops
+after analyze and still writes a terminal manifest with the recorded reason,
+no segments, and null capture/output artifacts. A failed run writes the same
+privacy-safe terminal shape with `decision: "blocked"` before returning a
+non-zero result.
+
+Only `E_LOCK_TIMEOUT` and `E_INTERNAL` are retryable. In orchestrated operation
+the voice command performs one attempt and the orchestrator permits at most
+three identical stage attempts, reusing the same script, timings, output path,
+and therefore the same content-derived request ids. No capture, local
+validation, mux, or other voice error is retried. Before accepting a completed
+manifest, the orchestrator cross-checks every segment's measured start and
+duration against the fitted timing handoff and its narration hash, duration,
+and API-supplied `profile_revision` against the locally validated narration.
+
 ## 5. Manifest (`changedrop-manifest/1`)
 
 ```json
@@ -307,6 +332,10 @@ anchored to the original content clock.
   "publish": { "state": "withheld", "destination": null }
 }
 ```
+
+The object above is the render shape. For `skip` or `blocked`, `segments` is
+empty, `capture` and `output` are null, and `blocked_reason` carries the recorded
+skip or stop reason; publication remains withheld.
 
 `engine.name/t3_model/cli_sha256` and `profile_revision` are provenance the API
 exposes; they are recorded as provenance and are never presented as
