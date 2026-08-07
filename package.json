@@ -9,6 +9,7 @@
     "changedrop:voice": "node tools/changedrop/voice.mjs",
     "changedrop:mux": "node tools/changedrop/mux.mjs",
     "changedrop:run": "node tools/changedrop/run.mjs",
+    "changedrop:review": "node tools/changedrop/review.mjs",
     "test:tier1": "bash tools/tests/tier1.sh",
     "test:tier2": "bash tools/tests/tier2.sh",
     "test:tier2:js": "node tools/tests/tier2_bridge.test.js",

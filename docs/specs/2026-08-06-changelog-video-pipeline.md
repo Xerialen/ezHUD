@@ -57,7 +57,7 @@ Schemas are committed under `tools/changedrop/schemas/<name>.v1.json`. Every
 stage validates its input against the previous stage's schema and refuses to
 guess at a malformed handoff.
 
-Wired as `npm run changedrop:analyze|script|capture|voice|mux|run`.
+Wired as `npm run changedrop:analyze|script|capture|voice|mux|run|review`.
 
 ## 3. Artifact locations, and the privacy line
 
