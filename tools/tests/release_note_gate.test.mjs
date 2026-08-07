@@ -20,7 +20,7 @@ const VALID_PAYLOAD = {
 };
 
 function notes(payload = VALID_PAYLOAD, evidence = 'img/proof.png') {
-	return `# Player change\n\nA short player-facing summary.\n\n## Features\n\n### A visible improvement\nPlayers can use the changed control more reliably. The clearer state saves time while editing.\n\nEvidence: ${evidence}\n\n## Discord payload\n\n\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\`\n`;
+	return `# Player change\n\nA short player-facing summary.\n\n## Features\n\n### A visible improvement\nPlayers can use the changed control more reliably. The clearer state saves time while editing.\n\nBefore: The changed control was unreliable.\nAfter: The changed control is clear and dependable.\nValue: Players spend less time correcting state.\nEvidence: ${evidence}\n\n## Discord payload\n\n\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\`\n`;
 }
 
 function fixture({ note = notes(), images = ['img/proof.png'] } = {}) {
@@ -54,6 +54,60 @@ test('case 1: a linked release PR with valid notes, evidence and payload passes'
 	assert.equal(result.ok, true);
 	assert.equal(result.notice, null);
 	assert.match(result.reason, /docs\/change\/NOTES\.md/);
+});
+
+test('mandatory value triple: all three fields on every feature pass for both apply labels', (t) => {
+	const secondFeature = `### A second improvement\nBefore: The second control was hidden.\nAfter: The second control is visible.\nValue: Players find it immediately.\nEvidence: img/proof.png\n\n`;
+	const note = notes().replace('## Discord payload', `${secondFeature}## Discord payload`);
+	for (const labels of [['user-visible'], ['release']]) {
+		const repo = fixture({ note });
+		t.after(repo.cleanup);
+		const result = decideReleaseNoteGate({ prBody: applicableBody(), labels, repoRoot: repo.repoRoot });
+		assert.equal(result.ok, true, result.reason);
+	}
+	const missingSecond = fixture({ note: note.replace('Value: Players find it immediately.\n', '') });
+	t.after(missingSecond.cleanup);
+	const result = decideReleaseNoteGate({
+		prBody: applicableBody(), labels: ['release'], repoRoot: missingSecond.repoRoot,
+	});
+	assert.equal(result.ok, false);
+	assert.match(result.reason, /A second improvement.*Value:/i);
+});
+
+test('mandatory value triple: each absent field fails with canonical file, feature block, and field named', (t) => {
+	for (const field of ['Before', 'After', 'Value']) {
+		for (const label of ['user-visible', 'release']) {
+			const note = notes().replace(new RegExp(`^${field}:.*\\n`, 'm'), '');
+			const repo = fixture({ note });
+			t.after(repo.cleanup);
+			const result = decideReleaseNoteGate({
+				prBody: applicableBody(), labels: [label], repoRoot: repo.repoRoot,
+			});
+			assert.equal(result.ok, false, `${label} ${field}`);
+			assert.match(result.reason, /docs\/change\/NOTES\.md/, field);
+			assert.match(result.reason, /A visible improvement/, field);
+			assert.match(result.reason, new RegExp(`${field}:?`, 'i'), field);
+		}
+	}
+});
+
+test('mandatory value triple: empty and whitespace-only fields fail identically to absent', (t) => {
+	for (const field of ['Before', 'After', 'Value']) {
+		const absentRepo = fixture({ note: notes().replace(new RegExp(`^${field}:.*\\n`, 'm'), '') });
+		t.after(absentRepo.cleanup);
+		const absent = decideReleaseNoteGate({
+			prBody: applicableBody(), labels: ['release'], repoRoot: absentRepo.repoRoot,
+		});
+		for (const replacement of [`${field}:\n`, `${field}:   \t\n`]) {
+			const repo = fixture({ note: notes().replace(new RegExp(`^${field}:.*\\n`, 'm'), replacement) });
+			t.after(repo.cleanup);
+			const result = decideReleaseNoteGate({
+				prBody: applicableBody(), labels: ['user-visible'], repoRoot: repo.repoRoot,
+			});
+			assert.equal(result.ok, false, `${field} ${JSON.stringify(replacement)}`);
+			assert.equal(result.reason, absent.reason, `${field} empty must equal absent`);
+		}
+	}
 });
 
 test('case 2: an unnamed or absent canonical notes document fails by name', (t) => {
@@ -179,11 +233,10 @@ test('payload mention safety, link suppression and document privacy are enforced
 	}
 });
 
-test('canonical notes require a title, player summary and prose in every feature', (t) => {
+test('canonical notes require a title and player summary before structured feature text', (t) => {
 	const variants = [
 		['title', notes().replace(/^# Player change\n/, ''), /level-one title/i],
 		['summary', notes().replace(/\nA short player-facing summary\.\n/, '\n'), /summary/i],
-		['feature prose', notes().replace('Players can use the changed control more reliably. The clearer state saves time while editing.\n\n', ''), /feature.*player-facing prose/i],
 	];
 	for (const [name, note, reason] of variants) {
 		const repo = fixture({ note });
