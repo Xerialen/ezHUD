@@ -1,0 +1,2246 @@
+{
+ "measured": [
+  {
+   "element": "ammo",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "ammo",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "ammo",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "ammo1",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "ammo1",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 200,
+    "y": 236
+   },
+   "preview": {
+    "x": 200,
+    "y": 236
+   }
+  },
+  {
+   "element": "ammo1",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 13,
+    "h": 4
+   },
+   "preview": {
+    "w": 13,
+    "h": 4
+   }
+  },
+  {
+   "element": "ammo2",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "ammo2",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 282,
+    "y": 332
+   },
+   "preview": {
+    "x": 282,
+    "y": 332
+   }
+  },
+  {
+   "element": "ammo2",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 13,
+    "h": 4
+   },
+   "preview": {
+    "w": 13,
+    "h": 4
+   }
+  },
+  {
+   "element": "ammo3",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "ammo3",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 307,
+    "y": 305
+   },
+   "preview": {
+    "x": 307,
+    "y": 305
+   }
+  },
+  {
+   "element": "ammo3",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 32,
+    "h": 16
+   },
+   "preview": {
+    "w": 32,
+    "h": 16
+   }
+  },
+  {
+   "element": "ammo4",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "ammo4",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 340,
+    "y": 333
+   },
+   "preview": {
+    "x": 340,
+    "y": 333
+   }
+  },
+  {
+   "element": "ammo4",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 8,
+    "h": 4
+   },
+   "preview": {
+    "w": 8,
+    "h": 4
+   }
+  },
+  {
+   "element": "armor",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "armor",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 188,
+    "y": 337
+   },
+   "preview": {
+    "x": 188,
+    "y": 337
+   }
+  },
+  {
+   "element": "armor",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 60,
+    "h": 20
+   },
+   "preview": {
+    "w": 60,
+    "h": 20
+   }
+  },
+  {
+   "element": "armordamage",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "armordamage",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "armordamage",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "bar_armor",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "bar_armor",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 326,
+    "y": 355
+   },
+   "preview": {
+    "x": 326,
+    "y": 355
+   }
+  },
+  {
+   "element": "bar_armor",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 50,
+    "h": 2
+   },
+   "preview": {
+    "w": 50,
+    "h": 2
+   }
+  },
+  {
+   "element": "bar_health",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "bar_health",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 394,
+    "y": 338
+   },
+   "preview": {
+    "x": 394,
+    "y": 338
+   }
+  },
+  {
+   "element": "bar_health",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 50,
+    "h": 20
+   },
+   "preview": {
+    "w": 50,
+    "h": 20
+   }
+  },
+  {
+   "element": "centerprint",
+   "dimension": "presence",
+   "verdict": "diverges",
+   "code": "not-registered-in-preview"
+  },
+  {
+   "element": "centerprint",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "centerprint",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "clock",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "clock",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 600,
+    "y": 216
+   },
+   "preview": {
+    "x": 600,
+    "y": 216
+   }
+  },
+  {
+   "element": "clock",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 40,
+    "h": 8
+   },
+   "preview": {
+    "w": 40,
+    "h": 8
+   }
+  },
+  {
+   "element": "democlock",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "democlock",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "democlock",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "face",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "face",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 337,
+    "y": 111
+   },
+   "preview": {
+    "x": 337,
+    "y": 111
+   }
+  },
+  {
+   "element": "face",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 48,
+    "h": 48
+   },
+   "preview": {
+    "w": 48,
+    "h": 48
+   }
+  },
+  {
+   "element": "fps",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "fps",
+   "dimension": "position",
+   "verdict": "diverges",
+   "code": "position-differs",
+   "delta": {
+    "x": 0,
+    "y": -1
+   },
+   "reference": {
+    "x": 58,
+    "y": 473
+   },
+   "preview": {
+    "x": 58,
+    "y": 472
+   }
+  },
+  {
+   "element": "fps",
+   "dimension": "size",
+   "verdict": "diverges",
+   "code": "size-differs",
+   "delta": {
+    "w": 42,
+    "h": 1
+   },
+   "reference": {
+    "w": 86,
+    "h": 7
+   },
+   "preview": {
+    "w": 128,
+    "h": 8
+   }
+  },
+  {
+   "element": "frags",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "frags",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "frags",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "framestats",
+   "dimension": "presence",
+   "verdict": "diverges",
+   "code": "not-registered-in-preview"
+  },
+  {
+   "element": "framestats",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "framestats",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "frametime",
+   "dimension": "presence",
+   "verdict": "diverges",
+   "code": "not-registered-in-preview"
+  },
+  {
+   "element": "frametime",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "frametime",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "gameclock",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "gameclock",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 464,
+    "y": 0
+   },
+   "preview": {
+    "x": 464,
+    "y": 0
+   }
+  },
+  {
+   "element": "gameclock",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 112,
+    "h": 24
+   },
+   "preview": {
+    "w": 112,
+    "h": 24
+   }
+  },
+  {
+   "element": "gamesummary",
+   "dimension": "presence",
+   "verdict": "diverges",
+   "code": "not-registered-in-preview"
+  },
+  {
+   "element": "gamesummary",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "gamesummary",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group1",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "group1",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group1",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group2",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "group2",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group2",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group3",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "group3",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group3",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group4",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "group4",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group4",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group5",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "group5",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group5",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group6",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "group6",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group6",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group7",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "group7",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group7",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group8",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "group8",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group8",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group9",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "group9",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "group9",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "gun",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "gun",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "gun",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "gun2",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "gun2",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "gun2",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "gun3",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "gun3",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 262,
+    "y": 324
+   },
+   "preview": {
+    "x": 262,
+    "y": 324
+   }
+  },
+  {
+   "element": "gun3",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 14,
+    "h": 9
+   },
+   "preview": {
+    "w": 14,
+    "h": 9
+   }
+  },
+  {
+   "element": "gun4",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "gun4",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "gun4",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "gun5",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "gun5",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 279,
+    "y": 324
+   },
+   "preview": {
+    "x": 279,
+    "y": 324
+   }
+  },
+  {
+   "element": "gun5",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 14,
+    "h": 9
+   },
+   "preview": {
+    "w": 14,
+    "h": 9
+   }
+  },
+  {
+   "element": "gun6",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "gun6",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 296,
+    "y": 324
+   },
+   "preview": {
+    "x": 296,
+    "y": 324
+   }
+  },
+  {
+   "element": "gun6",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 16,
+    "h": 11
+   },
+   "preview": {
+    "w": 16,
+    "h": 11
+   }
+  },
+  {
+   "element": "gun7",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "gun7",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 314,
+    "y": 324
+   },
+   "preview": {
+    "x": 314,
+    "y": 324
+   }
+  },
+  {
+   "element": "gun7",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 16,
+    "h": 11
+   },
+   "preview": {
+    "w": 16,
+    "h": 11
+   }
+  },
+  {
+   "element": "gun8",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "gun8",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 333,
+    "y": 325
+   },
+   "preview": {
+    "x": 333,
+    "y": 325
+   }
+  },
+  {
+   "element": "gun8",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 28,
+    "h": 9
+   },
+   "preview": {
+    "w": 28,
+    "h": 9
+   }
+  },
+  {
+   "element": "health",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "health",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 325,
+    "y": 337
+   },
+   "preview": {
+    "x": 325,
+    "y": 337
+   }
+  },
+  {
+   "element": "health",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 60,
+    "h": 20
+   },
+   "preview": {
+    "w": 60,
+    "h": 20
+   }
+  },
+  {
+   "element": "healthdamage",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "healthdamage",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "healthdamage",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "iammo",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "iammo",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "iammo",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "iammo1",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "iammo1",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 195,
+    "y": 236
+   },
+   "preview": {
+    "x": 195,
+    "y": 236
+   }
+  },
+  {
+   "element": "iammo1",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 4,
+    "h": 4
+   },
+   "preview": {
+    "w": 4,
+    "h": 4
+   }
+  },
+  {
+   "element": "iammo2",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "iammo2",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 213,
+    "y": 236
+   },
+   "preview": {
+    "x": 213,
+    "y": 236
+   }
+  },
+  {
+   "element": "iammo2",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 4,
+    "h": 4
+   },
+   "preview": {
+    "w": 4,
+    "h": 4
+   }
+  },
+  {
+   "element": "iammo3",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "iammo3",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 360,
+    "y": 212
+   },
+   "preview": {
+    "x": 360,
+    "y": 212
+   }
+  },
+  {
+   "element": "iammo3",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 12,
+    "h": 12
+   },
+   "preview": {
+    "w": 12,
+    "h": 12
+   }
+  },
+  {
+   "element": "iammo4",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "iammo4",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 333,
+    "y": 237
+   },
+   "preview": {
+    "x": 333,
+    "y": 237
+   }
+  },
+  {
+   "element": "iammo4",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 4,
+    "h": 4
+   },
+   "preview": {
+    "w": 4,
+    "h": 4
+   }
+  },
+  {
+   "element": "iarmor",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "iarmor",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "iarmor",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "itemsclock",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "itemsclock",
+   "dimension": "position",
+   "verdict": "diverges",
+   "code": "position-differs",
+   "delta": {
+    "x": -128,
+    "y": 4
+   },
+   "reference": {
+    "x": 129,
+    "y": 274
+   },
+   "preview": {
+    "x": 1,
+    "y": 278
+   }
+  },
+  {
+   "element": "itemsclock",
+   "dimension": "size",
+   "verdict": "diverges",
+   "code": "size-differs",
+   "delta": {
+    "w": 128,
+    "h": -8
+   },
+   "reference": {
+    "w": 80,
+    "h": 16
+   },
+   "preview": {
+    "w": 208,
+    "h": 8
+   }
+  },
+  {
+   "element": "key1",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "key1",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "key1",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "key2",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "key2",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "key2",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "keys",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "keys",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "keys",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "mouserate",
+   "dimension": "presence",
+   "verdict": "diverges",
+   "code": "not-registered-in-reference"
+  },
+  {
+   "element": "mouserate",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "mouserate",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "mp3_time",
+   "dimension": "presence",
+   "verdict": "diverges",
+   "code": "not-registered-in-reference"
+  },
+  {
+   "element": "mp3_time",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "mp3_time",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "mp3_title",
+   "dimension": "presence",
+   "verdict": "diverges",
+   "code": "not-registered-in-reference"
+  },
+  {
+   "element": "mp3_title",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "mp3_title",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "net",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "net",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "net",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "netgraph",
+   "dimension": "presence",
+   "verdict": "diverges",
+   "code": "not-registered-in-preview"
+  },
+  {
+   "element": "netgraph",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "netgraph",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "netproblem",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "netproblem",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "netproblem",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "notify",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "notify",
+   "dimension": "position",
+   "verdict": "match",
+   "code": "position-within-tolerance",
+   "delta": {
+    "x": 0,
+    "y": 0
+   },
+   "reference": {
+    "x": 157,
+    "y": 91
+   },
+   "preview": {
+    "x": 157,
+    "y": 91
+   }
+  },
+  {
+   "element": "notify",
+   "dimension": "size",
+   "verdict": "match",
+   "code": "size-within-tolerance",
+   "delta": {
+    "w": 0,
+    "h": 0
+   },
+   "reference": {
+    "w": 384,
+    "h": 38
+   },
+   "preview": {
+    "w": 384,
+    "h": 38
+   }
+  },
+  {
+   "element": "ownfrags",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "ownfrags",
+   "dimension": "position",
+   "verdict": "diverges",
+   "code": "position-differs",
+   "delta": {
+    "x": 28,
+    "y": 0
+   },
+   "reference": {
+    "x": 292,
+    "y": 69
+   },
+   "preview": {
+    "x": 320,
+    "y": 69
+   }
+  },
+  {
+   "element": "ownfrags",
+   "dimension": "size",
+   "verdict": "diverges",
+   "code": "size-differs",
+   "delta": {
+    "w": -56,
+    "h": 0
+   },
+   "reference": {
+    "w": 56,
+    "h": 8
+   },
+   "preview": {
+    "w": 0,
+    "h": 8
+   }
+  },
+  {
+   "element": "pent",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "pent",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "pent",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "ping",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "ping",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "ping",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "qtv_buffer",
+   "dimension": "presence",
+   "verdict": "diverges",
+   "code": "not-registered-in-preview"
+  },
+  {
+   "element": "qtv_buffer",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "qtv_buffer",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "quad",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "quad",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "quad",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "radar",
+   "dimension": "presence",
+   "verdict": "diverges",
+   "code": "not-registered-in-preview"
+  },
+  {
+   "element": "radar",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "radar",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "ring",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "ring",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "ring",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "score_bar",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "score_bar",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "score_bar",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "score_difference",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "score_difference",
+   "dimension": "position",
+   "verdict": "diverges",
+   "code": "position-differs",
+   "delta": {
+    "x": -8,
+    "y": 0
+   },
+   "reference": {
+    "x": 311,
+    "y": 190
+   },
+   "preview": {
+    "x": 303,
+    "y": 190
+   }
+  },
+  {
+   "element": "score_difference",
+   "dimension": "size",
+   "verdict": "diverges",
+   "code": "size-differs",
+   "delta": {
+    "w": 16,
+    "h": 0
+   },
+   "reference": {
+    "w": 16,
+    "h": 16
+   },
+   "preview": {
+    "w": 32,
+    "h": 16
+   }
+  },
+  {
+   "element": "score_enemy",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "score_enemy",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "score_enemy",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "score_position",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "score_position",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "score_position",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "score_team",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "score_team",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "score_team",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "scoreclock",
+   "dimension": "presence",
+   "verdict": "diverges",
+   "code": "not-registered-in-preview"
+  },
+  {
+   "element": "scoreclock",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "scoreclock",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "scoremapname",
+   "dimension": "presence",
+   "verdict": "diverges",
+   "code": "not-registered-in-preview"
+  },
+  {
+   "element": "scoremapname",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "scoremapname",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "sigil1",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "sigil1",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "sigil1",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "sigil2",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "sigil2",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "sigil2",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "sigil3",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "sigil3",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "sigil3",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "sigil4",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "sigil4",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "sigil4",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "speed",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "speed",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "speed",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "speed2",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "speed2",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "speed2",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "static_text",
+   "dimension": "presence",
+   "verdict": "diverges",
+   "code": "not-registered-in-preview"
+  },
+  {
+   "element": "static_text",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "static_text",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "suit",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "suit",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "suit",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "teamfrags",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "teamfrags",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "teamfrags",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "teamholdbar",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "teamholdbar",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "teamholdbar",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "teamholdinfo",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "teamholdinfo",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "teamholdinfo",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "teaminfo",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "teaminfo",
+   "dimension": "position",
+   "verdict": "diverges",
+   "code": "position-differs",
+   "delta": {
+    "x": 0,
+    "y": 3
+   },
+   "reference": {
+    "x": 483,
+    "y": 305
+   },
+   "preview": {
+    "x": 483,
+    "y": 308
+   }
+  },
+  {
+   "element": "teaminfo",
+   "dimension": "size",
+   "verdict": "diverges",
+   "code": "size-differs",
+   "delta": {
+    "w": 0,
+    "h": -5
+   },
+   "reference": {
+    "w": 156,
+    "h": 61
+   },
+   "preview": {
+    "w": 156,
+    "h": 56
+   }
+  },
+  {
+   "element": "teamstackbar",
+   "dimension": "presence",
+   "verdict": "diverges",
+   "code": "not-registered-in-preview"
+  },
+  {
+   "element": "teamstackbar",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "teamstackbar",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "tracker",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "tracker",
+   "dimension": "position",
+   "verdict": "diverges",
+   "code": "position-differs",
+   "delta": {
+    "x": 640,
+    "y": 0
+   },
+   "reference": {
+    "x": 294,
+    "y": 161
+   },
+   "preview": {
+    "x": 934,
+    "y": 161
+   }
+  },
+  {
+   "element": "tracker",
+   "dimension": "size",
+   "verdict": "diverges",
+   "code": "size-differs",
+   "delta": {
+    "w": -113,
+    "h": -20
+   },
+   "reference": {
+    "w": 113,
+    "h": 20
+   },
+   "preview": {
+    "w": 0,
+    "h": 0
+   }
+  },
+  {
+   "element": "tracking",
+   "dimension": "presence",
+   "verdict": "match",
+   "code": "drawn-on-both-sides"
+  },
+  {
+   "element": "tracking",
+   "dimension": "position",
+   "verdict": "diverges",
+   "code": "position-differs",
+   "delta": {
+    "x": 30,
+    "y": 0
+   },
+   "reference": {
+    "x": 198,
+    "y": 13
+   },
+   "preview": {
+    "x": 228,
+    "y": 13
+   }
+  },
+  {
+   "element": "tracking",
+   "dimension": "size",
+   "verdict": "diverges",
+   "code": "size-differs",
+   "delta": {
+    "w": -60,
+    "h": 0
+   },
+   "reference": {
+    "w": 240,
+    "h": 40
+   },
+   "preview": {
+    "w": 180,
+    "h": 40
+   }
+  },
+  {
+   "element": "vidlag",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "vidlag",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "vidlag",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "weaponstats",
+   "dimension": "presence",
+   "verdict": "absent-both",
+   "code": "registered-but-drawn-by-neither"
+  },
+  {
+   "element": "weaponstats",
+   "dimension": "position",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  },
+  {
+   "element": "weaponstats",
+   "dimension": "size",
+   "verdict": "not-assessable",
+   "code": "not-drawn-on-both-sides"
+  }
+ ],
+ "carried": [
+  {
+   "element": "armor",
+   "dimension": "colour",
+   "verdict": "asserted"
+  },
+  {
+   "element": "gameclock",
+   "dimension": "colour",
+   "verdict": "asserted"
+  },
+  {
+   "element": "itemsclock",
+   "dimension": "texture",
+   "verdict": "asserted"
+  },
+  {
+   "element": "notify",
+   "dimension": "texture",
+   "verdict": "asserted"
+  }
+ ]
+}
