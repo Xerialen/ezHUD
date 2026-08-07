@@ -51,7 +51,10 @@ async function inputs() {
 	const script = await fixture('capture-script.json');
 	const timings = buildTimingReceipt({
 		script,
-		recording: { basename: 'walkthrough.webm', bytes: 512, duration_seconds: 4.1 },
+		recording: {
+			basename: 'walkthrough.webm', bytes: 512,
+			duration_seconds: 4.1, container_duration_seconds: 5.02,
+		},
 		observations: await fixture('capture-observations-a.json'),
 	});
 	return { script, timings };
@@ -300,7 +303,10 @@ test('review blocker: natural measurement fits explicit padding while fixed acti
 	});
 	const releaseTimings = buildTimingReceipt({
 		script: releaseScript,
-		recording: { basename: 'walkthrough.webm', bytes: 1024, duration_seconds: 19.6 },
+		recording: {
+			basename: 'walkthrough.webm', bytes: 1024,
+			duration_seconds: 19.6, container_duration_seconds: 20.52,
+		},
 		observations: [
 			{ id: 'intro', start_seconds: 0.1, duration_seconds: 4.201, highlights: [] },
 			{
@@ -446,7 +452,10 @@ test('review mechanism: measure phase is offline-injectable and writes a closed 
 	});
 	const fittedTimings = buildTimingReceipt({
 		script: fittedScript,
-		recording: { basename: 'walkthrough.webm', bytes: 2048, duration_seconds: cursor + 0.1 },
+		recording: {
+			basename: 'walkthrough.webm', bytes: 2048,
+			duration_seconds: cursor + 0.1, container_duration_seconds: cursor + 1.02,
+		},
 		observations,
 	});
 	const fittedTimingsPath = path.join(root, 'release', 'run', 'fitted-timings.json');

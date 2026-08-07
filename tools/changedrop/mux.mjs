@@ -16,7 +16,10 @@ import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
-import { validateCaptureScript } from './capture.mjs';
+import {
+	CONTAINER_CONTENT_EPSILON_SECONDS,
+	validateCaptureScript,
+} from './capture.mjs';
 import {
 	assertNarrationFitsCapture,
 	inspectDeliveredWav,
@@ -236,17 +239,26 @@ function validateProbe(value, subject) {
 	return value;
 }
 
-export function assertMuxMediaGates({ captureDurationSeconds, captureProbe, outputProbe } = {}) {
-	finiteNumber(captureDurationSeconds, 'Fitted capture receipt duration', { positive: true });
+export function assertMuxMediaGates({
+	captureContentDurationSeconds,
+	captureContainerDurationSeconds,
+	captureProbe,
+	outputProbe,
+} = {}) {
+	finiteNumber(captureContentDurationSeconds, 'Fitted capture content duration', { positive: true });
+	finiteNumber(captureContainerDurationSeconds, 'Fitted capture container duration', { positive: true });
+	if (captureContainerDurationSeconds + CONTAINER_CONTENT_EPSILON_SECONDS < captureContentDurationSeconds) {
+		throw new Error('Fitted capture container duration is shorter than measured content duration.');
+	}
 	validateProbe(captureProbe, 'Fitted capture probe');
 	validateProbe(outputProbe, 'Changedrop output probe');
-	const captureDelta = Math.abs(captureProbe.duration_seconds - captureDurationSeconds);
+	const captureDelta = Math.abs(captureProbe.duration_seconds - captureContainerDurationSeconds);
 	if (captureDelta > OUTPUT_DURATION_TOLERANCE_SECONDS) {
-		throw new Error(`Fitted capture probe duration ${captureProbe.duration_seconds.toFixed(3)}s differs from receipt ${captureDurationSeconds.toFixed(3)}s beyond tolerance ${OUTPUT_DURATION_TOLERANCE_SECONDS.toFixed(3)}s.`);
+		throw new Error(`Fitted capture probe duration ${captureProbe.duration_seconds.toFixed(3)}s differs from container receipt ${captureContainerDurationSeconds.toFixed(3)}s beyond tolerance ${OUTPUT_DURATION_TOLERANCE_SECONDS.toFixed(3)}s.`);
 	}
-	const outputDelta = Math.abs(outputProbe.duration_seconds - captureProbe.duration_seconds);
+	const outputDelta = Math.abs(outputProbe.duration_seconds - captureContentDurationSeconds);
 	if (outputDelta > OUTPUT_DURATION_TOLERANCE_SECONDS) {
-		throw new Error(`Mux output duration ${outputProbe.duration_seconds.toFixed(3)}s differs from fitted capture ${captureProbe.duration_seconds.toFixed(3)}s beyond tolerance ${OUTPUT_DURATION_TOLERANCE_SECONDS.toFixed(3)}s.`);
+		throw new Error(`Mux output duration ${outputProbe.duration_seconds.toFixed(3)}s differs from fitted capture content ${captureContentDurationSeconds.toFixed(3)}s beyond tolerance ${OUTPUT_DURATION_TOLERANCE_SECONDS.toFixed(3)}s.`);
 	}
 	const captureVideos = captureProbe.streams.filter((stream) => stream.codec_type === 'video').length;
 	if (captureVideos !== 1) throw new Error('Fitted capture must contain exactly one video stream.');
@@ -275,7 +287,8 @@ export function buildFfmpegArguments({ captureFile, narrationFiles, timings, out
 		nonEmptyString(narration.file, 'Delivered narration file');
 		args.push('-i', narration.file);
 	}
-	const filters = ['[0:v]setpts=PTS-STARTPTS[muxvideo]'];
+	const contentDuration = decimalSeconds(timings.recording.duration_seconds);
+	const filters = [`[0:v]trim=duration=${contentDuration},setpts=PTS-STARTPTS[muxvideo]`];
 	for (const [index, segment] of timings.segments.entries()) {
 		finiteNumber(segment.start_seconds, `Mux timing start for "${segment.id}"`, { minimum: 0 });
 		filters.push(`[${index + 1}:a]asetpts=PTS-STARTPTS,adelay=${Math.round(segment.start_seconds * 1000)}:all=1[segment${index}]`);
@@ -563,8 +576,9 @@ export async function main({
 	});
 	const captureProbe = await probe(captureFile);
 	validateProbe(captureProbe, 'Fitted capture probe');
-	if (Math.abs(captureProbe.duration_seconds - timings.recording.duration_seconds) > OUTPUT_DURATION_TOLERANCE_SECONDS) {
-		throw new Error('Fitted capture probe duration differs from its timing receipt beyond tolerance.');
+	if (Math.abs(captureProbe.duration_seconds - timings.recording.container_duration_seconds)
+		> OUTPUT_DURATION_TOLERANCE_SECONDS) {
+		throw new Error('Fitted capture probe duration differs from its container timing receipt beyond tolerance.');
 	}
 	if (captureProbe.streams.filter((stream) => stream.codec_type === 'video').length !== 1) {
 		throw new Error('Fitted capture must contain exactly one video stream.');
@@ -597,7 +611,8 @@ export async function main({
 		const outputArtifact = await verifiedFile(outputFile, 'Changedrop mux output');
 		const outputProbe = await probe(outputFile);
 		assertMuxMediaGates({
-			captureDurationSeconds: timings.recording.duration_seconds,
+			captureContentDurationSeconds: timings.recording.duration_seconds,
+			captureContainerDurationSeconds: timings.recording.container_duration_seconds,
 			captureProbe,
 			outputProbe,
 		});

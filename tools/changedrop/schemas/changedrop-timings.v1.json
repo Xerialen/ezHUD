@@ -10,11 +10,12 @@
     "recording": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["basename", "bytes", "duration_seconds"],
+      "required": ["basename", "bytes", "duration_seconds", "container_duration_seconds"],
       "properties": {
         "basename": {"const": "walkthrough.webm"},
         "bytes": {"type": "integer", "minimum": 1},
-        "duration_seconds": {"type": "number", "exclusiveMinimum": 0}
+        "duration_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "container_duration_seconds": {"type": "number", "exclusiveMinimum": 0}
       }
     },
     "setup_actions": {

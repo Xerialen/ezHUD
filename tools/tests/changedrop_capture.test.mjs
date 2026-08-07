@@ -63,10 +63,31 @@ function stringsIn(value) {
 	return [];
 }
 
-const recording = (duration_seconds = 4.1, bytes = 512) => ({
+const recording = (duration_seconds = 4.1, bytes = 512, container_duration_seconds = duration_seconds + 0.92) => ({
 	basename: 'walkthrough.webm',
 	bytes,
 	duration_seconds,
+	container_duration_seconds,
+});
+
+test('review blocker: capture receipts measured content and finalized container durations separately', async (t) => {
+	assert.ifError(loadError);
+	const directory = await mkdtemp(path.join(tmpdir(), 'changedrop-container-duration-'));
+	t.after(() => rm(directory, { recursive: true, force: true }));
+	await chmod(directory, 0o700);
+	const file = path.join(directory, 'walkthrough.webm');
+	await writeFile(file, Buffer.from('synthetic-webm-fixture'), { mode: 0o600 });
+	assert.deepEqual(await capture.recordingMetadata(file, 22.543, 23.48), {
+		basename: 'walkthrough.webm',
+		bytes: 22,
+		duration_seconds: 22.543,
+		container_duration_seconds: 23.48,
+	});
+	const schema = JSON.parse(await readFile(
+		path.join(repo, 'tools', 'changedrop', 'schemas', 'changedrop-timings.v1.json'), 'utf8'));
+	assert.ok(schema.properties.recording.required.includes('container_duration_seconds'));
+	await assert.rejects(capture.recordingMetadata(file, 22.543, 22.0),
+		/container duration.*content duration|container.*shorter.*content/i);
 });
 
 test('case 1: recording metadata requires a real non-empty file and positive measured duration', async (t) => {
@@ -77,15 +98,16 @@ test('case 1: recording metadata requires a real non-empty file and positive mea
 	await chmod(directory, 0o700);
 	const file = path.join(directory, 'walkthrough.webm');
 	await writeFile(file, Buffer.from('synthetic-webm-fixture'));
-	assert.deepEqual(await capture.recordingMetadata(file, 1.25), {
+	assert.deepEqual(await capture.recordingMetadata(file, 1.25, 2.17), {
 		basename: 'walkthrough.webm',
 		bytes: 22,
 		duration_seconds: 1.25,
+		container_duration_seconds: 2.17,
 	});
 	await writeFile(file, Buffer.alloc(0));
-	await assert.rejects(capture.recordingMetadata(file, 1.25), /recording.*non-empty|non-empty.*recording/i);
+	await assert.rejects(capture.recordingMetadata(file, 1.25, 2.17), /recording.*non-empty|non-empty.*recording/i);
 	await writeFile(file, Buffer.from('x'));
-	await assert.rejects(capture.recordingMetadata(file, 0), /duration.*positive|positive.*duration/i);
+	await assert.rejects(capture.recordingMetadata(file, 0, 1), /duration.*positive|positive.*duration/i);
 });
 
 test('case 2: timings contain exactly one positive, strictly monotonic entry per script segment', async () => {
@@ -184,6 +206,7 @@ test('supporting contract: closed safe DSL, bounded runtime, schema/privacy, npm
 
 	const source = await readFile(path.join(repo, 'tools', 'changedrop', 'capture.mjs'), 'utf8');
 	assert.doesNotMatch(source, /\.evaluate\s*\(/);
+	assert.match(source, /spawn\('ffprobe'/);
 	const sourceCapture = source.indexOf('const sourceBytes = await page.screenshot');
 	const liveRing = source.indexOf('await page.addStyleTag({ content: liveRingCss');
 	assert.ok(sourceCapture >= 0 && liveRing >= 0 && sourceCapture < liveRing,

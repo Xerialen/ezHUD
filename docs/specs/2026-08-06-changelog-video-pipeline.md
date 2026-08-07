@@ -186,7 +186,9 @@ control only, small badge, no inset, no prose inside the image. A `highlight`
 derives ring geometry from its validated selector and writes separate focused
 source and annotated stills; its human instruction is never rendered.
 
-- **C1** recording exists, non-empty, duration > 0.
+- **C1** recording exists and is non-empty. The timing receipt records both the
+  measured content duration and the finalized container duration so a static
+  recorder-finalization tail is explicit rather than mistaken for content.
 - **C2** exactly one timing entry per script segment; starts strictly
   monotonic; every duration > 0.
 - **C3** every highlight timestamp lies inside its segment's interval.
@@ -262,9 +264,15 @@ Failure handling continues to branch on `error_code`, never message text:
 ### Stage 5 — mux (`changedrop-manifest/1`)
 
 ffmpeg muxes narration onto the fitted recapture aligned to its `timings.json`, and runs
-**only after valid voice output exists**. No narration ⇒ no mux.
+**only after valid voice output exists**. No narration ⇒ no mux. Playwright can
+append a static finalization tail to the WebM container; Stage 5 verifies that
+container duration against the capture receipt, then trims video to the
+separately measured content duration before muxing. Segment starts remain
+anchored to the original content clock.
 
-- **M1** output duration equals fitted capture duration within the fixed 0.5-second tolerance.
+- **M1** output duration equals the fitted capture's measured content duration
+  within the fixed 0.5-second tolerance; the untrimmed input is checked against
+  its separately receipted container duration.
 - **M2** exactly one audio and one video stream.
 - **M3** every segment's narration is the natural measure-phase artifact,
   matched by SHA-256; a re-rendered or substituted file fails the run.

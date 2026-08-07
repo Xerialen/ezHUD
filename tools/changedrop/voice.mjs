@@ -17,7 +17,11 @@ import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
-import { MAX_HOLD_MS, validateCaptureScript } from './capture.mjs';
+import {
+	CONTAINER_CONTENT_EPSILON_SECONDS,
+	MAX_HOLD_MS,
+	validateCaptureScript,
+} from './capture.mjs';
 
 const SCRIPT_SCHEMA_VERSION = 'changedrop-script/1';
 const TIMINGS_SCHEMA_VERSION = 'changedrop-timings/1';
@@ -136,12 +140,20 @@ export function validateTimingReceipt(script, timings) {
 	if (timings.schema_version !== TIMINGS_SCHEMA_VERSION) {
 		throw new Error(`Changedrop timings must use ${TIMINGS_SCHEMA_VERSION}.`);
 	}
-	exactObject(timings.recording, ['basename', 'bytes', 'duration_seconds'], 'Changedrop timing recording');
+	exactObject(timings.recording,
+		['basename', 'bytes', 'duration_seconds', 'container_duration_seconds'],
+		'Changedrop timing recording');
 	if (timings.recording.basename !== 'walkthrough.webm'
 		|| !Number.isInteger(timings.recording.bytes) || timings.recording.bytes <= 0) {
 		throw new Error('Changedrop timing recording is invalid.');
 	}
-	finiteNumber(timings.recording.duration_seconds, 'Changedrop recording duration', { positive: true });
+	finiteNumber(timings.recording.duration_seconds, 'Changedrop recording content duration', { positive: true });
+	finiteNumber(timings.recording.container_duration_seconds,
+		'Changedrop recording container duration', { positive: true });
+	if (timings.recording.container_duration_seconds + CONTAINER_CONTENT_EPSILON_SECONDS
+		< timings.recording.duration_seconds) {
+		throw new Error('Changedrop recording container duration is shorter than its measured content duration.');
+	}
 	if (!Array.isArray(timings.setup_actions)
 		|| JSON.stringify(timings.setup_actions) !== JSON.stringify(script.setup.map(machineAction))) {
 		throw new Error('Changedrop timings setup action sequence is stale; capture the script again.');

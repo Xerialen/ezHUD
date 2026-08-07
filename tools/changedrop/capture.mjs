@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import {
 	chmod,
@@ -27,11 +28,17 @@ const MAX_WAIT_MS = 120_000;
 // two-second repeat tolerance admits that measured interaction jitter while
 // still rejecting a lost wait or an accidentally extended narration hold.
 export const REPEAT_DURATION_TOLERANCE_SECONDS = 2.0;
+// Frame timestamps and the browser's performance clock can straddle one final
+// scheduling boundary. A tenth of a second permits that boundary but still
+// rejects a receipt that describes content materially beyond its container.
+export const CONTAINER_CONTENT_EPSILON_SECONDS = 0.1;
 const DEVICE_SCALE_FACTOR = 2;
 const ACCENT = '#ff4116';
 const LIGHT = '#fffaf2';
 const DARK = '#11100f';
 const RING_PADDING = 6;
+const MAX_PROBE_OUTPUT_BYTES = 65_536;
+const PROBE_TIMEOUT_MS = 30_000;
 
 export const ACTIONS = Object.freeze(['wait-for', 'resize', 'click', 'hold', 'highlight']);
 export const SELECTOR_PATTERN = /^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\[data-changedrop="[a-z0-9]+(?:-[a-z0-9]+)*"\])$/;
@@ -213,14 +220,62 @@ function safeRelativePng(value, source) {
 }
 
 function validateRecording(recording) {
-	exactObject(recording, ['basename', 'bytes', 'duration_seconds'], 'Changedrop recording');
+	exactObject(recording, ['basename', 'bytes', 'duration_seconds', 'container_duration_seconds'], 'Changedrop recording');
 	if (recording.basename !== 'walkthrough.webm') throw new Error('Changedrop recording basename must be walkthrough.webm.');
 	if (!Number.isInteger(recording.bytes) || recording.bytes <= 0) throw new Error('Changedrop recording must be non-empty.');
-	finiteNumber(recording.duration_seconds, 'Changedrop recording duration', { positive: true });
+	finiteNumber(recording.duration_seconds, 'Changedrop recording content duration', { positive: true });
+	finiteNumber(recording.container_duration_seconds, 'Changedrop recording container duration', { positive: true });
+	if (recording.container_duration_seconds + CONTAINER_CONTENT_EPSILON_SECONDS < recording.duration_seconds) {
+		throw new Error('Changedrop recording container duration is shorter than its measured content duration.');
+	}
 }
 
-export async function recordingMetadata(file, measuredDurationSeconds) {
-	finiteNumber(measuredDurationSeconds, 'Changedrop recording duration', { positive: true });
+export function probeRecordingDuration(file) {
+	return new Promise((resolve, reject) => {
+		const child = spawn('ffprobe', [
+			'-v', 'error',
+			'-show_entries', 'format=duration',
+			'-of', 'default=noprint_wrappers=1:nokey=1',
+			file,
+		], { stdio: ['ignore', 'pipe', 'pipe'] });
+		let stdout = '';
+		let outputBytes = 0;
+		let settled = false;
+		let timer;
+		const finish = (callback, value) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			callback(value);
+		};
+		for (const stream of [child.stdout, child.stderr]) {
+			stream.on('data', (chunk) => {
+				outputBytes += chunk.length;
+				if (stream === child.stdout && outputBytes <= MAX_PROBE_OUTPUT_BYTES) stdout += chunk.toString('utf8');
+			});
+		}
+		child.once('error', () => finish(reject, new Error('Could not start fitted capture duration probe.')));
+		child.once('close', (exitCode) => {
+			if (outputBytes > MAX_PROBE_OUTPUT_BYTES) {
+				return finish(reject, new Error('Fitted capture duration probe output exceeded its bound.'));
+			}
+			const duration = Number(stdout.trim());
+			if (exitCode !== 0 || !Number.isFinite(duration) || duration <= 0) {
+				return finish(reject, new Error('Could not measure fitted capture container duration.'));
+			}
+			return finish(resolve, duration);
+		});
+		timer = setTimeout(() => {
+			child.kill('SIGKILL');
+			finish(reject, new Error('Fitted capture duration probe exceeded its bounded runtime.'));
+		}, PROBE_TIMEOUT_MS);
+		timer.unref?.();
+	});
+}
+
+export async function recordingMetadata(file, measuredDurationSeconds, containerDurationSeconds) {
+	finiteNumber(measuredDurationSeconds, 'Changedrop recording content duration', { positive: true });
+	finiteNumber(containerDurationSeconds, 'Changedrop recording container duration', { positive: true });
 	let metadata;
 	try {
 		metadata = await stat(file);
@@ -228,11 +283,14 @@ export async function recordingMetadata(file, measuredDurationSeconds) {
 		throw new Error('Changedrop recording is missing.');
 	}
 	if (!metadata.isFile() || metadata.size <= 0) throw new Error('Changedrop recording must exist and be non-empty.');
-	return {
+	const recording = {
 		basename: 'walkthrough.webm',
 		bytes: metadata.size,
 		duration_seconds: measuredDurationSeconds,
+		container_duration_seconds: containerDurationSeconds,
 	};
+	validateRecording(recording);
+	return recording;
 }
 
 function machineAction(step) {
@@ -688,7 +746,13 @@ async function runBrowserCapture({ script, dist, output }) {
 		await bounded(video.saveAs(recordingPath), deadline, 'video save');
 		await chmod(recordingPath, 0o600);
 		await rm(videoDirectory, { recursive: true, force: true });
-		const recording = await recordingMetadata(recordingPath, (captureEnded - captureStart) / 1000);
+		const containerDurationSeconds = await bounded(
+			probeRecordingDuration(recordingPath), deadline, 'recording duration probe');
+		const recording = await recordingMetadata(
+			recordingPath,
+			(captureEnded - captureStart) / 1000,
+			containerDurationSeconds,
+		);
 		return buildTimingReceipt({ script, recording, observations });
 	} finally {
 		if (context) await context.close().catch(() => {});

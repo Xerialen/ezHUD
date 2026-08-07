@@ -144,6 +144,7 @@ async function prepareRun(t) {
 			basename: 'walkthrough.webm',
 			bytes: captureBytes.length,
 			duration_seconds: 4.1,
+			container_duration_seconds: 5.02,
 		},
 		setup_actions: script.setup.map(machineAction),
 		segments: script.segments.map((segment, index) => ({
@@ -262,22 +263,58 @@ test('case no-narration: mux refuses before media execution when narration is in
 	assert.equal(muxCalls, 0, 'media executor ran without narration');
 });
 
+test('review blocker: a finalized trailing pad is reconciled against explicit container and content durations', async () => {
+	assert.ifError(loadError);
+	assert.equal(mux.assertMuxMediaGates({
+		captureContentDurationSeconds: 22.543,
+		captureContainerDurationSeconds: 23.48,
+		captureProbe: { duration_seconds: 23.48, streams: [{ codec_type: 'video' }] },
+		outputProbe: {
+			duration_seconds: 22.543,
+			streams: [{ codec_type: 'video' }, { codec_type: 'audio' }],
+		},
+	}), true);
+});
+
+test('review blocker: ffmpeg trims static container tail to measured content duration before muxing', async () => {
+	assert.ifError(loadError);
+	const args = mux.buildFfmpegArguments({
+		captureFile: 'capture-fitted/walkthrough.webm',
+		narrationFiles: [{ id: 'intro', file: 'narration/intro.wav' }],
+		timings: {
+			recording: {
+				basename: 'walkthrough.webm',
+				bytes: 512,
+				duration_seconds: 22.543,
+				container_duration_seconds: 23.48,
+			},
+			segments: [{ id: 'intro', start_seconds: 0.4 }],
+		},
+		outputFile: 'mux/changedrop.mp4',
+	});
+	assert.match(args.join(' '), /trim=duration=22\.543/);
+	assert.equal(args[args.indexOf('-t') + 1], '22.543');
+	assert.equal(args.join(' ').includes('trim=duration=23.48'), false);
+});
+
 test('case M1: output duration must equal the fitted capture within the stated tolerance', async () => {
 	assert.ifError(loadError);
 	assert.equal(mux.OUTPUT_DURATION_TOLERANCE_SECONDS, 0.5);
 	const observations = await fixture('mux-media-observations.json');
 	assert.equal(mux.assertMuxMediaGates({
-		captureDurationSeconds: 4.1,
+		captureContentDurationSeconds: 4.1,
+		captureContainerDurationSeconds: 5.02,
 		captureProbe: observations.capture,
 		outputProbe: observations.output,
 	}), true);
 	const tooLong = structuredClone(observations.output);
 	tooLong.duration_seconds = 4.601;
 	assert.throws(() => mux.assertMuxMediaGates({
-		captureDurationSeconds: 4.1,
+		captureContentDurationSeconds: 4.1,
+		captureContainerDurationSeconds: 5.02,
 		captureProbe: observations.capture,
 		outputProbe: tooLong,
-	}), /output duration.*4\.601.*capture.*4\.100.*tolerance.*0\.500/i);
+	}), /output duration.*4\.601.*capture content.*4\.100.*tolerance.*0\.500/i);
 });
 
 test('case M2: mux output contains exactly one video and one audio stream', async () => {
@@ -290,7 +327,8 @@ test('case M2: mux output contains exactly one video and one audio stream', asyn
 	]) {
 		const outputProbe = { ...observations.output, streams };
 		assert.throws(() => mux.assertMuxMediaGates({
-			captureDurationSeconds: 4.1,
+			captureContentDurationSeconds: 4.1,
+			captureContainerDurationSeconds: 5.02,
 			captureProbe: observations.capture,
 			outputProbe,
 		}), /exactly one audio and one video stream/i);
@@ -358,6 +396,8 @@ test('case manifest: offline fixture mux emits a private changedrop-manifest/1 i
 	});
 	assert.equal(muxCalls, 1);
 	assert.deepEqual(plan.timings.segments.map((entry) => entry.start_seconds), [0.4, 1.12, 3.01]);
+	assert.match(plan.args.join(' '), /trim=duration=4\.1/);
+	assert.equal(plan.args.join(' ').includes('trim=duration=5.02'), false);
 	assert.match(plan.args.join(' '), /adelay=400:all=1/);
 	assert.match(plan.args.join(' '), /adelay=1120:all=1/);
 	assert.match(plan.args.join(' '), /adelay=3010:all=1/);
@@ -373,6 +413,8 @@ test('case manifest: offline fixture mux emits a private changedrop-manifest/1 i
 	assert.equal(manifest.blocked_reason, null);
 	assert.deepEqual(manifest.publish, { state: 'withheld', destination: null });
 	assert.equal(manifest.capture.basename, 'walkthrough.webm');
+	assert.equal(manifest.capture.duration_s, 4.1);
+	assert.equal(manifest.output.duration_s, 4.1);
 	assert.equal(manifest.output.basename, 'changedrop.mp4');
 	assert.deepEqual(manifest.segments.map((entry) => entry.narration.sha256),
 		run.narration.segments.map((entry) => entry.audio.sha256));
