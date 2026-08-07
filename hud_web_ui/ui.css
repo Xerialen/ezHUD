@@ -17,6 +17,10 @@
 @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap");
 
 :root {
+	/* Editor chrome scale. This never participates in HUD coordinate maths;
+	   it only grows the browser UI around the engine-owned render. */
+	--ui-scale: 1;
+
 	/* -- raw: id1 palette anchors ------------------------------------------ */
 	--qk-ember-400: #db7f3b;
 	--qk-gold-500: #dfab27;
@@ -95,12 +99,12 @@
 	--font-ui: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
 	--font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-	--fs-micro: 9px;
-	--fs-caption: 10.5px;
-	--fs-small: 11.5px;
-	--fs-base: 12.5px;
-	--fs-ui: 13px;
-	--fs-lead: 15px;
+	--fs-micro: calc(9px * var(--ui-scale));
+	--fs-caption: calc(10.5px * var(--ui-scale));
+	--fs-small: calc(11.5px * var(--ui-scale));
+	--fs-base: calc(12.5px * var(--ui-scale));
+	--fs-ui: calc(13px * var(--ui-scale));
+	--fs-lead: calc(15px * var(--ui-scale));
 
 	--ls-eyebrow: 0.14em;
 	--ls-caps: 0.07em;
@@ -131,11 +135,13 @@
 	--dur-fast: 110ms;
 	--dur-slow: 200ms;
 
-	/* Layout constants of the editor shell. */
-	--bar-h: 46px;
-	--rail-w: 252px;
-	--inspect-w: 300px;
-	--statusbar-h: 24px;
+	/* Layout constants of the editor shell. The viewport caps keep 125/150%
+	   useful on a smaller high-DPI monitor instead of letting both rails eat
+	   the live stage. At 1440px and above the requested preset is exact. */
+	--bar-h: calc(46px * var(--ui-scale));
+	--rail-w: clamp(220px, calc(252px * var(--ui-scale)), 28vw);
+	--inspect-w: clamp(260px, calc(300px * var(--ui-scale)), 32vw);
+	--statusbar-h: calc(24px * var(--ui-scale));
 
 	/* Textures: a soot checker behind the render, 1px scanlines that hint CRT
 	   without ever touching the game pixels. */
@@ -221,6 +227,23 @@ body {
 
 .bar__spacer { flex: 1; }
 
+/* Deliberately named Editor size rather than Scale: the adjacent readout is the
+   HUD's console-pixel scale, while this control changes only browser chrome. */
+.ui-scale {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--text-faint);
+	font: var(--type-meta);
+	white-space: nowrap;
+}
+
+.ui-scale select {
+	flex: 0 0 auto;
+	width: calc(70px * var(--ui-scale));
+	padding-block: calc(5px * var(--ui-scale));
+}
+
 /* One real model, not three numbers: what a console pixel is worth on screen.
    Expands to per-axis form only when the factors differ — then the layout is
    stretched and the user has to notice. */
@@ -295,7 +318,10 @@ body {
 	flex: 1;
 	min-height: 0;
 	display: grid;
-	grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--inspect-w);
+	/* A monitor move can reduce the CSS-pixel viewport when DPR increases. The
+	   stage keeps a real editing surface rather than collapsing to a zero-width
+	   grid item; the capped rails above absorb the reduction first. */
+	grid-template-columns: var(--rail-w) minmax(280px, 1fr) var(--inspect-w);
 }
 
 .panel {

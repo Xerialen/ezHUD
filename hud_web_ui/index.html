@@ -33,6 +33,14 @@
   <!-- One real model, not three numbers: what a console pixel is worth on
        screen right now. Filled by renderBar. -->
   <div class="scalechip" id="readout" hidden></div>
+  <label class="ui-scale" title="Changes the editor chrome only. HUD coordinates and the editing-at scale stay unchanged.">
+    <span>Editor size</span>
+    <select id="ui-scale" aria-label="Editor size">
+      <option value="1">100%</option>
+      <option value="1.25">125%</option>
+      <option value="1.5">150%</option>
+    </select>
+  </label>
   <label class="toggle">
     <input type="checkbox" id="chrome" checked>
     <span>Overlay</span>

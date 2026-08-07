@@ -250,6 +250,18 @@ try {
 		el.width = canvas[0];
 		el.height = canvas[1];
 
+		// FTE's real resize glue owns this in tier 4F: it follows the canvas CSS
+		// box, multiplies by devicePixelRatio, then exports the new video size in
+		// state.screen. Mirror only that boundary here so the editor-scale case can
+		// prove a chrome-only layout change still propagates through engine state.
+		window.addEventListener('resize', () => requestAnimationFrame(() => {
+			const rect = el.getBoundingClientRect();
+			el.width = Math.max(1, Math.round(rect.width * window.devicePixelRatio));
+			el.height = Math.max(1, Math.round(rect.height * window.devicePixelRatio));
+			fake.state.screen = { ...fake.state.screen,
+				vid_width: el.width, vid_height: el.height };
+		}));
+
 		// These live on hud_t rather than in the params array (hud.c), which is
 		// why they are named here instead of being found in `cvars`.
 		const PLACEMENT = new Set(['place', 'align_x', 'align_y', 'order', 'frame']);
@@ -813,7 +825,83 @@ try {
 
 	console.log('  12 reset positions: hud_reset_layout reverts a moved element to its registered default');
 
-	// ---- 13. volume ----------------------------------------------------------
+	// ---- 13. editor window scaling (#25) ------------------------------------
+	// The control scales editor chrome, never HUD coordinates. Its CSS change
+	// also has to wake FTE's resize glue because changing a custom property does
+	// not itself emit a browser resize event.
+	const uiScale = page.locator('#ui-scale');
+	await uiScale.waitFor();
+	assert(await uiScale.inputValue() === '1',
+		'the editor scale did not start at the usable 100% default');
+	const layoutAt100 = await page.evaluate(() => {
+		const box = (selector) => {
+			const rect = document.querySelector(selector).getBoundingClientRect();
+			return { width: rect.width, height: rect.height };
+		};
+		return {
+			rail: box('.panel--tree'), inspect: box('.panel--inspect'),
+			stage: box('.stage'), frame: box('.stage__frame'), canvas: box('#canvas'),
+		};
+	});
+	assert(layoutAt100.rail.width >= 240 && layoutAt100.inspect.width >= 280
+		&& layoutAt100.stage.width >= 600 && layoutAt100.stage.height >= 700,
+		`1440p-class default layout is not usable: ${JSON.stringify(layoutAt100)}`);
+	near(layoutAt100.canvas.width, layoutAt100.frame.width, 'default canvas/frame width');
+	near(layoutAt100.canvas.height, layoutAt100.frame.height, 'default canvas/frame height');
+
+	const placementBeforeScale = named(await engineState(), 'health');
+	const sentBeforeScale = (await sentLines()).length;
+	const screenBeforeScale = (await engineState()).screen;
+	await uiScale.selectOption('1.25');
+	await page.waitForFunction(() => localStorage.getItem('ezhud.ui.scale') === '1.25'
+		&& getComputedStyle(document.documentElement).getPropertyValue('--ui-scale').trim() === '1.25');
+	await page.waitForFunction(([width, height]) => {
+		const screen = window.__fake.state.screen;
+		return screen.vid_width !== width || screen.vid_height !== height;
+	}, [screenBeforeScale.vid_width, screenBeforeScale.vid_height]);
+	const layoutAt125 = await page.evaluate(() => {
+		const box = (selector) => {
+			const rect = document.querySelector(selector).getBoundingClientRect();
+			return { width: rect.width, height: rect.height };
+		};
+		return {
+			rail: box('.panel--tree'), inspect: box('.panel--inspect'),
+			stage: box('.stage'), frame: box('.stage__frame'), canvas: box('#canvas'),
+		};
+	});
+	assert(layoutAt125.rail.width > layoutAt100.rail.width
+		&& layoutAt125.inspect.width > layoutAt100.inspect.width,
+		`125% did not visibly enlarge editor chrome: ${JSON.stringify({ layoutAt100, layoutAt125 })}`);
+	assert(layoutAt125.stage.width > 500 && layoutAt125.stage.height > 700,
+		`125% collapsed the usable stage: ${JSON.stringify(layoutAt125.stage)}`);
+	near(layoutAt125.canvas.width, layoutAt125.frame.width, 'scaled canvas/frame width');
+	near(layoutAt125.canvas.height, layoutAt125.frame.height, 'scaled canvas/frame height');
+	const placementAfterScale = named(await engineState(), 'health');
+	assert(placementAfterScale.pos_x === placementBeforeScale.pos_x
+		&& placementAfterScale.pos_y === placementBeforeScale.pos_y,
+		'editor scaling changed engine placement values');
+	assert((await sentLines()).length === sentBeforeScale,
+		'editor scaling sent a command to the engine');
+	const scaledState = await page.evaluate(async () =>
+		(await import('/core/bridge.js')).currentBridge().state());
+	assert(scaledState.screen.vid_width === scaledState.physical[0]
+		&& scaledState.screen.vid_height === scaledState.physical[1],
+		`state.screen did not follow the resized canvas: ${JSON.stringify({ screen: scaledState.screen, physical: scaledState.physical })}`);
+
+	// A second chrome scale must produce a second engine resize, not merely the
+	// first one after boot. Leave 125% stored so the volume case's reload proves
+	// persistence from actual storage rather than a same-document variable.
+	const screenAt125 = structuredClone((await engineState()).screen);
+	await uiScale.selectOption('1.5');
+	await page.waitForFunction(([width, height]) => {
+		const screen = window.__fake.state.screen;
+		return screen.vid_width !== width || screen.vid_height !== height;
+	}, [screenAt125.vid_width, screenAt125.vid_height]);
+	await uiScale.selectOption('1.25');
+	await page.waitForFunction(() => localStorage.getItem('ezhud.ui.scale') === '1.25');
+	console.log('  13 editor scale: 1440p minimums, visible presets, persistence seed, canvas and state propagation');
+
+	// ---- 14. volume ----------------------------------------------------------
 	// The page's own sound knob (#10). The engine side is a plain cvar write, so
 	// the assertions are about the contract around it: the quiet boot default,
 	// the mute/unmute round trip, the imported line that must never apply, and
@@ -870,15 +958,76 @@ try {
 	await page.waitForFunction(() => document.getElementById('fte-volume')?.value === '0.4');
 	assert(await page.locator('#fte-mute').getAttribute('aria-pressed') === 'false',
 		'the unmuted state did not survive the reload');
+	await page.waitForFunction(() => document.getElementById('ui-scale')?.value === '1.25');
+	assert(await page.evaluate(() => getComputedStyle(document.documentElement)
+		.getPropertyValue('--ui-scale').trim()) === '1.25',
+		'the editor scale did not survive the reload');
 
-	console.log('  13 volume: quiet boot default, mute round trip, import refusal, persistence');
+	console.log('  14 volume: quiet boot default, mute round trip, import refusal, persistence');
+
+	// A second page at DPR 2 is the monitor-move half of #25. Playwright fixes
+	// deviceScaleFactor per browser context, so exercise that layout, then change
+	// its viewport while DPR stays fixed. Neither path may degenerate the rails or
+	// stop the canvas filling its frame.
+	const dprPage = await browser.newPage({
+		viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2,
+	});
+	try {
+		// Install the same public FTE boundary before the module app starts polling,
+		// but no command folding is needed: this page only exercises monitor/layout
+		// behaviour. A real rect keeps the live 16:9 stage path active rather than
+		// the intentional 4:3 empty-state placeholder.
+		await dprPage.addInitScript((state) => {
+			window.FTEC = { cbufadd() {}, handleevent() {} };
+			const install = setInterval(() => {
+				if (!window.Module) {
+					return;
+				}
+				clearInterval(install);
+				window.Module._EZHud_StateJSON = () => 1;
+				window.Module.UTF8ToString = () => JSON.stringify(state);
+			}, 0);
+		}, structuredClone(FIXTURE));
+		await dprPage.goto(`http://127.0.0.1:${port}/index-fte.html`);
+		await dprPage.waitForSelector('#overlay .box');
+		await dprPage.waitForSelector('#ui-scale');
+		const measure = () => dprPage.evaluate(() => {
+			const box = (selector) => {
+				const rect = document.querySelector(selector).getBoundingClientRect();
+				return { width: rect.width, height: rect.height };
+			};
+			return {
+				dpr: window.devicePixelRatio,
+				rail: box('.panel--tree'), inspect: box('.panel--inspect'),
+				stage: box('.stage'), frame: box('.stage__frame'), canvas: box('#canvas'),
+			};
+		});
+		const dpr1440 = await measure();
+		assert(dpr1440.dpr === 2, `deviceScaleFactor did not produce DPR 2: ${dpr1440.dpr}`);
+		assert(dpr1440.rail.width >= 240 && dpr1440.inspect.width >= 280
+			&& dpr1440.stage.width >= 600,
+			`DPR 2 collapsed the 1440 layout: ${JSON.stringify(dpr1440)}`);
+		near(dpr1440.canvas.width, dpr1440.frame.width, 'DPR 2 canvas/frame width');
+		near(dpr1440.canvas.height, dpr1440.frame.height, 'DPR 2 canvas/frame height');
+
+		await dprPage.setViewportSize({ width: 1280, height: 800 });
+		const dpr1280 = await measure();
+		assert(dpr1280.dpr === 2, 'viewport change unexpectedly changed DPR');
+		assert(dpr1280.rail.width >= 220 && dpr1280.inspect.width >= 260
+			&& dpr1280.stage.width >= 500 && dpr1280.stage.height >= 600,
+			`fixed-DPR viewport resize collapsed the layout: ${JSON.stringify(dpr1280)}`);
+		near(dpr1280.canvas.width, dpr1280.frame.width, 'resized DPR 2 canvas/frame width');
+		near(dpr1280.canvas.height, dpr1280.frame.height, 'resized DPR 2 canvas/frame height');
+	} finally {
+		await dprPage.close();
+	}
 
 	// The whole suite ran against a page whose engine script never downloaded.
 	assert(engineScript.length && engineScript.every((status) => status === 404),
 		`ftewebglcl.js should 404 here, got ${JSON.stringify(engineScript)}`);
 	assert(crashes.length === 0, `uncaught page errors: ${crashes.join('; ')}`);
 
-	console.log('Tier 3 FTE: 13 cases passed with no wasm (ftewebglcl.js 404 throughout)');
+	console.log('Tier 3 FTE: 14 cases passed with no wasm (ftewebglcl.js 404 throughout)');
 } catch (err) {
 	// A CI-only failure is undiagnosable from a TimeoutError alone; dump what
 	// the editor actually did before dying. Temporary debug aid — cheap enough

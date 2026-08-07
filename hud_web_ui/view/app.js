@@ -16,7 +16,7 @@ import { initDebugPanel } from './debug.js';
 
 const $ = (id) => document.getElementById(id);
 const el = {
-	readout: $('readout'), status: $('status'), chrome: $('chrome'),
+	readout: $('readout'), status: $('status'), chrome: $('chrome'), uiScale: $('ui-scale'),
 	sbCursor: $('sb-cursor'), sbDrawn: $('sb-drawn'), sbEngine: $('engine'),
 	sbFont: $('sb-font'), sbFrame: $('sb-frame'),
 	filter: $('filter'), showHidden: $('show-hidden'), showSpectator: $('show-spectator'), tree: $('tree'), treeCount: $('tree-count'),
@@ -26,6 +26,65 @@ const el = {
 	saveOpen: $('save-open'), saveDialog: $('save-dialog'),
 	modePanel: $('hudmodes'), killfeedPanel: $('killfeed'), resetDialog: $('reset-dialog'),
 };
+
+// Editor chrome scale is browser-local preference, not HUD state. Keeping the
+// accepted values closed avoids a corrupted localStorage entry producing an
+// unusable shell, and never creates a cvar/export path that could be confused
+// with the engine's console-pixel scale model.
+const UI_SCALE_KEY = 'ezhud.ui.scale';
+const UI_SCALES = new Set(['1', '1.25', '1.5']);
+
+function storedUiScale() {
+	try {
+		const value = localStorage.getItem(UI_SCALE_KEY);
+		return UI_SCALES.has(value) ? value : '1';
+	} catch {
+		return '1';
+	}
+}
+
+function wakeEngineResize() {
+	// FTE's wasm host listens for window resize; changing a CSS variable does not
+	// emit one. Wake that existing path rather than duplicating its backing-store
+	// or state.screen arithmetic in the editor.
+	requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+}
+
+function applyUiScale(value, { persist = false, wake = false } = {}) {
+	const accepted = UI_SCALES.has(String(value)) ? String(value) : '1';
+	document.documentElement.style.setProperty('--ui-scale', accepted);
+	document.documentElement.dataset.uiScale = accepted;
+	el.uiScale.value = accepted;
+	if (persist) {
+		try {
+			localStorage.setItem(UI_SCALE_KEY, accepted);
+		} catch { /* private mode: the in-session choice still works */ }
+	}
+	if (wake) {
+		wakeEngineResize();
+	}
+}
+
+applyUiScale(storedUiScale());
+
+// Browsers normally emit resize when a window crosses monitors, but the DPR
+// media query is the reliable signal when the CSS-pixel viewport happens to be
+// unchanged. Re-arm at the new ratio, then wake the engine's existing resize
+// glue so its canvas and exported state follow the monitor.
+let dprQuery = null;
+function onDevicePixelRatioChange() {
+	watchDevicePixelRatio();
+	wakeEngineResize();
+}
+function watchDevicePixelRatio() {
+	if (!window.matchMedia) {
+		return;
+	}
+	dprQuery?.removeEventListener('change', onDevicePixelRatioChange);
+	dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+	dprQuery.addEventListener('change', onDevicePixelRatioChange, { once: true });
+}
+watchDevicePixelRatio();
 
 const bridge = Bridge.fromLocation(location.search);
 const model = new Model();
@@ -1907,6 +1966,7 @@ el.filter.addEventListener('input', () => model.set({ filter: el.filter.value })
 el.showHidden.addEventListener('change', () => model.set({ showHidden: el.showHidden.checked }));
 el.showSpectator.addEventListener('change', () => model.set({ showSpectator: el.showSpectator.checked }));
 el.chrome.addEventListener('change', () => model.set({ chromeVisible: el.chrome.checked }));
+el.uiScale.addEventListener('change', () => applyUiScale(el.uiScale.value, { persist: true, wake: true }));
 el.saveOpen.addEventListener('click', () => openSave());
 el.frame.addEventListener('load', renderOverlay);
 window.addEventListener('resize', renderOverlay);

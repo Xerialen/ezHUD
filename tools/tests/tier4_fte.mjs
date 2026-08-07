@@ -455,8 +455,19 @@ async function operateControl(row) {
 
 async function proveControl(row) {
 	let unchangedBefore = null;
+	let editorBefore = null;
 	if (row.exportOnly) {
 		unchangedBefore = await readCvar(row.exportOnly.unchangedCvar);
+	}
+	if (row.editorOnly) {
+		unchangedBefore = await readCvar(row.editorOnly.unchangedCvar);
+		const state = await readState();
+		editorBefore = {
+			metric: await page.locator(row.editorOnly.metricSelector).evaluate(
+				(node, property) => node.getBoundingClientRect()[property], row.editorOnly.metricProperty),
+			screen: state.screen,
+			physical: state.physical,
+		};
 	}
 	await operateControl(row);
 	if (row.expect) {
@@ -477,6 +488,52 @@ async function proveControl(row) {
 			return text.split('\n').includes(row.exportOnly.line) ? text : null;
 		}, `${row.label} to land ${row.exportOnly.line} in the full export`, UI_WAIT);
 		assert(exportedText, `${row.label} did not land in the full export`);
+	}
+	if (row.editorOnly) {
+		const changed = await eventually(async () => {
+			const metric = await page.locator(row.editorOnly.metricSelector).evaluate(
+				(node, property) => node.getBoundingClientRect()[property], row.editorOnly.metricProperty);
+			const state = await readState();
+			const screenChanged = state.screen?.vid_width !== editorBefore.screen?.vid_width
+				|| state.screen?.vid_height !== editorBefore.screen?.vid_height;
+			const physicalChanged = state.physical?.[0] !== editorBefore.physical?.[0]
+				|| state.physical?.[1] !== editorBefore.physical?.[1];
+			return metric > editorBefore.metric * row.editorOnly.minimumFactor
+				&& screenChanged && physicalChanged ? { metric, state } : null;
+		}, `${row.label} to resize chrome, canvas and exported screen state`, UI_WAIT);
+		const unchangedAfter = await readCvar(row.editorOnly.unchangedCvar);
+		assert(unchangedAfter === unchangedBefore,
+			`${row.label} changed HUD placement ${row.editorOnly.unchangedCvar} `
+			+ `${unchangedBefore} -> ${unchangedAfter}`);
+		assert(await page.evaluate((key) => localStorage.getItem(key), row.editorOnly.storageKey)
+			=== row.operation.value,
+			`${row.label} did not persist ${row.operation.value}`);
+		const exported = await readExport();
+		assert(!exported.includes(row.editorOnly.forbiddenExport),
+			`${row.label} leaked editor-only state into the HUD export`);
+		const backing = await page.locator('#canvas').evaluate((canvas) =>
+			[canvas.width, canvas.height]);
+		assert(changed.state.physical[0] === backing[0] && changed.state.physical[1] === backing[1],
+			`${row.label} physical state does not match the canvas backing store: `
+			+ `${JSON.stringify({ physical: changed.state.physical, backing })}`);
+		// vid_conautoscale may intentionally make console screen dimensions a
+		// fraction of the physical backing store. "Follows" means both resize by
+		// the same ratio, not that they are numerically equal.
+		const ratios = {
+			screenX: changed.state.screen.vid_width / editorBefore.screen.vid_width,
+			screenY: changed.state.screen.vid_height / editorBefore.screen.vid_height,
+			physicalX: changed.state.physical[0] / editorBefore.physical[0],
+			physicalY: changed.state.physical[1] / editorBefore.physical[1],
+		};
+		assert(Math.abs(ratios.screenX - ratios.physicalX) < 0.02
+			&& Math.abs(ratios.screenY - ratios.physicalY) < 0.02,
+			`${row.label} screen did not follow physical resize ratios: ${JSON.stringify(ratios)}`);
+		if (row.editorOnly.restore != null) {
+			await controlLocator(row.target).selectOption(String(row.editorOnly.restore));
+			await eventually(async () => await page.evaluate((value) =>
+				document.documentElement.dataset.uiScale === value ? true : null,
+			String(row.editorOnly.restore)), `${row.label} cleanup`, UI_WAIT);
+		}
 	}
 }
 
@@ -864,9 +921,10 @@ try {
 	// Interactive engine/export controls rendered by the public FTE page:
 	//
 	//   FTE chrome: demo picker (case 6), cfg drop target (case 4), demo pause
-	//   and resume, volume range, mute and unmute. The Overlay/filter/Hidden/Spectator controls are
-	//   editor-view filters only; Save is an export workflow (case 5), not an
-	//   engine setting.
+	//   and resume, volume range, mute and unmute. Editor size (#25) has its own
+	//   row proving visible chrome growth, persisted choice, engine resize and
+	//   unchanged HUD placement. Overlay/filter/Hidden/Spectator are editor-view
+	//   filters only; Save is an export workflow (case 5), not an engine setting.
 	//
 	//   HUD systems: Classic/New/Both (scr_newhud), QW262 overlay (cl_hud),
 	//   classic bar (cl_sbar), compact style (scr_compacthud), viewsize, and
@@ -912,6 +970,16 @@ try {
 		{
 			label: 'unmute button restores the slider', target: { selector: '#fte-mute' },
 			operation: { kind: 'click' }, expect: { volume: '0.35' },
+		},
+		{
+			issue: 25,
+			label: 'Editor size: 125%', target: { selector: '#ui-scale' },
+			operation: { kind: 'select', value: '1.25' },
+			editorOnly: {
+				unchangedCvar: `hud_${candidate.name}_pos_y`,
+				metricSelector: '.panel--tree', metricProperty: 'width', minimumFactor: 1.15,
+				storageKey: 'ezhud.ui.scale', forbiddenExport: 'ezhud.ui.scale', restore: '1',
+			},
 		},
 		{
 			label: 'killfeed Where: Console messages',
@@ -1053,7 +1121,7 @@ try {
 	];
 
 	let nextCase = 8;
-	for (const row of controlCases.filter((entry) => entry.issue !== 43)) {
+	for (const row of controlCases.filter((entry) => entry.issue !== 43 && entry.issue !== 25)) {
 		await proveControl(row);
 		const effect = row.expect
 			? Object.entries(row.expect).map(([name, value]) => `${name}=${value}`).join(', ')
@@ -1291,9 +1359,13 @@ try {
 	pass(nextCase++, visualPassText);
 
 	// Preserve the historical 1–36 numbering (especially the anti-stale audit
-	// at case 35), then append #43's functional cases and mandatory control rows.
+	// at case 35), then append new-ticket functional/control rows.
 	pass(nextCase++, demoPausePassText);
 	pass(nextCase++, demoReadbackPassText);
+	for (const row of controlCases.filter((entry) => entry.issue === 25)) {
+		await proveControl(row);
+		pass(nextCase++, `${row.label} — chrome, canvas and state resized; HUD placement unchanged`);
+	}
 	// Case 36 resumes through the raw channel in its finally block. Wait for
 	// that engine state to reach the visible toggle before asking the toggle for
 	// its opposite; otherwise a deliberately stale aria-pressed=true would
