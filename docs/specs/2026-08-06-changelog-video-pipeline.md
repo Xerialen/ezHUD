@@ -46,8 +46,9 @@ contract; these are.
 | 1 | value analyzer | `node tools/changedrop/analyze.mjs --release <id> --out <run>/value-summary.json` | `changedrop-value-summary/1` |
 | 2 | script author | `node tools/changedrop/script.mjs --summary <run>/value-summary.json --out <run>/script.json` | `changedrop-script/1` |
 | 3 | capture (first) | `node tools/changedrop/capture.mjs --script <run>/script.json --dist <dist> --out <run>/capture` | `changedrop-timings/1` |
-| 4 | narration order | `node tools/changedrop/voice.mjs --script <run>/script.json --timings <run>/capture/timings.json --out <run>/narration` | `changedrop-narration/1` |
-| 5 | mux | `node tools/changedrop/mux.mjs --capture <run>/capture --narration <run>/narration --out <run>/mux` | `changedrop-manifest/1` |
+| 4 | narration order (no target) | `node tools/changedrop/voice.mjs --script <run>/script.json --timings <run>/capture/timings.json --out <run>/narration` | `changedrop-narration/1` |
+| 5 | mux | `node tools/changedrop/mux.mjs --capture <run>/capture-fitted --narration <run>/narration --out <run>/mux` | `changedrop-manifest/1` |
+| 5a | review payload | `node tools/changedrop/review.mjs --manifest <run>/manifest.json --out <run>/review-payload.json` | `changedrop-review-payload/1` |
 | — | orchestrator | `node tools/changedrop/run.mjs --release <id>` | chains 1–5, writes the manifest |
 
 Schemas are committed under `tools/changedrop/schemas/<name>.v1.json`. Every
@@ -114,6 +115,10 @@ skip video by construction, through the exemption that already exists.
 - **A2** the skip rule holds and stops the run.
 - **A3** an entry whose before/after/value cannot be stated fails with the block
   named. Text is never invented to fill a gap.
+- **A4** `Before:`, `After:` and `Value:` are **mandatory** for every player-facing
+  canonical release feature (owner decision, 2026-08-07). The shared release-note
+  gate enforces them, so a note missing any of the three fails at the gate rather
+  than only here.
 
 ### Stage 2 — script author (`changedrop-script/1`)
 
@@ -145,49 +150,64 @@ control only, small badge, no inset, no prose inside the image.
 
 ### Stage 4 — narration order (`changedrop-narration/1`)
 
+**Owner decision, 2026-08-07: the measure-phase artifact is the delivery
+artifact. The pipeline never target-drives a re-render.**
+
+Chatterbox renders each segment **without** a duration target. That exact
+verified WAV is what ships. The pipeline then measures it locally and adds
+explicit capture padding so the picture fits the audio — never the reverse.
+
+Why: measurement showed a supplied `target` changes what the service
+generates. The same text renders 3.840 s unconstrained on three consecutive
+fresh request ids, but 3.44 s, 3.64 s and 4.44 s under targets of 3.9, 4.0 and
+4.2 — and a target of 3.84 rejects a natural 3.84 s render. A gate that alters
+the thing it measures cannot be a gate. Local measurement of the delivered
+bytes is both sufficient and honest.
+
 Transport: `voice-order submit --wait`, one order per segment.
+Fixed fields: `schema_version: "voice-order/1"`, `project: "ezhud"`,
+`voice_profile: "xeri-en-v1"`, `mode: "spoken"`, `style: "neutral"`,
+`language: "en"`, delivery `wav / 24000 / 1`.
 
-Fixed fields: `schema_version: "voice-order/1"`, `voice_profile: "xeri-en-v1"`,
-`mode: "spoken"`, `style: "neutral"`, `language: "en"`, delivery
-`wav / 24000 / 1`. Duration fitting uses the **measured** capture timing:
-`target.duration_seconds` with an explicit `tolerance_seconds`, both fields or
-neither. The service verifies the rendered WAV itself and fails closed out of
-tolerance; the pipeline does not second-guess that decision.
-
-Forbidden in a request, by gate: output or reference path, model selection,
-generation settings, seed, extra renderer arguments.
+**Never sent:** `target` (in any form), output or reference path, model
+selection, generation settings, seed, extra renderer arguments.
 
 `request_id` derives from the effective order content. `status: "duplicate"`
-with `rerendered: false` is a normal success and must not trigger a retry loop.
+with `rerendered: false` is a normal success and must not trigger a retry.
 
-**Failure handling — branch on `error_code`, never on message text:**
+**Local validation replaces the service-side duration gate.** For every
+segment the pipeline opens the delivered WAV and asserts, from the file
+itself: 24 kHz, mono, positive duration, and `sha256`/byte length matching
+the result. A segment whose measured duration cannot be fitted by padding
+within tolerance fails the run, naming the segment and both durations.
 
-| `error_code` | Action |
-|---|---|
-| `E_PROJECT_NOT_ALLOWED`, `E_PROFILE_UNKNOWN` (3) | **Stop the run before rendering.** Record the prerequisite (§6). Owner/Terra action; never retried, never routed around, never substituted with another voice. |
-| `E_SCHEMA_INVALID`, `E_UNKNOWN_FIELD` (2) | Request-builder bug; fix the builder. |
-| `E_TEXT_UNSAFE`, `E_TEXT_TOO_LONG`, `E_OVERRIDE_INVALID` (4) | Script defect; return to stage 2. Never auto-trim. |
-| `E_DURATION_OUT_OF_TOLERANCE` (9) | Re-author that segment to fit measured time, then a **new** `request_id`. |
-| `E_REQUEST_ID_CONFLICT` (5) | Effective order changed under a reused id — builder bug. |
-| `E_LOCK_TIMEOUT` (6), `E_INTERNAL` (10) | Bounded retry of the identical order; exact retries are safe by design. |
-| `E_RENDER_FAILED` (7), `E_ARTIFACT_INVALID` (8) | Stop and report; no blind retry. |
+Failure handling still branches on `error_code`, never message text.
+`E_PROJECT_NOT_ALLOWED` and `E_PROFILE_UNKNOWN` stop the run — no fallback
+voice, no microphone, ever. `E_LOCK_TIMEOUT` and `E_INTERNAL` retry the
+identical order within a bound; `E_RENDER_FAILED` and `E_ARTIFACT_INVALID`
+stop and report.
 
-- **V1 (offline)** the built request validates against v1, carries none of the
-  forbidden fields, and has both duration fields or neither. Tier 1, fixtures,
-  no service call.
-- **V2 (online)** each narration WAV's measured duration is within tolerance of
-  its measured capture segment, and the ≤ 10 s per surface budget holds against
-  **real audio**.
+**Padding fit.** `resize`, `click` and `wait-for` take as long as the
+application takes and stay measured. `hold` steps marked `fit: "narration"`
+are the only free parameter: their total is set so the segment window equals
+the measured narration. Fixed action time clamps at zero, with a stated
+timer-noise epsilon beyond which a negative genuinely means the timings and
+the script disagree. A re-capture against the fitted script closes the loop.
 
-### Stage 5 — mux (`changedrop-manifest/1`)
+### Stage 5 — mux and the Discord review payload (`changedrop-manifest/1`)
 
-ffmpeg muxes narration onto the recording aligned to `timings.json`, and runs
-**only after valid voice output exists**. No narration ⇒ no mux.
+ffmpeg muxes the delivered narration onto the fitted recording, aligned to
+`timings.json`, and runs **only after a complete, locally validated narration
+set exists**. No narration, no mux.
 
-- **M1** output duration equals capture duration within tolerance.
+- **M1** output duration equals the fitted capture duration within tolerance.
 - **M2** exactly one audio and one video stream.
-- **M3** `publish.state: "withheld"`, `destination: null`. **No stage uploads
-  anything.** The destination is pending owner approval.
+- **M3** every segment's narration is the measure-phase artifact, matched by
+  `sha256` — a re-rendered or substituted file fails the run.
+
+**The player-facing deliverable is Discord-native** (`changedrop-review-payload/1`):
+one concise forwardable message plus its attachment manifest, prepared and
+never auto-posted. See §5a.
 
 ## 5. Manifest (`changedrop-manifest/1`)
 
@@ -216,6 +236,61 @@ ffmpeg muxes narration onto the recording aligned to `timings.json`, and runs
 `engine.name/t3_model/cli_sha256` and `profile_revision` are provenance the API
 exposes; they are recorded as provenance and are never presented as
 caller-selectable controls.
+
+## 5a. Discord review payload (`changedrop-review-payload/1`)
+
+**Owner decision, 2026-08-07.** The change log reaches players as a Discord
+message, not a link. The pipeline prepares it; a human posts it.
+
+```json
+{
+  "schema_version": "changedrop-review-payload/1",
+  "release": "release-1",
+  "destination": {
+    "kind": "discord-channel",
+    "channel_id": "1534452186266734683",
+    "purpose": "owner-review",
+    "state": "prepared",
+    "posted": false
+  },
+  "message": {
+    "content": "<=1900 chars, plain text, no bare URLs, no @mentions",
+    "allowed_mentions": { "parse": [] },
+    "suppress_embeds": true
+  },
+  "attachments": [
+    { "name": "changedrop.mp4", "kind": "video", "sha256": "…",
+      "bytes": 0, "duration_seconds": 0.0 },
+    { "name": "window-follow.png", "kind": "image", "surface": "window-follow",
+      "sha256": "…", "bytes": 0 }
+  ],
+  "provenance": {
+    "manifest_sha256": "…",
+    "capture_sha256": "…",
+    "narration": [ { "id": "…", "sha256": "…", "duration_seconds": 0.0 } ]
+  }
+}
+```
+
+Rules the gate enforces:
+
+- **Destination is the review channel `1534452186266734683` and nothing else.**
+  `state` is `prepared` and `posted` is `false` in every committed or emitted
+  payload. The pipeline has no posting code path at all.
+- **No external link cards:** `suppress_embeds` true, and no bare URL in
+  `content` — any URL must be wrapped in `<…>`.
+- **No mentions:** `allowed_mentions.parse` is an empty array, and `content`
+  contains no `@everyone`, `@here` or role/user mention syntax.
+- Attachments are **local files uploaded with the message**, never links. Each
+  is named, hashed and size-recorded; every attachment resolves to a real file
+  in the run directory and no attachment path appears in the payload.
+- Content is player-facing: what changed and why it matters, no issue numbers,
+  no internal jargon, no private paths, host names or user names.
+
+**Handoff, not publication.** After the private artifact and privacy gates pass
+and the frozen-SHA review is done, the payload is presented to **Terra** for the
+owner-review post. The owner forwards it manually anywhere else. Nothing in this
+repository posts to Discord, and no public publishing happens at any stage.
 
 ## 6. External gate — registry prerequisite (Terra coordinates)
 
@@ -270,6 +345,8 @@ complete — never as complete, and never with a substituted voice.
 4. **#71** voice request builder + offline contract gate
 5. **#72** mux + withheld destination
 6. **#73** orchestrator + manifest + privacy gate
+7. **#75** mandatory Before/After/Value in the shared release-note gate
+8. **#76** Discord review payload + privacy gate
 
 Each: spec → RED gate → Sol implements → Opus reviews the current head SHA →
 green CI → owner decision. The video pipeline does not get a weaker flow than
