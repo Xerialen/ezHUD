@@ -32,7 +32,6 @@ const ORDER_TIMEOUT_MS = 600_000;
 const MAX_OUTPUT_BYTES = 1_048_576;
 
 export const DURATION_TOLERANCE_SECONDS = 0.5;
-export const TARGET_DURATION_DECIMALS = 3;
 // Pure-padding holds can measure a fraction under their declared timer because
 // browser clocks are sampled on opposite sides of a scheduling boundary. A
 // 25 ms allowance covers that boundary noise while remaining far below both
@@ -63,7 +62,7 @@ const ERROR_POLICIES = Object.freeze({
 	E_TEXT_UNSAFE: Object.freeze({ action: 'script-defect', retry: false }),
 	E_TEXT_TOO_LONG: Object.freeze({ action: 'script-defect', retry: false }),
 	E_OVERRIDE_INVALID: Object.freeze({ action: 'script-defect', retry: false }),
-	E_DURATION_OUT_OF_TOLERANCE: Object.freeze({ action: 'refit-padding', retry: false }),
+	E_DURATION_OUT_OF_TOLERANCE: Object.freeze({ action: 'service-contract-bug', retry: false }),
 	E_REQUEST_ID_CONFLICT: Object.freeze({ action: 'request-builder-bug', retry: false }),
 	E_LOCK_TIMEOUT: Object.freeze({ action: 'retry-identical', retry: true }),
 	E_INTERNAL: Object.freeze({ action: 'retry-identical', retry: true }),
@@ -122,13 +121,6 @@ function canonical(value) {
 function requestIdFor(effectiveOrder) {
 	const digest = createHash('sha256').update(JSON.stringify(canonical(effectiveOrder))).digest('hex');
 	return `ezhud-${digest.slice(0, 32)}`;
-}
-
-function quantizedTargetDuration(durationSeconds) {
-	finiteNumber(durationSeconds, 'Measured voice target duration', { positive: true });
-	const quantized = Number(durationSeconds.toFixed(TARGET_DURATION_DECIMALS));
-	if (quantized <= 0) throw new Error('Measured voice target duration is below millisecond precision.');
-	return quantized;
 }
 
 function machineAction(step) {
@@ -209,11 +201,10 @@ function validateTimingReceipt(script, timings) {
 }
 
 export function validateVoiceRequest(request) {
-	const baseKeys = [
+	const expected = [
 		'schema_version', 'request_id', 'project', 'voice_profile', 'mode', 'style',
 		'language', 'text', 'delivery',
 	];
-	const expected = request?.target === undefined ? baseKeys : [...baseKeys, 'target'];
 	exactObject(request, expected, 'Voice order request');
 	if (request.schema_version !== REQUEST_SCHEMA_VERSION) throw new Error('Voice request schema_version is invalid.');
 	if (!/^ezhud-[0-9a-f]{32}$/.test(request.request_id)) throw new Error('Voice request_id is invalid.');
@@ -227,21 +218,10 @@ export function validateVoiceRequest(request) {
 	if (request.delivery.container !== 'wav' || request.delivery.sample_rate !== 24_000 || request.delivery.channels !== 1) {
 		throw new Error('Voice request delivery must be 24 kHz mono WAV.');
 	}
-	if (request.target !== undefined) {
-		exactObject(request.target, ['duration_seconds', 'tolerance_seconds'], 'Voice request target');
-		finiteNumber(request.target.duration_seconds, 'Voice target duration', { positive: true });
-		if (request.target.duration_seconds !== quantizedTargetDuration(request.target.duration_seconds)) {
-			throw new Error('Voice target duration must use millisecond precision (three decimal places at most).');
-		}
-		if (request.target.duration_seconds > 120) throw new Error('Voice target duration exceeds the service maximum.');
-		if (request.target.tolerance_seconds !== DURATION_TOLERANCE_SECONDS) {
-			throw new Error('Voice target duration_seconds and tolerance_seconds must both use the fixed fitting contract.');
-		}
-	}
 	return privacyChecked(request, 'Voice request');
 }
 
-function voiceRequest(segment, target) {
+function voiceRequest(segment) {
 	const effectiveOrder = {
 		schema_version: REQUEST_SCHEMA_VERSION,
 		project: PROJECT,
@@ -251,7 +231,6 @@ function voiceRequest(segment, target) {
 		language: 'en',
 		text: segment.text,
 		delivery: { container: 'wav', sample_rate: 24_000, channels: 1 },
-		...(target ? { target } : {}),
 	};
 	return validateVoiceRequest({
 		schema_version: effectiveOrder.schema_version,
@@ -263,7 +242,6 @@ function voiceRequest(segment, target) {
 		language: effectiveOrder.language,
 		text: effectiveOrder.text,
 		delivery: effectiveOrder.delivery,
-		...(target ? { target: effectiveOrder.target } : {}),
 	});
 }
 
@@ -275,15 +253,7 @@ function validatedVoiceInputs(script, timings) {
 
 export function buildMeasurementRequests({ script, timings } = {}) {
 	validatedVoiceInputs(script, timings);
-	return script.segments.map((segment) => voiceRequest(segment, null));
-}
-
-export function buildVoiceRequests({ script, timings } = {}) {
-	validatedVoiceInputs(script, timings);
-	return script.segments.map((segment, index) => voiceRequest(segment, {
-		duration_seconds: quantizedTargetDuration(timings.segments[index].duration_seconds),
-		tolerance_seconds: DURATION_TOLERANCE_SECONDS,
-	}));
+	return script.segments.map((segment) => voiceRequest(segment));
 }
 
 function splitPadding(totalMilliseconds) {
@@ -365,6 +335,77 @@ export function fitCaptureScript({ script, timings, measurements } = {}) {
 	return privacyChecked({ script: fittedScript, segments: fittedSegments }, 'Changedrop voice fit');
 }
 
+function validateNarrationManifest(narration, script) {
+	exactObject(narration, ['schema_version', 'project', 'voice_profile', 'segments'], 'Changedrop narration');
+	if (narration.schema_version !== OUTPUT_SCHEMA_VERSION || narration.project !== PROJECT
+		|| narration.voice_profile !== VOICE_PROFILE || !Array.isArray(narration.segments)
+		|| narration.segments.length !== script.segments.length) {
+		throw new Error('Changedrop narration identity or segment count is invalid.');
+	}
+	for (const [index, entry] of narration.segments.entries()) {
+		exactObject(entry, [
+			'id', 'kind', 'surface', 'request_id', 'request_hash', 'status', 'rerendered',
+			'profile_revision', 'pronunciation_profile', 'pronunciation_revision',
+			'normalized_text_sha256', 'audio', 'duration_seconds', 'engine', 'rendered_at',
+		], `Changedrop narration segment ${index + 1}`);
+		const segment = script.segments[index];
+		if (entry.id !== segment.id || entry.kind !== segment.kind || entry.surface !== segment.surface) {
+			throw new Error(`Changedrop narration order is stale at segment "${segment.id}".`);
+		}
+		if (!/^ezhud-[0-9a-f]{32}$/.test(entry.request_id) || !/^sha256:[0-9a-f]{64}$/.test(entry.request_hash)
+			|| !['rendered', 'duplicate'].includes(entry.status) || typeof entry.rerendered !== 'boolean') {
+			throw new Error(`Changedrop narration request provenance is invalid for segment "${entry.id}".`);
+		}
+		if (!Number.isInteger(entry.profile_revision) || entry.profile_revision < 1
+			|| !Number.isInteger(entry.pronunciation_revision) || entry.pronunciation_revision < 0) {
+			throw new Error(`Changedrop narration profile provenance is invalid for segment "${entry.id}".`);
+		}
+		nonEmptyString(entry.pronunciation_profile, `Changedrop narration "${entry.id}" pronunciation profile`);
+		if (!/^[0-9a-f]{64}$/.test(entry.normalized_text_sha256)) {
+			throw new Error(`Changedrop narration normalized text hash is invalid for segment "${entry.id}".`);
+		}
+		exactObject(entry.audio, ['basename', 'sha256'], `Changedrop narration "${entry.id}" audio`);
+		if (entry.audio.basename !== `${entry.id}.wav` || !/^[0-9a-f]{64}$/.test(entry.audio.sha256)) {
+			throw new Error(`Changedrop narration audio identity is invalid for segment "${entry.id}".`);
+		}
+		finiteNumber(entry.duration_seconds, `Changedrop narration "${entry.id}" duration`, { positive: true });
+		exactObject(entry.engine, ['name', 't3_model', 'cli_sha256'], `Changedrop narration "${entry.id}" engine`);
+		if (entry.engine.name !== 'chatterbox-multilingual' || !/^[0-9a-f]{64}$/.test(entry.engine.cli_sha256)) {
+			throw new Error(`Changedrop narration engine provenance is invalid for segment "${entry.id}".`);
+		}
+		nonEmptyString(entry.engine.t3_model, `Changedrop narration "${entry.id}" engine model`);
+		nonEmptyString(entry.rendered_at, `Changedrop narration "${entry.id}" rendered_at`);
+	}
+	return privacyChecked(narration, 'Changedrop narration');
+}
+
+export function assertNarrationFitsCapture({ script, timings, narration } = {}) {
+	validatedVoiceInputs(script, timings);
+	if (!narration || narration.schema_version !== OUTPUT_SCHEMA_VERSION || !Array.isArray(narration.segments)
+		|| narration.segments.length !== script.segments.length) {
+		throw new Error('Changedrop narration must contain exactly one entry per fitted capture segment.');
+	}
+	const segments = narration.segments.map((entry, index) => {
+		const expected = script.segments[index];
+		if (!entry || entry.id !== expected.id) {
+			throw new Error(`Changedrop narration order is stale at segment "${expected.id}".`);
+		}
+		finiteNumber(entry.duration_seconds, `Narration "${entry.id}" audio duration`, { positive: true });
+		const captureDurationSeconds = timings.segments[index].duration_seconds;
+		const deltaSeconds = Number((entry.duration_seconds - captureDurationSeconds).toFixed(6));
+		if (Math.abs(deltaSeconds) > DURATION_TOLERANCE_SECONDS) {
+			throw new Error(`Narration fit failed for segment "${entry.id}": audio ${entry.duration_seconds.toFixed(3)}s, capture ${captureDurationSeconds.toFixed(3)}s, tolerance ${DURATION_TOLERANCE_SECONDS.toFixed(3)}s.`);
+		}
+		return {
+			id: entry.id,
+			audio_duration_seconds: entry.duration_seconds,
+			capture_duration_seconds: captureDurationSeconds,
+			delta_seconds: deltaSeconds,
+		};
+	});
+	return privacyChecked({ valid: true, segments }, 'Changedrop narration fit validation');
+}
+
 export function policyForError(errorCode, _messageIgnored) {
 	const policy = ERROR_POLICIES[errorCode];
 	if (!policy) throw new Error(`Undocumented voice error code "${String(errorCode)}" is unknown.`);
@@ -379,16 +420,12 @@ class VoiceOrderFailure extends Error {
 				? `Owner must provide profile ${VOICE_PROFILE}.`
 				: null;
 		const segment = segmentId ? ` for segment "${segmentId}"` : '';
-		const target = request?.target
-			? `; target ${request.target.duration_seconds.toFixed(3)}s, tolerance ${request.target.tolerance_seconds.toFixed(3)}s`
-			: '; untargeted natural measurement';
-		super(`Voice order${segment} stopped with ${errorCode} (${policy.action})${target}.`);
+		super(`Natural voice order${segment} stopped with ${errorCode} (${policy.action}).`);
 		this.name = 'VoiceOrderFailure';
 		this.errorCode = errorCode;
 		this.action = policy.action;
 		this.prerequisite = prerequisite;
 		this.segmentId = segmentId ?? null;
-		this.target = request?.target ? { ...request.target } : null;
 	}
 }
 
@@ -425,7 +462,6 @@ function validateSuccessResult(request, result) {
 	const successKeys = [
 		'schema_version', 'status', 'request_id', 'request_hash', 'project', 'voice_profile',
 		'profile_revision', 'pronunciation_profile', 'pronunciation_revision', 'audio',
-		...(request.target ? ['target'] : []),
 		'normalized_text', 'normalized_text_sha256', 'engine', 'rendered_at', 'rerendered',
 	];
 	exactObject(result, successKeys, 'Voice success result');
@@ -457,14 +493,6 @@ function validateSuccessResult(request, result) {
 		throw new Error('Voice audio result is invalid.');
 	}
 	finiteNumber(result.audio.duration_seconds, 'Voice audio duration', { positive: true });
-	if (request.target) {
-		exactObject(result.target, ['duration_seconds', 'tolerance_seconds', 'delta_seconds'], 'Voice result target');
-		if (result.target.duration_seconds !== request.target.duration_seconds
-			|| result.target.tolerance_seconds !== request.target.tolerance_seconds) {
-			throw new Error('Voice service target does not match the measured request target.');
-		}
-		finiteNumber(result.target.delta_seconds, 'Voice target delta');
-	}
 	exactObject(result.engine, ['name', 't3_model', 'cli_sha256'], 'Voice engine result');
 	if (result.engine.name !== 'chatterbox-multilingual' || !/^[0-9a-f]{64}$/.test(result.engine.cli_sha256)) {
 		throw new Error('Voice engine provenance is invalid.');
@@ -489,10 +517,10 @@ export async function submitWithPolicy(request, transport, context = {}) {
 	throw new Error('Voice order retry bound is unreachable.');
 }
 
-export function sanitizeVoiceResult({ segment, request, result, basename } = {}) {
+export function sanitizeVoiceResult({ segment, request, result, basename, localDurationSeconds } = {}) {
 	validateVoiceRequest(request);
 	validateSuccessResult(request, result);
-	if (!request.target) throw new Error('Final narration requires a duration-gated voice result.');
+	finiteNumber(localDurationSeconds, 'Locally measured narration duration', { positive: true });
 	if (!segment || typeof segment.id !== 'string' || basename !== `${segment.id}.wav`) {
 		throw new Error('Voice narration basename must derive from its segment id.');
 	}
@@ -512,8 +540,7 @@ export function sanitizeVoiceResult({ segment, request, result, basename } = {})
 			basename,
 			sha256: result.audio.sha256,
 		},
-		duration_seconds: result.audio.duration_seconds,
-		target: { ...result.target },
+		duration_seconds: localDurationSeconds,
 		engine: { ...result.engine },
 		rendered_at: result.rendered_at,
 	}, 'Changedrop narration entry');
@@ -531,8 +558,7 @@ export function buildFitReceipt({ fitted, script, requests, results } = {}) {
 	const segments = fitted.segments.map((fit, index) => {
 		const request = requests[index];
 		const result = validateSuccessResult(request, results[index]);
-		if (request.target) throw new Error('Natural narration measurement requests must not carry a target.');
-		if (fit.id !== script.segments[index].id || result.audio.duration_seconds !== fit.natural_duration_seconds) {
+		if (fit.id !== script.segments[index].id) {
 			throw new Error(`Natural narration fit result is stale at "${fit.id}".`);
 		}
 		return {
@@ -604,7 +630,7 @@ function parseArguments(argv) {
 	for (const name of ['--phase', '--script', '--timings', '--out']) {
 		if (!values.has(name)) throw new Error(`${name} is required.`);
 	}
-	if (!['measure', 'gate'].includes(values.get('--phase'))) throw new Error('--phase must be measure or gate.');
+	if (!['measure', 'validate'].includes(values.get('--phase'))) throw new Error('--phase must be measure or validate.');
 	return {
 		phase: values.get('--phase'),
 		script: values.get('--script'),
@@ -634,7 +660,80 @@ async function ensurePrivateParents(root, directory) {
 	}
 }
 
-async function verifiedAudioBytes(result) {
+export function inspectDeliveredWav(value) {
+	const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value ?? []);
+	if (bytes.length < 44 || bytes.toString('ascii', 0, 4) !== 'RIFF'
+		|| bytes.toString('ascii', 8, 12) !== 'WAVE') {
+		throw new Error('Delivered narration is not a RIFF/WAVE file.');
+	}
+	if (bytes.readUInt32LE(4) + 8 !== bytes.length) throw new Error('Delivered WAV RIFF length is invalid.');
+	let format = null;
+	let dataBytes = null;
+	for (let offset = 12; offset + 8 <= bytes.length;) {
+		const id = bytes.toString('ascii', offset, offset + 4);
+		const size = bytes.readUInt32LE(offset + 4);
+		const start = offset + 8;
+		const end = start + size;
+		if (end > bytes.length) throw new Error('Delivered WAV contains a truncated chunk.');
+		if (id === 'fmt ') {
+			if (size < 16) throw new Error('Delivered WAV format chunk is too short.');
+			format = {
+				encoding: bytes.readUInt16LE(start),
+				channels: bytes.readUInt16LE(start + 2),
+				sampleRate: bytes.readUInt32LE(start + 4),
+				byteRate: bytes.readUInt32LE(start + 8),
+				blockAlign: bytes.readUInt16LE(start + 12),
+				bitsPerSample: bytes.readUInt16LE(start + 14),
+			};
+		} else if (id === 'data' && dataBytes === null) {
+			dataBytes = size;
+		}
+		offset = end + (size % 2);
+	}
+	if (!format || dataBytes === null || dataBytes <= 0) throw new Error('Delivered WAV is missing format or positive audio data.');
+	if (format.encoding !== 1 || format.bitsPerSample !== 16) throw new Error('Delivered WAV must contain 16-bit PCM audio.');
+	if (format.sampleRate !== 24_000) throw new Error('Delivered WAV must use a 24 kHz sample rate.');
+	if (format.channels !== 1) throw new Error('Delivered WAV must be mono (one channel).');
+	const expectedBlockAlign = format.channels * format.bitsPerSample / 8;
+	if (format.blockAlign !== expectedBlockAlign || format.byteRate !== format.sampleRate * expectedBlockAlign
+		|| dataBytes % format.blockAlign !== 0) {
+		throw new Error('Delivered WAV format and data lengths are inconsistent.');
+	}
+	const durationSeconds = dataBytes / format.byteRate;
+	finiteNumber(durationSeconds, 'Delivered WAV duration', { positive: true });
+	return {
+		sample_rate: format.sampleRate,
+		channels: format.channels,
+		sample_width_bits: format.bitsPerSample,
+		data_bytes: dataBytes,
+		duration_seconds: durationSeconds,
+	};
+}
+
+async function verifiedStoredNarration(file, entry) {
+	if (!entry || entry.audio?.basename !== `${entry.id}.wav` || !/^[0-9a-f]{64}$/.test(entry.audio.sha256)) {
+		throw new Error('Changedrop narration audio identity is invalid.');
+	}
+	let metadata;
+	try {
+		metadata = await lstat(file);
+	} catch {
+		throw new Error(`Delivered narration for segment "${entry.id}" is missing.`);
+	}
+	if (!metadata.isFile() || metadata.isSymbolicLink()) {
+		throw new Error(`Delivered narration for segment "${entry.id}" is not a regular file.`);
+	}
+	const bytes = await readFile(file);
+	const digest = createHash('sha256').update(bytes).digest('hex');
+	if (digest !== entry.audio.sha256) throw new Error(`Delivered narration hash differs for segment "${entry.id}".`);
+	const wav = inspectDeliveredWav(bytes);
+	if (Math.abs(wav.duration_seconds - entry.duration_seconds) > 1 / wav.sample_rate) {
+		throw new Error(`Delivered narration duration differs from its manifest for segment "${entry.id}".`);
+	}
+	return wav;
+}
+
+async function verifiedDeliveredAudio(result) {
 	let metadata;
 	try {
 		metadata = await lstat(result.audio.path);
@@ -645,9 +744,15 @@ async function verifiedAudioBytes(result) {
 		throw new Error('Voice audio artifact is not the verified regular file described by the service.');
 	}
 	const bytes = await readFile(result.audio.path);
+	if (bytes.length !== result.audio.bytes) throw new Error('Voice audio artifact byte length differs from the service result.');
 	const digest = createHash('sha256').update(bytes).digest('hex');
 	if (digest !== result.audio.sha256) throw new Error('Voice audio artifact hash differs from the service result.');
-	return bytes;
+	const wav = inspectDeliveredWav(bytes);
+	if (wav.sample_rate !== result.audio.sample_rate || wav.channels !== result.audio.channels
+		|| wav.sample_width_bits !== result.audio.sample_width_bits) {
+		throw new Error('Voice audio artifact format differs from the service result.');
+	}
+	return { bytes, wav };
 }
 
 export async function main({
@@ -674,8 +779,9 @@ export async function main({
 	if (!scriptPath) throw new Error('--script must resolve inside EZHUD_CHANGEDROP_ROOT.');
 	if (!timingsPath) throw new Error('--timings must resolve inside EZHUD_CHANGEDROP_ROOT.');
 	if (!output) throw new Error('--out must resolve inside EZHUD_CHANGEDROP_ROOT.');
-	if (scriptPath.startsWith(`${output}${path.sep}`) || timingsPath.startsWith(`${output}${path.sep}`)) {
-		throw new Error('--out may not contain a voice input file.');
+	if (args.phase === 'measure'
+		&& (scriptPath.startsWith(`${output}${path.sep}`) || timingsPath.startsWith(`${output}${path.sep}`))) {
+		throw new Error('--out may not contain a voice input file during measurement.');
 	}
 	let script;
 	let timings;
@@ -687,70 +793,72 @@ export async function main({
 	} catch {
 		throw new Error('Could not read changedrop voice inputs inside EZHUD_CHANGEDROP_ROOT.');
 	}
-	const requests = args.phase === 'measure'
-		? buildMeasurementRequests({ script, timings })
-		: buildVoiceRequests({ script, timings });
+	if (args.phase === 'validate') {
+		let narration;
+		try {
+			narration = JSON.parse(await readFile(path.join(output, 'narration.json'), 'utf8'));
+		} catch {
+			throw new Error('Could not read delivered changedrop narration inside EZHUD_CHANGEDROP_ROOT.');
+		}
+		validateNarrationManifest(narration, script);
+		for (const entry of narration.segments) {
+			await verifiedStoredNarration(path.join(output, entry.audio.basename), entry);
+		}
+		assertNarrationFitsCapture({ script, timings, narration });
+		stdout(JSON.stringify(narration));
+		return narration;
+	}
+
+	const requests = buildMeasurementRequests({ script, timings });
 	await ensurePrivateParents(root, path.dirname(output));
 	const staging = `${output}.staging-${process.pid}`;
 	await rm(staging, { recursive: true, force: true });
 	await mkdir(staging, { mode: 0o700 });
 	await chmod(staging, 0o700);
 	try {
-		let outputReceipt;
-		if (args.phase === 'measure') {
-			const results = [];
-			for (const [index, request] of requests.entries()) {
-				const segment = script.segments[index];
-				const { result } = await submitWithPolicy(request, transport, { segmentId: segment.id });
-				const basename = `${segment.id}.wav`;
-				const bytes = await verifiedAudioBytes(result);
-				const audioFile = path.join(staging, basename);
-				await writeFile(audioFile, bytes, { mode: 0o600 });
-				await chmod(audioFile, 0o600);
-				results.push(result);
-			}
-			const fitted = fitCaptureScript({
-				script,
-				timings,
-				measurements: results.map((result, index) => ({
-					id: script.segments[index].id,
-					duration_seconds: result.audio.duration_seconds,
-				})),
-			});
-			outputReceipt = buildFitReceipt({ fitted, script, requests, results });
-			const fittedScriptFile = path.join(staging, 'script.json');
-			const fitManifest = path.join(staging, 'fit.json');
-			await writeFile(fittedScriptFile, `${JSON.stringify(fitted.script, null, 2)}\n`, { mode: 0o600 });
-			await writeFile(fitManifest, `${JSON.stringify(outputReceipt, null, 2)}\n`, { mode: 0o600 });
-			await chmod(fittedScriptFile, 0o600);
-			await chmod(fitManifest, 0o600);
-		} else {
-			const segments = [];
-			for (const [index, request] of requests.entries()) {
-				const segment = script.segments[index];
-				const { result } = await submitWithPolicy(request, transport, { segmentId: segment.id });
-				const basename = `${segment.id}.wav`;
-				const bytes = await verifiedAudioBytes(result);
-				const audioFile = path.join(staging, basename);
-				await writeFile(audioFile, bytes, { mode: 0o600 });
-				await chmod(audioFile, 0o600);
-				segments.push(sanitizeVoiceResult({ segment, request, result, basename }));
-			}
-			outputReceipt = privacyChecked({
-				schema_version: OUTPUT_SCHEMA_VERSION,
-				project: PROJECT,
-				voice_profile: VOICE_PROFILE,
-				segments,
-			}, 'Changedrop narration');
-			const manifest = path.join(staging, 'narration.json');
-			await writeFile(manifest, `${JSON.stringify(outputReceipt, null, 2)}\n`, { mode: 0o600 });
-			await chmod(manifest, 0o600);
+		const results = [];
+		const localMeasurements = [];
+		const narrationSegments = [];
+		for (const [index, request] of requests.entries()) {
+			const segment = script.segments[index];
+			const { result } = await submitWithPolicy(request, transport, { segmentId: segment.id });
+			const basename = `${segment.id}.wav`;
+			const delivered = await verifiedDeliveredAudio(result);
+			const audioFile = path.join(staging, basename);
+			await writeFile(audioFile, delivered.bytes, { mode: 0o600 });
+			await chmod(audioFile, 0o600);
+			results.push(result);
+			localMeasurements.push({ id: segment.id, duration_seconds: delivered.wav.duration_seconds });
+			narrationSegments.push(sanitizeVoiceResult({
+				segment,
+				request,
+				result,
+				basename,
+				localDurationSeconds: delivered.wav.duration_seconds,
+			}));
 		}
+		const fitted = fitCaptureScript({ script, timings, measurements: localMeasurements });
+		const fitReceipt = buildFitReceipt({ fitted, script, requests, results });
+		const narration = validateNarrationManifest(privacyChecked({
+			schema_version: OUTPUT_SCHEMA_VERSION,
+			project: PROJECT,
+			voice_profile: VOICE_PROFILE,
+			segments: narrationSegments,
+		}, 'Changedrop narration'), script);
+		const fittedScriptFile = path.join(staging, 'script.json');
+		const fitManifest = path.join(staging, 'fit.json');
+		const narrationManifest = path.join(staging, 'narration.json');
+		await writeFile(fittedScriptFile, `${JSON.stringify(fitted.script, null, 2)}\n`, { mode: 0o600 });
+		await writeFile(fitManifest, `${JSON.stringify(fitReceipt, null, 2)}\n`, { mode: 0o600 });
+		await writeFile(narrationManifest, `${JSON.stringify(narration, null, 2)}\n`, { mode: 0o600 });
+		await chmod(fittedScriptFile, 0o600);
+		await chmod(fitManifest, 0o600);
+		await chmod(narrationManifest, 0o600);
 		await rm(output, { recursive: true, force: true });
 		await rename(staging, output);
 		await chmod(output, 0o700);
-		stdout(JSON.stringify(outputReceipt));
-		return outputReceipt;
+		stdout(JSON.stringify(narration));
+		return narration;
 	} catch (error) {
 		await rm(staging, { recursive: true, force: true });
 		throw error;

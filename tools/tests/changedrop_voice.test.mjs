@@ -18,6 +18,27 @@ const fixture = async (name) => JSON.parse(await readFile(path.join(fixtureDir, 
 const HASH = 'a'.repeat(64);
 const syntheticAudioPath = () => path.resolve(path.sep, 'private-fixture', 'voice.wav');
 
+function wavBytes(durationSeconds, { sampleRate = 24_000, channels = 1 } = {}) {
+	const sampleWidthBytes = 2;
+	const frames = Math.max(1, Math.round(durationSeconds * sampleRate));
+	const dataBytes = frames * channels * sampleWidthBytes;
+	const bytes = Buffer.alloc(44 + dataBytes);
+	bytes.write('RIFF', 0, 'ascii');
+	bytes.writeUInt32LE(bytes.length - 8, 4);
+	bytes.write('WAVE', 8, 'ascii');
+	bytes.write('fmt ', 12, 'ascii');
+	bytes.writeUInt32LE(16, 16);
+	bytes.writeUInt16LE(1, 20);
+	bytes.writeUInt16LE(channels, 22);
+	bytes.writeUInt32LE(sampleRate, 24);
+	bytes.writeUInt32LE(sampleRate * channels * sampleWidthBytes, 28);
+	bytes.writeUInt16LE(channels * sampleWidthBytes, 32);
+	bytes.writeUInt16LE(sampleWidthBytes * 8, 34);
+	bytes.write('data', 36, 'ascii');
+	bytes.writeUInt32LE(dataBytes, 40);
+	return bytes;
+}
+
 let voice;
 let loadError;
 try {
@@ -38,7 +59,7 @@ async function inputs() {
 
 function resultFor(request, audioPath, {
 	status = 'rendered', rerendered = true, sha256 = HASH, bytes = 48_044,
-	durationSeconds = request.target?.duration_seconds ?? 3.84,
+	durationSeconds = 3.84,
 } = {}) {
 	return {
 		schema_version: 'voice-order/1',
@@ -60,13 +81,6 @@ function resultFor(request, audioPath, {
 			sample_width_bits: 16,
 			duration_seconds: durationSeconds,
 		},
-		...(request.target ? {
-			target: {
-				duration_seconds: request.target.duration_seconds,
-				tolerance_seconds: request.target.tolerance_seconds,
-				delta_seconds: 0,
-			},
-		} : {}),
 		normalized_text: request.text,
 		normalized_text_sha256: HASH,
 		engine: {
@@ -129,16 +143,64 @@ function stringsIn(value) {
 	return [];
 }
 
+test('review revision: natural delivery is the only request and target builder is retired', async () => {
+	assert.ifError(loadError);
+	const { script, timings } = await inputs();
+	assert.equal(typeof voice.buildVoiceRequests, 'undefined');
+	const requests = voice.buildMeasurementRequests({ script, timings });
+	for (const request of requests) {
+		assert.equal('target' in request, false);
+		assert.deepEqual(Object.keys(request), [
+			'schema_version', 'request_id', 'project', 'voice_profile', 'mode', 'style',
+			'language', 'text', 'delivery',
+		]);
+	}
+});
+
+test('review revision: delivered WAV is measured locally from its bytes', async () => {
+	assert.ifError(loadError);
+	assert.equal(typeof voice.inspectDeliveredWav, 'function');
+	const bytes = wavBytes(3.84);
+	const inspected = voice.inspectDeliveredWav(bytes);
+	assert.equal(inspected.sample_rate, 24_000);
+	assert.equal(inspected.channels, 1);
+	assert.ok(Math.abs(inspected.duration_seconds - 3.84) < 0.001);
+	assert.throws(() => voice.inspectDeliveredWav(wavBytes(1, { sampleRate: 48_000 })), /24 kHz|24000/i);
+	assert.throws(() => voice.inspectDeliveredWav(wavBytes(1, { channels: 2 })), /mono|one channel/i);
+	assert.throws(() => voice.inspectDeliveredWav(Buffer.from('not a wav')), /WAV|RIFF/i);
+});
+
+test('review revision: local fit failure names segment and audio and capture durations', async () => {
+	assert.ifError(loadError);
+	assert.equal(typeof voice.assertNarrationFitsCapture, 'function');
+	const { script, timings } = await inputs();
+	const narration = {
+		schema_version: 'changedrop-narration/1',
+		project: 'ezhud',
+		voice_profile: 'xeri-en-v1',
+		segments: script.segments.map((segment, index) => ({
+			id: segment.id,
+			duration_seconds: index === 1 ? timings.segments[index].duration_seconds + 0.501 : timings.segments[index].duration_seconds,
+		})),
+	};
+	assert.throws(() => voice.assertNarrationFitsCapture({ script, timings, narration }), (error) => {
+		assert.match(error.message, /snap-magnet/);
+		assert.match(error.message, /audio[^\n]*2\.361/i);
+		assert.match(error.message, /capture[^\n]*1\.860/i);
+		return true;
+	});
+});
+
 test('case 1: built requests validate with exact fixed fields and no forbidden controls', async () => {
 	assert.ifError(loadError);
 	const { script, timings } = await inputs();
-	const requests = voice.buildVoiceRequests({ script, timings });
+	const requests = voice.buildMeasurementRequests({ script, timings });
 	assert.equal(requests.length, script.segments.length);
 	for (const request of requests) {
 		assert.equal(voice.validateVoiceRequest(request), request);
 		assert.deepEqual(Object.keys(request), [
 			'schema_version', 'request_id', 'project', 'voice_profile', 'mode', 'style',
-			'language', 'text', 'delivery', 'target',
+			'language', 'text', 'delivery',
 		]);
 		assert.deepEqual(request.delivery, { container: 'wav', sample_rate: 24_000, channels: 1 });
 		assert.equal(request.schema_version, 'voice-order/1');
@@ -154,29 +216,21 @@ test('case 1: built requests validate with exact fixed fields and no forbidden c
 	for (const field of ['output_path', 'reference_path', 'model', 'generation_settings', 'seed', 'renderer_args', 'extra_args']) {
 		assert.throws(() => voice.validateVoiceRequest({ ...requests[0], [field]: 'forbidden' }), /unexpected field/i);
 	}
-	const rerun = voice.buildVoiceRequests({ script: structuredClone(script), timings: structuredClone(timings) });
+	const rerun = voice.buildMeasurementRequests({ script: structuredClone(script), timings: structuredClone(timings) });
 	assert.deepEqual(rerun.map((request) => request.request_id), requests.map((request) => request.request_id));
 	const changed = structuredClone(script);
 	changed.segments[1].text += ' Changed.';
-	assert.notEqual(voice.buildVoiceRequests({ script: changed, timings })[1].request_id, requests[1].request_id);
+	assert.notEqual(voice.buildMeasurementRequests({ script: changed, timings })[1].request_id, requests[1].request_id);
 });
 
-test('case 2: duration target is measured, paired with tolerance, and corrected bookends fit the probe', async () => {
+test('case 2: delivery requests reject target and corrected bookends remain fit padding', async () => {
 	assert.ifError(loadError);
 	const { script, timings } = await inputs();
-	const requests = voice.buildVoiceRequests({ script, timings });
-	for (const [index, request] of requests.entries()) {
-		assert.deepEqual(Object.keys(request.target), ['duration_seconds', 'tolerance_seconds']);
-		assert.equal(request.target.duration_seconds,
-			Number(timings.segments[index].duration_seconds.toFixed(3)));
-		assert.equal(request.target.tolerance_seconds, 0.5);
-	}
-	const unpaired = structuredClone(requests[0]);
-	delete unpaired.target.tolerance_seconds;
-	assert.throws(() => voice.validateVoiceRequest(unpaired), /target.*both|target.*missing.*tolerance_seconds|tolerance_seconds.*required/i);
-	const untargeted = structuredClone(requests[0]);
-	delete untargeted.target;
-	assert.equal(voice.validateVoiceRequest(untargeted), untargeted);
+	const requests = voice.buildMeasurementRequests({ script, timings });
+	for (const request of requests) assert.equal('target' in request, false);
+	assert.throws(() => voice.validateVoiceRequest({
+		...requests[0], target: { duration_seconds: 4.2, tolerance_seconds: 0.5 },
+	}), /unexpected field.*target/i);
 
 	const authoring = JSON.parse(await readFile(path.join(repo, 'docs', 'release-1', 'changedrop-script.json'), 'utf8'));
 	const introHold = authoring.bookends.intro_walkthrough.find((step) => step.action === 'hold');
@@ -187,28 +241,8 @@ test('case 2: duration target is measured, paired with tolerance, and corrected 
 		'known 3.840-second intro render does not fit corrected hold');
 	const staleCapture = structuredClone(timings);
 	staleCapture.segments[0].actions[0].duration_ms -= 1000;
-	assert.throws(() => voice.buildVoiceRequests({ script, timings: staleCapture }),
+	assert.throws(() => voice.buildMeasurementRequests({ script, timings: staleCapture }),
 		/intro.*stale.*capture|action sequence.*intro.*capture/i);
-});
-
-test('review blocker: target duration is quantised to millisecond precision before hashing', async () => {
-	assert.ifError(loadError);
-	assert.equal(voice.TARGET_DURATION_DECIMALS, 3);
-	const { script, timings } = await inputs();
-	const noisy = structuredClone(timings);
-	noisy.segments[1].duration_seconds = 4.980055691;
-	noisy.segments[2].start_seconds = 6.2;
-	noisy.recording.duration_seconds = 7;
-	const rounded = structuredClone(noisy);
-	rounded.segments[1].duration_seconds = 4.98;
-	const noisyRequests = voice.buildVoiceRequests({ script, timings: noisy });
-	const roundedRequests = voice.buildVoiceRequests({ script, timings: rounded });
-	assert.equal(noisyRequests[1].target.duration_seconds, 4.98);
-	assert.equal(noisyRequests[1].request_id, roundedRequests[1].request_id,
-		'sub-millisecond capture noise changed the effective request hash');
-	const overPrecise = structuredClone(noisyRequests[1]);
-	overPrecise.target.duration_seconds = 4.980055691;
-	assert.throws(() => voice.validateVoiceRequest(overPrecise), /millisecond|three decimal|precision/i);
 });
 
 test('review blocker: natural measurement fits explicit padding while fixed actions and prose stay unchanged', async () => {
@@ -222,16 +256,14 @@ test('review blocker: natural measurement fits explicit padding while fixed acti
 		assert.ok(padding.every((step) => step.action === 'hold'));
 	}
 	const measurementRequests = voice.buildMeasurementRequests({ script, timings });
-	const gateRequests = voice.buildVoiceRequests({ script, timings });
 	assert.equal(measurementRequests.length, script.segments.length);
-	for (const [index, request] of measurementRequests.entries()) {
+	for (const request of measurementRequests) {
 		assert.equal('target' in request, false);
 		assert.deepEqual(Object.keys(request), [
 			'schema_version', 'request_id', 'project', 'voice_profile', 'mode', 'style',
 			'language', 'text', 'delivery',
 		]);
 		assert.equal(voice.validateVoiceRequest(request), request);
-		assert.notEqual(request.request_id, gateRequests[index].request_id);
 		assert.doesNotMatch(JSON.stringify(request),
 			/output|reference|model|generation|seed|renderer|extra[_-]?args/i);
 	}
@@ -260,7 +292,7 @@ test('review blocker: natural measurement fits explicit padding while fixed acti
 		assert.ok(segment.walkthrough.filter((step) => step.fit === 'narration')
 			.every((step) => step.duration_ms >= 100 && step.duration_ms <= 5000));
 	}
-	assert.throws(() => voice.buildVoiceRequests({ script: fitted.script, timings }), /stale.*capture|action sequence/i);
+	assert.throws(() => voice.buildMeasurementRequests({ script: fitted.script, timings }), /stale.*capture|action sequence/i);
 
 	const releaseAuthoring = JSON.parse(await readFile(path.join(repo, 'docs', 'release-1', 'changedrop-script.json'), 'utf8'));
 	const releaseScript = authorChangedropScript(await fixture('script-render.json'), releaseAuthoring, {
@@ -349,7 +381,7 @@ test('review mechanism: measure phase is offline-injectable and writes a closed 
 	const durations = [3.84, 6.134, 3.88];
 	const results = new Map();
 	for (const [index, request] of requests.entries()) {
-		const bytes = Buffer.from(`offline natural audio ${request.request_id}`);
+		const bytes = wavBytes(durations[index]);
 		const audioPath = path.join(root, 'release', 'run', `${request.request_id}.source.wav`);
 		await writeFile(audioPath, bytes, { mode: 0o600 });
 		const sha256 = (await import('node:crypto')).createHash('sha256').update(bytes).digest('hex');
@@ -359,7 +391,7 @@ test('review mechanism: measure phase is offline-injectable and writes a closed 
 	}
 	const seen = [];
 	let printed = '';
-	const receipt = await voice.main({
+	const narration = await voice.main({
 		env: { ...process.env, EZHUD_CHANGEDROP_ROOT: root },
 		argv: [
 			'--phase', 'measure',
@@ -378,37 +410,81 @@ test('review mechanism: measure phase is offline-injectable and writes a closed 
 	assert.equal(printed.includes(root), false);
 	const fitDir = path.join(root, 'release', 'run', 'fit');
 	const fitText = await readFile(path.join(fitDir, 'fit.json'), 'utf8');
+	const narrationText = await readFile(path.join(fitDir, 'narration.json'), 'utf8');
 	assert.equal(fitText.includes(root), false);
-	assert.deepEqual(JSON.parse(fitText), receipt);
+	assert.equal(narrationText.includes(root), false);
+	assert.deepEqual(JSON.parse(narrationText), narration);
+	const fitReceipt = JSON.parse(fitText);
 	const schema = JSON.parse(await readFile(
 		path.join(repo, 'tools', 'changedrop', 'schemas', 'changedrop-voice-fit.v1.json'), 'utf8'));
-	assert.deepEqual(schemaErrors(receipt, schema), []);
+	assert.deepEqual(schemaErrors(fitReceipt, schema), []);
 	assert.equal(schema.properties.segments.items.properties.audio.additionalProperties, false);
 	assert.equal('path' in schema.properties.segments.items.properties.audio.properties, false);
-	assert.deepEqual(Object.keys(receipt.segments[0].audio), ['basename', 'sha256']);
+	assert.deepEqual(Object.keys(fitReceipt.segments[0].audio), ['basename', 'sha256']);
+	assert.deepEqual(narration.segments.map((entry) => entry.audio.sha256),
+		fitReceipt.segments.map((entry) => entry.audio.sha256));
 	const names = await readdir(fitDir);
-	assert.deepEqual(names.sort(), ['fit.json', 'intro.wav', 'outro.wav', 'script.json', 'snap-magnet.wav']);
+	assert.deepEqual(names.sort(), ['fit.json', 'intro.wav', 'narration.json', 'outro.wav', 'script.json', 'snap-magnet.wav']);
 	for (const name of names) assert.equal((await stat(path.join(fitDir, name))).mode & 0o777, 0o600);
-});
 
-test('review blocker: duration failure names segment target and tolerance', async () => {
-	assert.ifError(loadError);
-	const { script, timings } = await inputs();
-	const request = voice.buildVoiceRequests({ script, timings })[1];
-	await assert.rejects(
-		voice.submitWithPolicy(request, async () => ({
-			exitCode: 9,
-			stdout: JSON.stringify(failed(request, 'E_DURATION_OUT_OF_TOLERANCE')),
-			stderr: '',
-		}), { segmentId: script.segments[1].id }),
-		(error) => {
-			assert.equal(error.errorCode, 'E_DURATION_OUT_OF_TOLERANCE');
-			assert.match(error.message, /snap-magnet/);
-			assert.match(error.message, new RegExp(request.target.duration_seconds.toFixed(3).replace('.', '\\.'), 'i'));
-			assert.match(error.message, /tolerance[^\n]*0\.500/i);
-			return true;
-		},
-	);
+	const fittedScript = JSON.parse(await readFile(path.join(fitDir, 'script.json'), 'utf8'));
+	let cursor = 0.1;
+	const observations = fittedScript.segments.map((segment, index) => {
+		const start_seconds = cursor;
+		const duration_seconds = narration.segments[index].duration_seconds;
+		const highlights = segment.walkthrough.filter((step) => step.action === 'highlight').map((step, highlightIndex) => ({
+			timestamp_seconds: start_seconds + Math.min(0.1, duration_seconds / 2),
+			selector: step.selector,
+			badge: step.badge,
+			source_basename: `stills/sources/${segment.id}-${highlightIndex + 1}.png`,
+			source_bytes: 512,
+			basename: `stills/${segment.id}-${highlightIndex + 1}.png`,
+			bytes: 640,
+		}));
+		cursor += duration_seconds + 0.05;
+		return { id: segment.id, start_seconds, duration_seconds, highlights };
+	});
+	const fittedTimings = buildTimingReceipt({
+		script: fittedScript,
+		recording: { basename: 'walkthrough.webm', bytes: 2048, duration_seconds: cursor + 0.1 },
+		observations,
+	});
+	const fittedTimingsPath = path.join(root, 'release', 'run', 'fitted-timings.json');
+	await writeFile(fittedTimingsPath, `${JSON.stringify(fittedTimings)}\n`, { mode: 0o600 });
+	let validationCalls = 0;
+	const validated = await voice.main({
+		env: { ...process.env, EZHUD_CHANGEDROP_ROOT: root },
+		argv: [
+			'--phase', 'validate',
+			'--script', 'release/run/fit/script.json',
+			'--timings', 'release/run/fitted-timings.json',
+			'--out', 'release/run/fit',
+		],
+		transport: async () => { validationCalls += 1; },
+		stdout: () => {},
+	});
+	assert.equal(validationCalls, 0, 'local validation called the voice service');
+	assert.deepEqual(validated, narration);
+
+	const mismatched = structuredClone(fittedTimings);
+	mismatched.segments[1].duration_seconds += 0.501;
+	for (let index = 2; index < mismatched.segments.length; index += 1) {
+		mismatched.segments[index].start_seconds += 0.6;
+		for (const highlight of mismatched.segments[index].highlights) highlight.timestamp_seconds += 0.6;
+	}
+	mismatched.recording.duration_seconds += 0.6;
+	await writeFile(fittedTimingsPath, `${JSON.stringify(mismatched)}\n`, { mode: 0o600 });
+	await assert.rejects(voice.main({
+		env: { ...process.env, EZHUD_CHANGEDROP_ROOT: root },
+		argv: [
+			'--phase', 'validate',
+			'--script', 'release/run/fit/script.json',
+			'--timings', 'release/run/fitted-timings.json',
+			'--out', 'release/run/fit',
+		],
+		transport: async () => { validationCalls += 1; },
+	}), /snap-magnet.*audio.*capture.*tolerance/i);
+	assert.equal(validationCalls, 0);
 });
 
 test('case 3: every documented error code maps by code to its specified action', async () => {
@@ -421,7 +497,7 @@ test('case 3: every documented error code maps by code to its specified action',
 		E_TEXT_UNSAFE: 'script-defect',
 		E_TEXT_TOO_LONG: 'script-defect',
 		E_OVERRIDE_INVALID: 'script-defect',
-		E_DURATION_OUT_OF_TOLERANCE: 'refit-padding',
+		E_DURATION_OUT_OF_TOLERANCE: 'service-contract-bug',
 		E_REQUEST_ID_CONFLICT: 'request-builder-bug',
 		E_LOCK_TIMEOUT: 'retry-identical',
 		E_INTERNAL: 'retry-identical',
@@ -436,7 +512,7 @@ test('case 3: every documented error code maps by code to its specified action',
 	assert.throws(() => voice.policyForError('E_UNDOCUMENTED'), /undocumented.*E_UNDOCUMENTED|E_UNDOCUMENTED.*unknown/i);
 
 	const { script, timings } = await inputs();
-	const request = voice.buildVoiceRequests({ script, timings })[0];
+	const request = voice.buildMeasurementRequests({ script, timings })[0];
 	const seen = [];
 	const success = resultFor(request, syntheticAudioPath());
 	const submitted = await voice.submitWithPolicy(request, async (sameRequest) => {
@@ -462,7 +538,7 @@ test('case 3: every documented error code maps by code to its specified action',
 test('case 4: project/profile refusal stops once with a recorded prerequisite and no fallback', async () => {
 	assert.ifError(loadError);
 	const { script, timings } = await inputs();
-	const request = voice.buildVoiceRequests({ script, timings })[0];
+	const request = voice.buildMeasurementRequests({ script, timings })[0];
 	for (const code of ['E_PROJECT_NOT_ALLOWED', 'E_PROFILE_UNKNOWN']) {
 		let calls = 0;
 		await assert.rejects(
@@ -485,7 +561,7 @@ test('case 4: project/profile refusal stops once with a recorded prerequisite an
 test('case 5: duplicate with rerendered false succeeds once and never retries', async () => {
 	assert.ifError(loadError);
 	const { script, timings } = await inputs();
-	const request = voice.buildVoiceRequests({ script, timings })[0];
+	const request = voice.buildMeasurementRequests({ script, timings })[0];
 	let calls = 0;
 	const duplicate = resultFor(request, syntheticAudioPath(), { status: 'duplicate', rerendered: false });
 	const submitted = await voice.submitWithPolicy(request, async () => {
@@ -508,12 +584,13 @@ test('case 6: tier-1 command contract is offline and refuses before any service 
 	assert.equal(packageJson.scripts?.['changedrop:voice'], 'node tools/changedrop/voice.mjs');
 	const source = await readFile(path.join(repo, 'tools', 'changedrop', 'voice.mjs'), 'utf8');
 	assert.doesNotMatch(source, /microphone|fallback voice|substitute engine/i);
+	assert.doesNotMatch(source, /\btarget\b/i);
 	assert.doesNotMatch(source, /execFileSync|spawnSync|execSync/);
 	const env = { ...process.env };
 	delete env.EZHUD_CHANGEDROP_ROOT;
 	await assert.rejects(execFileAsync(process.execPath, [
 		path.join(repo, 'tools', 'changedrop', 'voice.mjs'),
-		'--phase', 'gate',
+		'--phase', 'measure',
 		'--script', 'release-1/run/script.json',
 		'--timings', 'release-1/run/capture/timings.json',
 		'--out', 'release-1/run/narration',
@@ -535,6 +612,16 @@ test('case 6: tier-1 command contract is offline and refuses before any service 
 		],
 		transport: async () => { calls += 1; },
 	}), /--phase is required/i);
+	await assert.rejects(voice.main({
+		env: { ...process.env, EZHUD_CHANGEDROP_ROOT: root },
+		argv: [
+			'--phase', 'gate',
+			'--script', 'release/run/script.json',
+			'--timings', 'release/run/timings.json',
+			'--out', 'release/run/narration',
+		],
+		transport: async () => { calls += 1; },
+	}), /--phase must be measure or validate/i);
 	assert.equal(calls, 0);
 
 });
@@ -542,19 +629,21 @@ test('case 6: tier-1 command contract is offline and refuses before any service 
 test('case 7: sanitized narration strips audio.path and validates with basename and sha256 only', async (t) => {
 	assert.ifError(loadError);
 	const { script, timings } = await inputs();
-	const request = voice.buildVoiceRequests({ script, timings })[0];
+	const request = voice.buildMeasurementRequests({ script, timings })[0];
 	const result = resultFor(request, syntheticAudioPath());
 	const entry = voice.sanitizeVoiceResult({
 		segment: script.segments[0],
 		request,
 		result,
 		basename: 'intro.wav',
+		localDurationSeconds: 3.84,
 	});
 	assert.equal('path' in entry.audio, false);
+	assert.equal('target' in entry, false);
 	assert.deepEqual(Object.keys(entry.audio), ['basename', 'sha256']);
 	assert.equal(entry.audio.basename, 'intro.wav');
 	assert.equal(entry.audio.sha256, HASH);
-	assert.equal(entry.duration_seconds, result.audio.duration_seconds);
+	assert.equal(entry.duration_seconds, 3.84);
 	assert.equal(JSON.stringify(entry).includes(result.audio.path), false);
 	const narration = {
 		schema_version: 'changedrop-narration/1',
@@ -567,6 +656,7 @@ test('case 7: sanitized narration strips audio.path and validates with basename 
 	assert.equal(schema.additionalProperties, false);
 	assert.equal(schema.properties.segments.items.properties.audio.additionalProperties, false);
 	assert.equal('path' in schema.properties.segments.items.properties.audio.properties, false);
+	assert.equal('target' in schema.properties.segments.items.properties, false);
 	assert.deepEqual(schemaErrors(narration, schema), []);
 	for (const value of stringsIn(narration)) {
 		assert.equal(path.isAbsolute(value), false, `absolute path escaped into narration: ${JSON.stringify(value)}`);
@@ -582,10 +672,10 @@ test('case 7: sanitized narration strips audio.path and validates with basename 
 	await chmod(path.join(root, 'release', 'run'), 0o700);
 	await writeFile(path.join(root, 'release', 'run', 'script.json'), `${JSON.stringify(script)}\n`, { mode: 0o600 });
 	await writeFile(path.join(root, 'release', 'run', 'timings.json'), `${JSON.stringify(timings)}\n`, { mode: 0o600 });
-	const requests = voice.buildVoiceRequests({ script, timings });
+	const requests = voice.buildMeasurementRequests({ script, timings });
 	const results = new Map();
 	for (const built of requests) {
-		const audioBytes = Buffer.from(`offline audio ${built.request_id}`);
+		const audioBytes = wavBytes(3.84);
 		const audioPath = path.join(root, 'release', 'run', `${built.request_id}.source.wav`);
 		await writeFile(audioPath, audioBytes, { mode: 0o600 });
 		const sha256 = (await import('node:crypto')).createHash('sha256').update(audioBytes).digest('hex');
@@ -595,7 +685,7 @@ test('case 7: sanitized narration strips audio.path and validates with basename 
 	const written = await voice.main({
 		env: { ...process.env, EZHUD_CHANGEDROP_ROOT: root },
 		argv: [
-			'--phase', 'gate',
+			'--phase', 'measure',
 			'--script', 'release/run/script.json',
 			'--timings', 'release/run/timings.json',
 			'--out', 'release/run/narration',

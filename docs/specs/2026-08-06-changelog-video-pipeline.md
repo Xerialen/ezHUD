@@ -46,9 +46,10 @@ contract; these are.
 | 1 | value analyzer | `node tools/changedrop/analyze.mjs --release <id> --out <run>/value-summary.json` | `changedrop-value-summary/1` |
 | 2 | script author | `node tools/changedrop/script.mjs --summary <run>/value-summary.json --authoring docs/release-<N>/changedrop-script.json --out <run>/script.json` | `changedrop-script/1` |
 | 3 | capture (first) | `node tools/changedrop/capture.mjs --script <run>/script.json --dist <dist> --out <run>/capture` | `changedrop-timings/1` |
-| 4a | natural narration measure + padding fit | `node tools/changedrop/voice.mjs --phase measure --script <run>/script.json --timings <run>/capture/timings.json --out <run>/fit` | `changedrop-voice-fit/1` + fitted `changedrop-script/1` |
-| 3b | fitted recapture | `node tools/changedrop/capture.mjs --script <run>/fit/script.json --dist <dist> --out <run>/capture-fitted` | `changedrop-timings/1` |
-| 4b | duration-gated narration order | `node tools/changedrop/voice.mjs --phase gate --script <run>/fit/script.json --timings <run>/capture-fitted/timings.json --out <run>/narration` | `changedrop-narration/1` |
+| 4a | natural narration delivery + padding fit | `node tools/changedrop/voice.mjs --phase measure --script <run>/script.json --timings <run>/capture/timings.json --out <run>/narration` | `changedrop-narration/1`, `changedrop-voice-fit/1` + fitted `changedrop-script/1` |
+| 3b | fitted recapture | `node tools/changedrop/capture.mjs --script <run>/narration/script.json --dist <dist> --out <run>/capture-fitted` | `changedrop-timings/1` |
+| 4b | local delivery validation (no order) | `node tools/changedrop/voice.mjs --phase validate --script <run>/narration/script.json --timings <run>/capture-fitted/timings.json --out <run>/narration` | validated `changedrop-narration/1` |
+| 5a | review payload | `node tools/changedrop/review.mjs --manifest <run>/manifest.json --out <run>/review-payload.json` | `changedrop-review-payload/1` |
 | 5 | mux | `node tools/changedrop/mux.mjs --capture <run>/capture-fitted --narration <run>/narration --out <run>/mux` | `changedrop-manifest/1` |
 | — | orchestrator | `node tools/changedrop/run.mjs --release <id>` | chains 1–5, writes the manifest |
 
@@ -70,12 +71,12 @@ $EZHUD_CHANGEDROP_ROOT/<release>/<run-id>/
   capture/walkthrough.webm
   capture/timings.json
   capture/stills/<surface>.png
-  fit/fit.json
-  fit/script.json
-  fit/<segment-id>.wav
+  narration/fit.json
+  narration/script.json
+  narration/narration.json
+  narration/<segment-id>.wav
   capture-fitted/walkthrough.webm
   capture-fitted/timings.json
-  narration/<segment-id>.wav
   mux/changedrop.mp4
   manifest.json
 ```
@@ -122,6 +123,10 @@ skip video by construction, through the exemption that already exists.
 - **A2** the skip rule holds and stops the run.
 - **A3** an entry whose before/after/value cannot be stated fails with the block
   named. Text is never invented to fill a gap.
+- **A4** `Before:`, `After:` and `Value:` are **mandatory** for every player-facing
+  canonical release feature (owner decision, 2026-08-07). The shared release-note
+  gate enforces them, so a note missing any of the three fails at the gate rather
+  than only here.
 
 ### Stage 2 — script author (`changedrop-script/1`)
 
@@ -190,75 +195,69 @@ source and annotated stills; its human instruction is never rendered.
   structure and a two-second per-segment tolerance, never bytes. Two seconds
   admits real engine-readback jitter while still catching a lost wait or hold.
 
-### Stage 4 — natural measure, padding fit, then gated narration
+### Stage 4 — natural narration delivery and local validation
 
-Transport is always `voice-order submit --wait`, one ordered request per
-segment. Stage 4 has two explicit phases around a real fitted recapture:
+**Owner decision, 2026-08-07: the measure-phase artifact is the delivery
+artifact. The pipeline never target-drives a re-render.**
 
-1. `--phase measure` submits each segment **without `target`**. The service's
-   verified WAV duration is the natural measurement; no word-rate estimate is
-   consulted.
-2. For each segment, fixed action time is its measured Stage 3 duration minus
-   the explicitly marked narration-padding holds. A negative result within
-   25 ms is clamped to zero: pure-padding browser timers can straddle a
-   scheduling boundary, while 25 ms remains well below both the 100 ms minimum
-   hold and the 500 ms final tolerance. A result below -25 ms still fails as a
-   real script/timings disagreement. The fitted padding is `natural duration -
-   fixed action time`, rounded to integer milliseconds. Prose and fixed actions
-   are byte-for-byte unchanged. Each hold remains
-   between 100 and 5,000 ms; totals above 5,000 ms are split evenly across
-   contiguous bounded holds. The private `changedrop-voice-fit/1` receipt stores
-   the calculation, safe request/audio hashes, and a fitted `script.json`.
-3. Stage 3 captures that fitted script for real. This preserves capture-first:
-   app-driven resize/click/wait timing is observed, never predicted, and only
-   explicit padding was changed.
-4. `--phase gate` orders the same narration again, now with the fitted capture's
-   measured target. Sampling can drift; the existing 0.5-second tolerance
-   absorbs small drift and remains the fail-closed gate. It is not widened.
+Chatterbox renders each segment naturally through `voice-order submit --wait`,
+one ordered request per segment. The exact verified WAV returned by that order
+is copied into the private narration directory and is the file that ships.
+No later step orders that text again.
 
-Fixed fields: `schema_version: "voice-order/1"`, `project: "ezhud"`,
-`voice_profile: "xeri-en-v1"`, `mode: "spoken"`, `style: "neutral"`,
-`language: "en"`, delivery `wav / 24000 / 1`. Duration fitting uses the
-**measured** capture timing: `target.duration_seconds` with a fixed 0.5-second
-`tolerance_seconds`, both fields or neither. Before request hashing or submit,
-the measured target is rounded to millisecond precision (at most three decimal
-places). This removes irrelevant capture-clock noise from ids and avoids a
-known service misclassification of over-precise out-of-tolerance targets;
-`E_DURATION_OUT_OF_TOLERANCE` still remains the authoritative refit gate.
-Half a second admits normal phrase cadence without masking a segment-sized
-mismatch. The service verifies the rendered WAV itself and fails closed; the
-pipeline does not second-guess it.
+Fixed request fields remain `schema_version: "voice-order/1"`, project
+`ezhud`, profile `xeri-en-v1`, spoken/neutral/en, and 24 kHz mono WAV delivery.
+**Never sent:** `target` in any form, output or reference path, model selection,
+generation settings, seed, or extra renderer arguments. `request_id` derives
+from this effective natural order. A duplicate with `rerendered: false` remains
+a normal success.
 
-Forbidden in a request, by gate: output or reference path, model selection,
-generation settings, seed, extra renderer arguments.
+The operational loop is:
 
-`request_id` derives from the effective order content. `status: "duplicate"`
-with `rerendered: false` is a normal success and must not trigger a retry loop.
+1. `--phase measure` places the only voice orders. For every returned artifact,
+   it reads the WAV bytes locally, recomputes byte length and SHA-256, parses the
+   RIFF/WAVE chunks, and requires 16-bit PCM, 24 kHz, mono, and positive audio
+   duration. The local duration — not service metadata and not a word-rate
+   estimate — drives `fitCaptureScript`. The same files and hashes are written
+   to `changedrop-narration/1`; `audio.path` is stripped.
+2. Fixed action time is the measured Stage 3 duration minus explicitly marked
+   narration-padding holds. A negative result within 25 ms is clamped to zero:
+   pure-padding browser timers can straddle a scheduling boundary, while 25 ms
+   remains well below both the 100 ms minimum hold and the 500 ms fit tolerance.
+   Below -25 ms fails as a real script/timings disagreement. Fitted padding is
+   `local WAV duration - fixed action time`, rounded to integer milliseconds.
+   Prose and fixed actions remain unchanged; totals above the five-second
+   per-hold bound split into contiguous bounded holds.
+3. Stage 3 captures the fitted script for real. App-driven resize/click/wait
+   timing stays observed rather than predicted; only explicit padding changes.
+4. `--phase validate` is local-only and cannot invoke the voice transport. It
+   reopens the delivered WAVs, rechecks their hashes, formats and manifest
+   durations, then compares each local audio duration with the fitted capture
+   window using the fixed 0.5-second tolerance. Failure names the segment,
+   audio duration, capture duration, and tolerance.
 
-**Failure handling — branch on `error_code`, never on message text:**
+Failure handling continues to branch on `error_code`, never message text:
 
 | `error_code` | Action |
 |---|---|
-| `E_PROJECT_NOT_ALLOWED`, `E_PROFILE_UNKNOWN` (3) | **Stop the run before rendering.** Record the prerequisite (§6). Owner/Terra action; never retried, never routed around, never substituted with another voice. |
+| `E_PROJECT_NOT_ALLOWED`, `E_PROFILE_UNKNOWN` (3) | Stop and record the prerequisite; no retry, alternate voice, or microphone path. |
 | `E_SCHEMA_INVALID`, `E_UNKNOWN_FIELD` (2) | Request-builder bug; fix the builder. |
 | `E_TEXT_UNSAFE`, `E_TEXT_TOO_LONG`, `E_OVERRIDE_INVALID` (4) | Script defect; return to stage 2. Never auto-trim. |
-| `E_DURATION_OUT_OF_TOLERANCE` (9) | Re-run natural measurement and padding fit for the named segment, then recapture and use a **new** `request_id`. The error names segment, target and tolerance. |
+| `E_DURATION_OUT_OF_TOLERANCE` (9) | Service-contract bug: an untargeted order cannot legitimately return this; stop and report. |
 | `E_REQUEST_ID_CONFLICT` (5) | Effective order changed under a reused id — builder bug. |
-| `E_LOCK_TIMEOUT` (6), `E_INTERNAL` (10) | Bounded retry of the identical order; exact retries are safe by design. |
+| `E_LOCK_TIMEOUT` (6), `E_INTERNAL` (10) | Bounded retry of the identical natural order. |
 | `E_RENDER_FAILED` (7), `E_ARTIFACT_INVALID` (8) | Stop and report; no blind retry. |
 
-- **V1 (offline)** both request forms validate against v1 and carry none of the
-  forbidden fields. Measure requests omit `target`; gate requests quantise the
-  fitted capture target to millisecond precision before deriving `request_id`
-  and carry both duration fields. The pure fitter changes only marked padding,
-  splits long padding into bounded holds, and makes old timings stale. Tier 1,
-  fixtures, no service call.
-- **V1F (operator error)** any failed order names its segment. A duration-gate
-  failure also prints the exact target and tolerance without exposing the
-  service message or private paths.
-- **V2 (online)** each narration WAV's measured duration is within tolerance of
-  its measured capture segment, and the ≤ 10 s per surface budget holds against
-  **real audio**.
+- **V1 (offline)** the sole request form validates against v1, contains no
+  forbidden fields and structurally cannot carry a duration target. The pure
+  fitter changes only marked padding, splits long padding into bounded holds,
+  and makes old timings stale. WAV fixtures prove local format, hash, byte and
+  duration validation without a service call.
+- **V1F (local close)** validation reopens the delivered artifacts and rejects
+  a fitted capture outside 0.5 seconds with segment and both durations named.
+- **V2 (online)** the complete narration set consists exactly of the natural
+  measure-phase WAVs, and every locally measured duration is within tolerance
+  of its fitted capture segment.
 
 ### Stage 5 — mux (`changedrop-manifest/1`)
 
@@ -267,8 +266,8 @@ ffmpeg muxes narration onto the fitted recapture aligned to its `timings.json`, 
 
 - **M1** output duration equals capture duration within tolerance.
 - **M2** exactly one audio and one video stream.
-- **M3** `publish.state: "withheld"`, `destination: null`. **No stage uploads
-  anything.** The destination is pending owner approval.
+- **M3** every segment's narration is the natural measure-phase artifact,
+  matched by SHA-256; a re-rendered or substituted file fails the run.
 
 ## 5. Manifest (`changedrop-manifest/1`)
 
@@ -297,6 +296,61 @@ ffmpeg muxes narration onto the fitted recapture aligned to its `timings.json`, 
 `engine.name/t3_model/cli_sha256` and `profile_revision` are provenance the API
 exposes; they are recorded as provenance and are never presented as
 caller-selectable controls.
+
+## 5a. Discord review payload (`changedrop-review-payload/1`)
+
+**Owner decision, 2026-08-07.** The change log reaches players as a Discord
+message, not a link. The pipeline prepares it; a human posts it.
+
+```json
+{
+  "schema_version": "changedrop-review-payload/1",
+  "release": "release-1",
+  "destination": {
+    "kind": "discord-channel",
+    "channel_id": "1534452186266734683",
+    "purpose": "owner-review",
+    "state": "prepared",
+    "posted": false
+  },
+  "message": {
+    "content": "<=1900 chars, plain text, no bare URLs, no @mentions",
+    "allowed_mentions": { "parse": [] },
+    "suppress_embeds": true
+  },
+  "attachments": [
+    { "name": "changedrop.mp4", "kind": "video", "sha256": "…",
+      "bytes": 0, "duration_seconds": 0.0 },
+    { "name": "window-follow.png", "kind": "image", "surface": "window-follow",
+      "sha256": "…", "bytes": 0 }
+  ],
+  "provenance": {
+    "manifest_sha256": "…",
+    "capture_sha256": "…",
+    "narration": [ { "id": "…", "sha256": "…", "duration_seconds": 0.0 } ]
+  }
+}
+```
+
+Rules the gate enforces:
+
+- **Destination is the review channel `1534452186266734683` and nothing else.**
+  `state` is `prepared` and `posted` is `false` in every committed or emitted
+  payload. The pipeline has no posting code path at all.
+- **No external link cards:** `suppress_embeds` true, and no bare URL in
+  `content` — any URL must be wrapped in `<…>`.
+- **No mentions:** `allowed_mentions.parse` is an empty array, and `content`
+  contains no `@everyone`, `@here` or role/user mention syntax.
+- Attachments are **local files uploaded with the message**, never links. Each
+  is named, hashed and size-recorded; every attachment resolves to a real file
+  in the run directory and no attachment path appears in the payload.
+- Content is player-facing: what changed and why it matters, no issue numbers,
+  no internal jargon, no private paths, host names or user names.
+
+**Handoff, not publication.** After the private artifact and privacy gates pass
+and the frozen-SHA review is done, the payload is presented to **Terra** for the
+owner-review post. The owner forwards it manually anywhere else. Nothing in this
+repository posts to Discord, and no public publishing happens at any stage.
 
 ## 6. External gate — open (Terra coordinates)
 
