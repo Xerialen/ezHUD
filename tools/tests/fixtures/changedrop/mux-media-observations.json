@@ -1,0 +1,15 @@
+{
+  "capture": {
+    "duration_seconds": 4.1,
+    "streams": [
+      {"codec_type": "video"}
+    ]
+  },
+  "output": {
+    "duration_seconds": 4.1,
+    "streams": [
+      {"codec_type": "video"},
+      {"codec_type": "audio"}
+    ]
+  }
+}

@@ -264,7 +264,7 @@ Failure handling continues to branch on `error_code`, never message text:
 ffmpeg muxes narration onto the fitted recapture aligned to its `timings.json`, and runs
 **only after valid voice output exists**. No narration ⇒ no mux.
 
-- **M1** output duration equals capture duration within tolerance.
+- **M1** output duration equals fitted capture duration within the fixed 0.5-second tolerance.
 - **M2** exactly one audio and one video stream.
 - **M3** every segment's narration is the natural measure-phase artifact,
   matched by SHA-256; a re-rendered or substituted file fails the run.

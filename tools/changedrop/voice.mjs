@@ -131,7 +131,7 @@ function machineAction(step) {
 	};
 }
 
-function validateTimingReceipt(script, timings) {
+export function validateTimingReceipt(script, timings) {
 	exactObject(timings, ['schema_version', 'recording', 'setup_actions', 'segments'], 'Changedrop timings');
 	if (timings.schema_version !== TIMINGS_SCHEMA_VERSION) {
 		throw new Error(`Changedrop timings must use ${TIMINGS_SCHEMA_VERSION}.`);
@@ -335,7 +335,7 @@ export function fitCaptureScript({ script, timings, measurements } = {}) {
 	return privacyChecked({ script: fittedScript, segments: fittedSegments }, 'Changedrop voice fit');
 }
 
-function validateNarrationManifest(narration, script) {
+export function validateNarrationManifest(narration, script) {
 	exactObject(narration, ['schema_version', 'project', 'voice_profile', 'segments'], 'Changedrop narration');
 	if (narration.schema_version !== OUTPUT_SCHEMA_VERSION || narration.project !== PROJECT
 		|| narration.voice_profile !== VOICE_PROFILE || !Array.isArray(narration.segments)
