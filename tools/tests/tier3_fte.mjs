@@ -977,7 +977,118 @@ try {
 
 	console.log('  13 reset positions: hud_reset_layout reverts a moved element to its registered default');
 
-	// ---- 14. editor window scaling (#25) ------------------------------------
+	// ---- 14. snap grid + magnet alignment (#24) -----------------------------
+	const gridToggle = page.locator('#snap-grid');
+	const magnetToggle = page.locator('#snap-magnet');
+	const gridStep = page.locator('#snap-step');
+	await gridToggle.waitFor();
+	assert(!(await gridToggle.isChecked()) && !(await magnetToggle.isChecked()),
+		'drag assistance must start visibly off rather than silently changing old drags');
+	const setEnginePlacement = async (name, x, y) => {
+		await page.evaluate(async ([element, px, py]) => {
+			const bridge = (await import('/core/bridge.js')).currentBridge();
+			await bridge.setCvar(`hud_${element}_pos_x`, px);
+			await bridge.setCvar(`hud_${element}_pos_y`, py);
+		}, [name, x, y]);
+		await page.waitForFunction(([element, px, py]) => {
+			const current = window.__fake.state.elements.find((e) => e.name === element);
+			return current.pos_x === String(px) && current.pos_y === String(py);
+		}, [name, x, y]);
+		await page.waitForFunction((element) => {
+			const current = window.__fake.state.elements.find((e) => e.name === element);
+			return document.querySelector(`.tree__row[data-name="${element}"] .tree__meta`)?.textContent
+				=== `${current.rect.x},${current.rect.y}`;
+		}, name);
+	};
+	const dragHealth = async (dx, dy, { alt = false, beforeUp = null } = {}) => {
+		await page.locator('.tree__row[data-name="health"]').click();
+		const selectedHealth = page.locator('#overlay .box[data-selected="true"]');
+		const rect = await selectedHealth.boundingBox();
+		assert(rect, 'health has no draggable box for snap/magnet cases');
+		if (alt) await page.keyboard.down('Alt');
+		try {
+			await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+			await page.mouse.down();
+			await page.mouse.move(rect.x + rect.width / 2 + dx, rect.y + rect.height / 2 + dy,
+				{ steps: 4 });
+			if (beforeUp) await beforeUp();
+			await page.mouse.up();
+		} finally {
+			if (alt) await page.keyboard.up('Alt');
+		}
+		return named(await engineState(), 'health');
+	};
+
+	await gridToggle.click();
+	await setEnginePlacement('health', 13, 24);
+	let snapped = await dragHealth(19, 0);
+	assert(Number(snapped.pos_x) % 8 === 0,
+		`8px grid produced pos_x=${snapped.pos_x}`);
+	await gridStep.fill('5');
+	await gridStep.press('Enter');
+	await setEnginePlacement('health', 13, 24);
+	snapped = await dragHealth(19, 0);
+	assert(Number(snapped.pos_x) % 5 === 0,
+		`5px grid produced pos_x=${snapped.pos_x}`);
+
+	await gridToggle.click();
+	await setEnginePlacement('health', 13, 24);
+	const free = await dragHealth(5, 0);
+	assert(Number(free.pos_x) % 5 !== 0,
+		`grid-off drag still quantized pos_x=${free.pos_x} to step 5`);
+
+	await magnetToggle.click();
+	await setEnginePlacement('health', 16, 30);
+	let magnetTarget = null;
+	const magnetized = await dragHealth(1, 1, {
+		beforeUp: async () => {
+			const guide = page.locator('#overlay .snap-guide--y');
+			await guide.waitFor();
+			magnetTarget = await guide.getAttribute('data-target');
+		},
+	});
+	const magnetState = await engineState();
+	const targetRect = named(magnetState, magnetTarget)?.rect;
+	const sourceY = [magnetized.rect.y, magnetized.rect.y + magnetized.rect.h / 2,
+		magnetized.rect.y + magnetized.rect.h];
+	const targetY = targetRect
+		? [targetRect.y, targetRect.y + targetRect.h / 2, targetRect.y + targetRect.h]
+		: [];
+	assert(sourceY.some((value) => targetY.includes(value)),
+		`magnet guide named ${magnetTarget} but no health edge/centre exactly aligned: `
+		+ `${JSON.stringify({ sourceY, targetY })}`);
+
+	await magnetToggle.click();
+	await setEnginePlacement('health', 16, 30);
+	const freeNearEdge = await dragHealth(1, 1);
+	assert(freeNearEdge.rect.y + freeNearEdge.rect.h !== named(await engineState(), 'armor').rect.y,
+		'magnet-off drag still aligned the two edges');
+
+	await gridToggle.click();
+	await magnetToggle.click();
+	await gridStep.fill('8');
+	await gridStep.press('Enter');
+	await setEnginePlacement('health', 17, 30);
+	const bypassed = await dragHealth(5, 0, {
+		alt: true,
+		beforeUp: async () => assert(await page.locator('#overlay .snap-guide').count() === 0,
+			'Alt bypass still drew a magnet guide'),
+	});
+	assert(Number(bypassed.pos_x) % 8 !== 0,
+		`Alt bypass still snapped pos_x=${bypassed.pos_x}`);
+	const dragExport = await page.evaluate(async () =>
+		(await import('/core/bridge.js')).currentBridge().exportFullCfg());
+	assert(!/snap|magnet/i.test(dragExport),
+		'drag-assistance editor state leaked into the exported cfg');
+
+	await gridToggle.click();
+	await magnetToggle.click();
+	await page.evaluate(async () => (await import('/core/bridge.js')).currentBridge().send('hud_reset_layout'));
+	await page.waitForFunction(() => window.__fake.state.elements
+		.find((e) => e.name === 'health').pos_x === '16');
+	console.log('  14 drag assistance: grid steps, free drag, edge magnet + guide, Alt bypass, clean export');
+
+	// ---- 15. editor window scaling (#25) ------------------------------------
 	// The control scales editor chrome, never HUD coordinates. Its CSS change
 	// also has to wake FTE's resize glue because changing a custom property does
 	// not itself emit a browser resize event.
@@ -1051,9 +1162,9 @@ try {
 	}, [screenAt125.vid_width, screenAt125.vid_height]);
 	await uiScale.selectOption('1.25');
 	await page.waitForFunction(() => localStorage.getItem('ezhud.ui.scale') === '1.25');
-	console.log('  14 editor scale: 1440p minimums, visible presets, persistence seed, canvas and state propagation');
+	console.log('  15 editor scale: 1440p minimums, visible presets, persistence seed, canvas and state propagation');
 
-	// ---- 15. volume ----------------------------------------------------------
+	// ---- 16. volume ----------------------------------------------------------
 	// The page's own sound knob (#10). The engine side is a plain cvar write, so
 	// the assertions are about the contract around it: the quiet boot default,
 	// the mute/unmute round trip, the imported line that must never apply, and
@@ -1115,7 +1226,7 @@ try {
 		.getPropertyValue('--ui-scale').trim()) === '1.25',
 		'the editor scale did not survive the reload');
 
-	console.log('  15 volume: quiet boot default, mute round trip, import refusal, persistence');
+	console.log('  16 volume: quiet boot default, mute round trip, import refusal, persistence');
 
 	// A second page at DPR 2 is the monitor-move half of #25. Playwright fixes
 	// deviceScaleFactor per browser context, so exercise that layout, then change
@@ -1179,7 +1290,7 @@ try {
 		`ftewebglcl.js should 404 here, got ${JSON.stringify(engineScript)}`);
 	assert(crashes.length === 0, `uncaught page errors: ${crashes.join('; ')}`);
 
-	console.log('Tier 3 FTE: 15 cases passed with no wasm (ftewebglcl.js 404 throughout)');
+	console.log('Tier 3 FTE: 16 cases passed with no wasm (ftewebglcl.js 404 throughout)');
 } catch (err) {
 	// A CI-only failure is undiagnosable from a TimeoutError alone; dump what
 	// the editor actually did before dying. Temporary debug aid — cheap enough

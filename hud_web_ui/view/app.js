@@ -11,6 +11,7 @@ import {
 import {
 	consoleToFrame, displayDeltaToConsole, elementAt, quantize, scaleFactors,
 } from '../core/geometry.js';
+import { magnetizeRect, snapToGrid } from '../core/snapping.js';
 import * as syslog from '../core/log.js';
 import { initDebugPanel } from './debug.js';
 
@@ -25,7 +26,10 @@ const el = {
 	inspector: $('inspector'), fontPanel: $('fonts'), groupPanel: $('groups'),
 	saveOpen: $('save-open'), saveDialog: $('save-dialog'),
 	modePanel: $('hudmodes'), killfeedPanel: $('killfeed'), resetDialog: $('reset-dialog'),
+	snapGrid: $('snap-grid'), snapStep: $('snap-step'), snapMagnet: $('snap-magnet'),
 };
+
+const dragAssist = { grid: false, step: 8, magnet: false, thresholdCss: 8 };
 
 // Editor chrome scale is browser-local preference, not HUD state. Keeping the
 // accepted values closed avoids a corrupted localStorage entry producing an
@@ -817,6 +821,39 @@ function beginGesture() {
 	};
 }
 
+function descendantNames(name, out = new Set()) {
+	for (const child of model.childrenOf(name)) {
+		if (out.has(child.name)) continue;
+		out.add(child.name);
+		descendantNames(child.name, out);
+	}
+	return out;
+}
+
+function clearSnapGuides() {
+	el.overlay.querySelectorAll('.snap-guide').forEach((guide) => guide.remove());
+}
+
+function renderSnapGuides(guides) {
+	clearSnapGuides();
+	const displayScale = el.frame.clientWidth / (el.frame.naturalWidth || 1);
+	for (const guide of guides) {
+		const projected = consoleToFrame(
+			{ x: guide.axis === 'x' ? guide.value : 0, y: guide.axis === 'y' ? guide.value : 0, w: 0, h: 0 },
+			model.screen, model.physical,
+		);
+		const node = document.createElement('div');
+		node.className = `snap-guide snap-guide--${guide.axis}`;
+		node.dataset.target = guide.target;
+		if (guide.axis === 'x') {
+			node.style.left = `${projected.x * displayScale}px`;
+		} else {
+			node.style.top = `${projected.y * displayScale}px`;
+		}
+		el.overlay.append(node);
+	}
+}
+
 function beginDrag(ev, item) {
 	ev.preventDefault();
 
@@ -826,6 +863,10 @@ function beginDrag(ev, item) {
 	const originX = Number(item.pos_x) || 0;
 	const originY = Number(item.pos_y) || 0;
 	const rect = { ...item.rect };
+	const excluded = descendantNames(item.name, new Set([item.name]));
+	const magnetTargets = model.placedElements
+		.filter((target) => !excluded.has(target.name))
+		.map((target) => ({ name: target.name, rect: { ...target.rect } }));
 	// Claim the overlay before changing the selection. Selecting re-renders, and a
 	// re-render calls replaceChildren() -- which would leave every placeBox()
 	// below writing to a node that is no longer in the document, so the drag would
@@ -846,10 +887,31 @@ function beginDrag(ev, item) {
 			model.screen, model.physical, el.frame.clientWidth,
 		);
 		// Quantize to what the engine will actually store, so the preview never
-		// promises sub-pixel precision the engine discards.
-		const nx = quantize(originX + dx);
-		const ny = quantize(originY + dy);
-		placeBox(box, { ...rect, x: rect.x + (nx - originX), y: rect.y + (ny - originY) });
+		// promises sub-pixel precision the engine discards. Grid changes offsets;
+		// magnet then makes the resulting engine rect meet another rect exactly.
+		const bypass = e.altKey;
+		let nx = quantize(originX + dx);
+		let ny = quantize(originY + dy);
+		if (!bypass && dragAssist.grid) {
+			nx = snapToGrid(nx, dragAssist.step);
+			ny = snapToGrid(ny, dragAssist.step);
+		}
+		let nextRect = { ...rect, x: rect.x + (nx - originX), y: rect.y + (ny - originY) };
+		let guides = [];
+		if (!bypass && dragAssist.magnet) {
+			const threshold = displayDeltaToConsole(
+				dragAssist.thresholdCss, dragAssist.thresholdCss,
+				model.screen, model.physical, el.frame.clientWidth,
+			);
+			const magnetized = magnetizeRect(nextRect, magnetTargets,
+				{ x: Math.abs(threshold.dx), y: Math.abs(threshold.dy) });
+			nx = quantize(nx + magnetized.delta.x);
+			ny = quantize(ny + magnetized.delta.y);
+			nextRect = { ...rect, x: rect.x + (nx - originX), y: rect.y + (ny - originY) };
+			guides = magnetized.guides;
+		}
+		renderSnapGuides(guides);
+		placeBox(box, nextRect);
 
 		const key = `${nx},${ny}`;
 		if (key === last) {
@@ -865,6 +927,7 @@ function beginDrag(ev, item) {
 	const up = () => {
 		window.removeEventListener('pointermove', move);
 		window.removeEventListener('pointerup', up);
+		clearSnapGuides();
 		gesture.end();
 	};
 	window.addEventListener('pointermove', move);
@@ -2057,6 +2120,23 @@ el.showHidden.addEventListener('change', () => model.set({ showHidden: el.showHi
 el.showSpectator.addEventListener('change', () => model.set({ showSpectator: el.showSpectator.checked }));
 el.chrome.addEventListener('change', () => model.set({ chromeVisible: el.chrome.checked }));
 el.uiScale.addEventListener('change', () => applyUiScale(el.uiScale.value, { persist: true, wake: true }));
+el.snapGrid.addEventListener('change', () => {
+	dragAssist.grid = el.snapGrid.checked;
+	el.snapStep.disabled = !dragAssist.grid;
+});
+el.snapMagnet.addEventListener('change', () => { dragAssist.magnet = el.snapMagnet.checked; });
+const updateSnapStep = () => {
+	const value = Number(el.snapStep.value);
+	if (Number.isFinite(value) && value >= 1) {
+		dragAssist.step = Math.min(64, Math.round(value));
+	}
+};
+el.snapStep.addEventListener('input', updateSnapStep);
+el.snapStep.addEventListener('change', () => {
+	updateSnapStep();
+	el.snapStep.value = String(dragAssist.step);
+});
+el.snapStep.disabled = true;
 el.saveOpen.addEventListener('click', () => openSave());
 el.frame.addEventListener('load', renderOverlay);
 window.addEventListener('resize', renderOverlay);

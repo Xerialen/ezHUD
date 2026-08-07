@@ -571,6 +571,17 @@ button:focus-visible,
 	vector-effect: non-scaling-stroke;
 }
 
+.snap-guide {
+	position: absolute;
+	z-index: 4;
+	pointer-events: none;
+	background: var(--qk-ice-400);
+	box-shadow: 0 0 4px rgb(127 191 255 / 0.7);
+}
+
+.snap-guide--x { top: 0; bottom: 0; width: 1px; }
+.snap-guide--y { left: 0; right: 0; height: 1px; }
+
 .box {
 	position: absolute;
 	pointer-events: auto;
@@ -877,6 +888,25 @@ button:focus-visible,
 	cursor: help;
 }
 .field[data-inert="true"] input { opacity: 0.62; }
+
+.drag-assist { border-bottom: 1px solid var(--line); }
+.drag-assist .group { padding-block: 8px; }
+.drag-assist__row {
+	display: grid;
+	grid-template-columns: auto minmax(78px, 1fr) auto;
+	align-items: center;
+	gap: 8px;
+}
+.drag-assist__step {
+	display: grid;
+	grid-template-columns: auto minmax(42px, 1fr);
+	align-items: center;
+	gap: 6px;
+	color: var(--text-dim);
+	font: var(--type-label);
+}
+.drag-assist__step input { padding: 4px 6px; }
+.drag-assist .font-state { margin-block: 7px 0; }
 
 .placement-workflow {
 	border-left: 2px solid var(--accent-deep);

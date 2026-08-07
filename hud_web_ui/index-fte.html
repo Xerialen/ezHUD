@@ -148,6 +148,17 @@
 
   <section class="panel panel--inspect" aria-label="Properties">
     <div class="panel__title">Properties</div>
+    <div id="drag-assist" class="drag-assist">
+      <section class="group">
+        <h3 class="group__title">Drag assistance</h3>
+        <div class="drag-assist__row">
+          <label class="toggle toggle--sm"><input type="checkbox" id="snap-grid"><span>Grid</span></label>
+          <label class="drag-assist__step" for="snap-step"><span>Step</span><input id="snap-step" type="number" min="1" max="64" value="8"></label>
+          <label class="toggle toggle--sm"><input type="checkbox" id="snap-magnet"><span>Magnet</span></label>
+        </div>
+        <p class="font-state">Hold Alt while dragging to bypass both.</p>
+      </section>
+    </div>
     <div id="hudmodes"></div>
     <div id="killfeed"></div>
     <div id="groups"></div>

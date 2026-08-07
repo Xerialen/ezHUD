@@ -973,6 +973,21 @@ try {
 			operation: { kind: 'click' }, expect: { volume: '0.35' },
 		},
 		{
+			issue: 24,
+			label: 'Snap grid toggle', target: { selector: '#snap-grid' },
+			operation: { kind: 'click' },
+		},
+		{
+			issue: 24,
+			label: 'Snap grid step', target: { selector: '#snap-step' },
+			operation: { kind: 'fill', value: '5' },
+		},
+		{
+			issue: 24,
+			label: 'Magnet toggle', target: { selector: '#snap-magnet' },
+			operation: { kind: 'click' },
+		},
+		{
 			issue: 25,
 			label: 'Editor size: 125%', target: { selector: '#ui-scale' },
 			operation: { kind: 'select', value: '1.25' },
@@ -1122,7 +1137,7 @@ try {
 	];
 
 	let nextCase = 8;
-	for (const row of controlCases.filter((entry) => entry.issue !== 43 && entry.issue !== 25)) {
+	for (const row of controlCases.filter((entry) => ![24, 25, 43].includes(entry.issue))) {
 		await proveControl(row);
 		const effect = row.expect
 			? Object.entries(row.expect).map(([name, value]) => `${name}=${value}`).join(', ')
@@ -1511,6 +1526,139 @@ try {
 			parentName: anchorParent.name, childName: anchorChild.name,
 			parent: originals.parent.element, child: originals.child.element,
 		}).catch(() => {});
+	}
+
+	// ---- #24 grid + magnet against the real wasm engine ---------------------
+	const snapGrid = page.locator('#snap-grid');
+	const snapStep = page.locator('#snap-step');
+	const snapMagnet = page.locator('#snap-magnet');
+	assert(!(await snapGrid.isChecked()) && !(await snapMagnet.isChecked()),
+		'drag assistance did not start visibly off');
+	const dragSubjectOriginal = (await readState(candidate.name)).element;
+	const snapPool = await readDrawn();
+	const magnetTarget = snapPool.find((entry) => entry.name !== candidate.name
+		&& entry.parent !== candidate.name && candidate.parent !== entry.name
+		&& entry.rect.x > candidate.rect.w + 12 && entry.name !== 'tracker');
+	assert(magnetTarget, `no drawn target can host the magnet case: ${JSON.stringify(snapPool)}`);
+	const placeSubject = async (x, y) => {
+		await page.evaluate(({ name, x, y }) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			channel.cbufadd(`set hud_${name}_place screen\nset hud_${name}_align_x left\n`
+				+ `set hud_${name}_align_y top\nset hud_${name}_pos_x ${x}\n`
+				+ `set hud_${name}_pos_y ${y}\nhud_recalculate\n`);
+		}, { name: candidate.name, x, y });
+		await eventually(async () => {
+			const state = (await readState(candidate.name)).element;
+			return state.place === 'screen' && state.align_x === 'left' && state.align_y === 'top'
+				&& state.pos_x === String(x) && state.pos_y === String(y) ? state : null;
+		}, `${candidate.name} screen placement ${x},${y}`, UI_WAIT);
+		await waitEditorCaughtUp(candidate.name);
+	};
+	const dragSubject = async (dx, dy, { alt = false, beforeUp = null } = {}) => {
+		await selectForPlacement(candidate.name);
+		const beforeDrag = (await readState(candidate.name)).element;
+		const subjectBox = page.locator('#overlay .box[data-selected="true"]');
+		const rect = await subjectBox.boundingBox();
+		assert(rect, `${candidate.name} has no box for drag assistance`);
+		if (alt) await page.keyboard.down('Alt');
+		try {
+			await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+			await page.mouse.down();
+			await page.mouse.move(rect.x + rect.width / 2 + dx,
+				rect.y + rect.height / 2 + dy, { steps: 5 });
+			if (beforeUp) await beforeUp();
+			await page.mouse.up();
+		} finally {
+			if (alt) await page.keyboard.up('Alt');
+		}
+		return eventually(async () => {
+			const state = (await readState(candidate.name)).element;
+			return state && (state.pos_x !== beforeDrag.pos_x || state.pos_y !== beforeDrag.pos_y)
+				? state : null;
+		}, `${candidate.name} drag readback`, UI_WAIT);
+	};
+	try {
+		await snapGrid.click();
+		await snapStep.fill('8');
+		await placeSubject(13, 80);
+		let gridResult = await dragSubject(29, 0);
+		assert(Number(gridResult.pos_x) % 8 === 0,
+			`8px live grid produced pos_x=${gridResult.pos_x}`);
+
+		await snapStep.fill('5');
+		await placeSubject(13, 80);
+		gridResult = await dragSubject(29, 0);
+		assert(Number(gridResult.pos_x) % 5 === 0,
+			`5px live grid produced pos_x=${gridResult.pos_x}`);
+
+		await snapGrid.click();
+		await placeSubject(13, 80);
+		const freeResult = await dragSubject(7, 0);
+		assert(Number(freeResult.pos_x) % 5 !== 0,
+			`grid-off live drag still quantized pos_x=${freeResult.pos_x}`);
+
+		await snapMagnet.click();
+		const nearX = magnetTarget.rect.x - candidate.rect.w - 3;
+		await placeSubject(nearX, magnetTarget.rect.y);
+		let guideTarget = null;
+		let guideAxis = null;
+		const magnetResult = await dragSubject(4, 0, {
+			beforeUp: async () => {
+				const guide = page.locator('#overlay .snap-guide').first();
+				await guide.waitFor({ timeout: UI_WAIT });
+				guideTarget = await guide.getAttribute('data-target');
+				guideAxis = (await guide.getAttribute('class')).includes('snap-guide--x') ? 'x' : 'y';
+			},
+		});
+		const targetAfterMagnet = (await readDrawn()).find((entry) => entry.name === guideTarget)?.rect;
+		const sourcePoints = guideAxis === 'x'
+			? [magnetResult.rect.x, magnetResult.rect.x + magnetResult.rect.w / 2,
+				magnetResult.rect.x + magnetResult.rect.w]
+			: [magnetResult.rect.y, magnetResult.rect.y + magnetResult.rect.h / 2,
+				magnetResult.rect.y + magnetResult.rect.h];
+		const targetPoints = !targetAfterMagnet ? [] : guideAxis === 'x'
+			? [targetAfterMagnet.x, targetAfterMagnet.x + targetAfterMagnet.w / 2,
+				targetAfterMagnet.x + targetAfterMagnet.w]
+			: [targetAfterMagnet.y, targetAfterMagnet.y + targetAfterMagnet.h / 2,
+				targetAfterMagnet.y + targetAfterMagnet.h];
+		assert(sourcePoints.some((value) => targetPoints.includes(value)),
+			`live magnet guide ${guideAxis}/${guideTarget} did not end in exact engine alignment`);
+
+		await snapMagnet.click();
+		await placeSubject(nearX, magnetTarget.rect.y);
+		await dragSubject(4, 0, {
+			beforeUp: async () => assert(await page.locator('#overlay .snap-guide').count() === 0,
+				'magnet-off live drag still drew a guide'),
+		});
+
+		await snapGrid.click();
+		await snapMagnet.click();
+		await snapStep.fill('8');
+		await placeSubject(14, 80);
+		const bypassResult = await dragSubject(7, 0, {
+			alt: true,
+			beforeUp: async () => assert(await page.locator('#overlay .snap-guide').count() === 0,
+				'Alt bypass still drew a live guide'),
+		});
+		assert(Number(bypassResult.pos_x) % 8 !== 0,
+			`Alt bypass still grid-snapped live pos_x=${bypassResult.pos_x}`);
+		const dragAssistExport = await readExport();
+		assert(!/snap|magnet/i.test(dragAssistExport),
+			'drag assistance leaked editor-only state into the full export');
+		pass(nextCase++, `${candidate.name} drag: 8/5 grids, free pixels, magnet guide + exact engine edge, Alt bypass, clean export`);
+	} finally {
+		if (await snapGrid.isChecked()) await snapGrid.click().catch(() => {});
+		if (await snapMagnet.isChecked()) await snapMagnet.click().catch(() => {});
+		await snapStep.fill('8').catch(() => {});
+		await page.evaluate(({ name, original }) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) return;
+			for (const [suffix, value] of Object.entries({
+				place: original.place, align_x: original.align_x, align_y: original.align_y,
+				pos_x: original.pos_x, pos_y: original.pos_y, order: original.order,
+			})) channel.cbufadd(`set hud_${name}_${suffix} ${value}\n`);
+			channel.cbufadd('hud_recalculate\n');
+		}, { name: candidate.name, original: dragSubjectOriginal }).catch(() => {});
 	}
 
 	// Case 36 resumes through the raw channel in its finally block. Wait for
