@@ -58,6 +58,8 @@ Release 1 "Trust the geometry" (#39) is merged:
 canvas sizing, honest resolution export, demo pause, and the 12-cell geometry
 QA matrix that now gates every geometric change. The
 [source files](docs/release-1/) remain available to checkout readers.
+Release 2 "Placera, inte pixla" (#62) — anchoring and alignment as the primary
+way to place things — is in progress and not yet released.
 
 ---
 

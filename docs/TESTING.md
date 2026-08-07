@@ -192,6 +192,22 @@ the same shape, before implementation starts.**
 Reference example: issue #18 (the Cases list) and PR #34 (the per-case PASS
 mapping).
 
+### The release-note gate
+
+A second, narrower gate governs player-facing releases:
+`tools/ci/release_note_gate.mjs` applies **only** to pull requests labelled
+`user-visible` or `release`. Every other PR passes untouched — it is not a tax
+on ordinary changes.
+
+An applicable PR must name its canonical `docs/<slug>/NOTES.md`, and that
+document must carry, per feature block, `Before:`, `After:`, `Value:` and one
+`Evidence:` mapping, plus a Discord payload with explicit attachment mappings.
+A genuinely internal change passes on a **recorded** `internal-only` exemption
+with a stated reason — never an implied one.
+
+The full flow is `docs/RELEASE-NOTE-WORKFLOW.md`. Note that merging `main`
+auto-deploys Pages, so **merge is publication** and waits for owner Go.
+
 ### Enforcement
 
 Three checks keep the convention live: the tier 4F control-coverage case in
