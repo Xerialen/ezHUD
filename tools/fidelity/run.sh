@@ -69,6 +69,22 @@ if ! node -e "import('playwright')" >/dev/null 2>&1; then
 	echo "FIDELITY ERROR: Playwright is not installed; run npm install." >&2
 	exit 2
 fi
+# wasm_bridge.mjs serves the dist from the origin root, so a dist assembled for
+# a BASE_PATH prefix has an import map keyed on '<prefix>core/bridge.js' that
+# never matches. core/bridge.js then loads instead of core/fte-adapter.js and
+# hud_web_ui/fte/chrome.js dies on a missing 'currentBridge' export -- the page
+# chrome is gone, silently. This run reads engine state through page globals
+# rather than the adapter, so the measurement itself is unaffected and this is a
+# warning rather than a refusal; but a half-loaded page is worth knowing about
+# before it is mistaken for an engine fault. Same trap tools/tests/tier4_fte.sh
+# preflights for, from the other direction.
+if grep -q '"/[^"]*/core/bridge\.js"' "$dist_dir/index.html" 2>/dev/null; then
+	echo "FIDELITY NOTE: '$dist_dir' was assembled for a BASE_PATH prefix, but the preview" >&2
+	echo "              bridge serves it from the root, so its import map will not match and" >&2
+	echo "              the FTE page chrome will fail to load. Engine state still reads" >&2
+	echo "              correctly, so the measurement stands. For a clean page, assemble a" >&2
+	echo "              root dist: tools/fte-web/assemble.sh" >&2
+fi
 if ! command -v google-chrome >/dev/null 2>&1 \
 	&& ! command -v google-chrome-stable >/dev/null 2>&1 \
 	&& [[ ! -x /opt/google/chrome/chrome ]]; then
