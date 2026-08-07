@@ -21,8 +21,84 @@ function decision(ok, reason, notice = null) {
 	return { ok, reason, notice };
 }
 
+// The release-note gate owns the one internal-only exemption grammar. Other
+// stages consume this decision rather than introducing a lookalike checkbox.
+export function parseInternalOnlyExemption(body = '') {
+	const source = String(body);
+	const exemption = source.match(
+		/^##[ \t]+Internal-only exemption[ \t]*$\r?\n([\s\S]*?)(?=^##[ \t]+|$(?![\s\S]))/m,
+	)?.[1] ?? '';
+	const checked = /^\s*[-*+]\s*\[[xX]\]\s+\S.*$/m.test(exemption);
+	const rawReason = exemption.match(/^Reason:\s*(.+)$/m)?.[1] ?? '';
+	const reason = rawReason.replace(/<!--.*?-->/g, '').trim();
+	if (!checked || !reason) {
+		return {
+			ok: false,
+			reason: null,
+			error: 'internal-only requires a checked exemption box and a non-empty Reason in the linked ticket record.',
+		};
+	}
+	return { ok: true, reason, error: null };
+}
+
 function nonEmptyString(value) {
 	return typeof value === 'string' && value.trim().length > 0;
+}
+
+// Canonical feature parsing is shared with changedrop stage 1. Keep the note
+// grammar in one place: release-note validation and value analysis must never
+// disagree about where feature prose or its Evidence mapping begins and ends.
+export function parseReleaseNoteFeatures(source, { notePath = 'Canonical NOTES.md' } = {}) {
+	const featuresMatch = String(source).match(
+		/^##[ \t]+Features[ \t]*$\r?\n([\s\S]*?)(?=^##[ \t]+|$(?![\s\S]))/m,
+	);
+	if (!featuresMatch) {
+		return { ok: false, reason: `${notePath} has no "## Features" section.`, features: [] };
+	}
+	const featureBody = featuresMatch[1];
+	const headings = [...featureBody.matchAll(/^###\s+(.+?)\s*$/gm)];
+	if (headings.length === 0) {
+		return {
+			ok: false,
+			reason: `${notePath} "## Features" section has no feature blocks.`,
+			features: [],
+		};
+	}
+	const features = [];
+	for (const [index, heading] of headings.entries()) {
+		const start = heading.index + heading[0].length;
+		const end = headings[index + 1]?.index ?? featureBody.length;
+		const block = featureBody.slice(start, end);
+		const evidence = [...block.matchAll(/^Evidence:\s+(\S+)\s*$/gm)];
+		const before = [...block.matchAll(/^Before:[ \t]+(.+?)[ \t]*\r?$/gm)];
+		const after = [...block.matchAll(/^After:[ \t]+(.+?)[ \t]*\r?$/gm)];
+		const value = [...block.matchAll(/^Value:[ \t]+(.+?)[ \t]*\r?$/gm)];
+		const prose = block.replace(/^Evidence:\s+\S+\s*$/gm, '').trim();
+		const parsedFeature = {
+			title: heading[1],
+			prose,
+			evidence: evidence.length === 1 ? evidence[0][1] : null,
+			before: before.length === 1 ? before[0][1] : null,
+			after: after.length === 1 ? after[0][1] : null,
+			value: value.length === 1 ? value[0][1] : null,
+		};
+		if (!prose || /^#/m.test(prose)) {
+			return {
+				ok: false,
+				reason: `${notePath} feature "${heading[1]}" needs player-facing prose before its evidence mapping.`,
+				features: [parsedFeature],
+			};
+		}
+		if (evidence.length !== 1) {
+			return {
+				ok: false,
+				reason: `${notePath} feature "${heading[1]}" needs exactly one Evidence: img/<file>.png mapping.`,
+				features: [parsedFeature],
+			};
+		}
+		features.push(parsedFeature);
+	}
+	return { ok: true, reason: null, features };
 }
 
 function regularFile(file) {
@@ -45,15 +121,12 @@ export function decideReleaseNoteGate({ prBody = '', labels = [], repoRoot = '.'
 		return decision(false, 'Applicable PR body has no linked ticket reference (#N).');
 	}
 	if (names.includes('internal-only')) {
-		const exemption = body.match(/^##[ \t]+Internal-only exemption[ \t]*$\r?\n([\s\S]*?)(?=^##[ \t]+|$(?![\s\S]))/m)?.[1] ?? '';
-		const checked = /^\s*[-*+]\s*\[[xX]\]\s+\S.*$/m.test(exemption);
-		const rawReason = exemption.match(/^Reason:\s*(.+)$/m)?.[1] ?? '';
-		const reason = rawReason.replace(/<!--.*?-->/g, '').trim();
-		if (!checked || !reason) {
-			return decision(false, 'internal-only requires a checked exemption box and a non-empty Reason in the linked ticket record.');
+		const exemption = parseInternalOnlyExemption(body);
+		if (!exemption.ok) {
+			return decision(false, exemption.error);
 		}
 		return decision(true, 'Recorded internal-only exemption; release notes and images are not required.',
-			`Internal-only reason: ${reason}`);
+			`Internal-only reason: ${exemption.reason}`);
 	}
 
 	const match = body.match(NOTE_PATH_RE);
@@ -86,28 +159,12 @@ export function decideReleaseNoteGate({ prBody = '', labels = [], repoRoot = '.'
 		return decision(false, `${notePath} needs one player-facing summary paragraph before "## Features".`);
 	}
 	const noteDir = path.dirname(noteFile);
-	const featuresMatch = source.match(/^##[ \t]+Features[ \t]*$\r?\n([\s\S]*?)(?=^##[ \t]+|$(?![\s\S]))/m);
-	if (!featuresMatch) {
-		return decision(false, `${notePath} has no "## Features" section.`);
+	const parsedFeatures = parseReleaseNoteFeatures(source, { notePath });
+	if (!parsedFeatures.ok) {
+		return decision(false, parsedFeatures.reason);
 	}
-	const featureBody = featuresMatch[1];
-	const headings = [...featureBody.matchAll(/^###\s+(.+?)\s*$/gm)];
-	if (headings.length === 0) {
-		return decision(false, `${notePath} "## Features" section has no feature blocks.`);
-	}
-	for (const [index, heading] of headings.entries()) {
-		const start = heading.index + heading[0].length;
-		const end = headings[index + 1]?.index ?? featureBody.length;
-		const block = featureBody.slice(start, end);
-		const evidence = [...block.matchAll(/^Evidence:\s+(\S+)\s*$/gm)];
-		const prose = block.replace(/^Evidence:\s+\S+\s*$/gm, '').trim();
-		if (!prose || /^#/m.test(prose)) {
-			return decision(false, `${notePath} feature "${heading[1]}" needs player-facing prose before its evidence mapping.`);
-		}
-		if (evidence.length !== 1) {
-			return decision(false, `${notePath} feature "${heading[1]}" needs exactly one Evidence: img/<file>.png mapping.`);
-		}
-		const evidencePath = evidence[0][1];
+	for (const feature of parsedFeatures.features) {
+		const evidencePath = feature.evidence;
 		const evidenceFile = /^img\/[^/\s]+\.png$/i.test(evidencePath)
 			? resolveInside(noteDir, evidencePath) : null;
 		if (!evidenceFile || !regularFile(evidenceFile)) {
