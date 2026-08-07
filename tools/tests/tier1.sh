@@ -19,6 +19,11 @@ node --check hud_web_ui/core/*.js
 if [ -d hud_web_ui/fte ]; then node --check hud_web_ui/fte/*.js; fi
 node --test hud_web_ui/core/tests/*.test.js
 node --test tools/tests/*.test.mjs
+# The fidelity gate's judgement layer (#84). Pure functions over hand-built
+# snapshot pairs, so it belongs here rather than with the run that needs two
+# engines; tools/fidelity/run.sh --selftest covers the plumbing. Guarded like
+# the checks below -- an ezQuake checkout does not receive tools/fidelity/.
+if [ -d tools/fidelity ]; then node --test tools/fidelity/tests/*.test.mjs; fi
 python3 "$embed" --check
 # Committed release evidence is repository-only, so this guard is absent from
 # an ezQuake source checkout just like the public-dist assembler below.

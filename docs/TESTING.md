@@ -119,6 +119,64 @@ Plus screenshots of affected states, uploaded as artifacts.
 
 ---
 
+## The fidelity gate — FTE-web preview vs real ezQuake
+
+Not a tier. The tiers above all ask "does ez-hud do what ez-hud says". This
+asks a different question: **does the preview show what the game shows.** Its
+subject is the *pair* of engines, so it has a reference side no tier has.
+
+```
+npm run test:fidelity     # judgement + planted-divergence drill, no engine
+npm run fidelity          # the real measurement, owner machine only
+```
+
+**Where it runs, stated rather than left ambiguous.** The real measurement
+needs a native ezQuake build, a demo seeked to the comparison point, and the
+owner's config. GitHub's runners have none of those, so `npm run fidelity` is
+deliberately **not** a CI job — it is an owner-machine command whose dated
+report is committed to `docs/fidelity/` and reviewed in git like any other
+file. `npm run test:fidelity` has no such dependency and runs in tier 1.
+
+| | Real run | Selftest |
+|---|---|---|
+| Reference | real ezQuake, `hud_web 1`, via `REFERENCE_BRIDGE_URL`/`_TOKEN` | fake engine over the fixture |
+| Preview | the assembled dist, driven by `tools/qa/wasm_bridge.mjs` | second fake engine |
+| Proves | today's gap list | that a divergence is caught at all |
+
+Both backends already speak one protocol — the bridge's `/state`, whose rects
+are the engine's own resolved geometry — so the measurement is a diff of two
+snapshots taken under the same config at the same console size.
+
+**What it measures and what it refuses to.** `presence`, `position` and `size`
+come from rects and are machine-verdicted. `texture` and `colour` do not, and
+are **not** guessed at: comparing pixels across two different renderers is not
+a verdict this run can make honestly. Those live in
+`tools/fidelity/claims.json` as dated, sourced assertions that the run
+re-emits and marks `stale` when the element they describe stops being drawn on
+both sides.
+
+**Two rules the harness enforces on itself**, both from real failures:
+
+- **Console size is confirmed, not merely requested.** While
+  `vid_conautoscale` is non-zero the FTE preview derives its console size from
+  the canvas and silently ignores `vid_conwidth`/`vid_conheight` (measured
+  2026-08-07). Rects from two different console sizes are in different units,
+  so the run disarms autoscale first and then polls until both engines *report*
+  the requested size — and refuses to produce a table if either never does.
+- **Two consecutive reads must judge identically.** A flaky verdict is its own
+  defect; the run fails rather than averaging it away.
+
+The selftest is the part that keeps the rest honest. A comparator that returned
+"match" unconditionally would pass a clean run, so `tools/fidelity/run.sh
+--selftest` also plants a divergence through the real `/cmd` path and requires
+the run to name it — same discipline as `tools/qa/run.sh --selftest`.
+
+Everything in a report is scoped to one FTE artifact, one ezQuake build, one
+config and one demo frame. The report says so in its own words, and the
+provenance table names each one.
+
+---
+
 ## CI wiring (GitHub Actions)
 
 Public repo → GitHub-hosted runner minutes are free. Self-hosted runners are
