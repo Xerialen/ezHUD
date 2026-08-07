@@ -181,6 +181,72 @@ function installDemoPause() {
 	setInterval(sync, 200);
 }
 
+// ---- deterministic demo moments --------------------------------------------
+// These are reviewed points in the bundled tb4gf match, not page-owned clock
+// state. Every seek starts from the demo origin before advancing to its target:
+// FTE can otherwise land on a different nearby packet depending on which point
+// it sought from. Preserving cl_demospeed means a running demo continues from
+// the point while a parked demo stays parked.
+
+function installDemoMoments() {
+	const buttons = [...document.querySelectorAll('[data-demo-jump]')];
+	let pending = false;
+
+	async function selectDemo(path) {
+		const basename = path.split('/').at(-1).replace(/\.[^.]+$/, '');
+		if (document.title.includes(basename)) {
+			return;
+		}
+		if (!host.play?.(path)) {
+			throw new Error('the engine is not up yet');
+		}
+		const picker = $('fte-demo');
+		if (picker) {
+			picker.value = path;
+		}
+		const deadline = Date.now() + 20000;
+		while (!document.title.includes(basename)) {
+			if (Date.now() >= deadline) {
+				throw new Error(`the engine did not open ${basename}`);
+			}
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		}
+	}
+
+	for (const button of buttons) {
+		button.addEventListener('click', async () => {
+			if (pending) return;
+			const target = button.dataset.demoJump;
+			const demoPath = button.dataset.demoPath;
+			const bridge = currentBridge();
+			if (!bridge) {
+				note('The engine is not up yet — try that moment again in a moment.');
+				return;
+			}
+			pending = true;
+			for (const control of buttons) control.disabled = true;
+			try {
+				// Preserve the engine's state at the gesture, not a possibly stale
+				// app polling snapshot. In particular, a console pause immediately
+				// followed by a preset must remain paused after the seek.
+				const state = await bridge.state();
+				const wasPaused = Number(state.demo?.cl_demospeed) === 0;
+				await selectDemo(demoPath);
+				if (wasPaused) {
+					await bridge.send('demo_setspeed 0');
+				}
+				await bridge.send('demo_jump 0:00');
+				await bridge.send(`demo_jump ${target}`);
+			} catch (err) {
+				note(`Could not jump to ${target}: ${err.message ?? err}.`);
+			} finally {
+				pending = false;
+				for (const control of buttons) control.disabled = false;
+			}
+		});
+	}
+}
+
 // ---- volume -----------------------------------------------------------------
 // The demo's sound, owner decision #10: it defaults quiet (0.175, applied by
 // boot.js's +volume launch argument, which also replays the state stored here)
@@ -403,5 +469,6 @@ function renderDrift(report) {
 
 buildDemoPicker();
 installDemoPause();
+installDemoMoments();
 installVolume();
 installDropZone();

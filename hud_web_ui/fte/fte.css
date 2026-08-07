@@ -115,6 +115,35 @@
 	color: var(--text-dim);
 }
 
+.fte-moments {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	font-size: 11px;
+	color: var(--text-dim);
+}
+
+.fte-moment {
+	padding: 2px 6px;
+	border: 1px solid var(--line);
+	border-radius: 3px;
+	background: rgba(255, 255, 255, 0.03);
+	color: var(--text-body);
+	font: inherit;
+	cursor: pointer;
+}
+
+.fte-moment:hover,
+.fte-moment:focus-visible {
+	border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+	color: var(--accent);
+}
+
+.fte-moment:disabled {
+	cursor: wait;
+	opacity: 0.45;
+}
+
 /* The volume pair (#10): deliberately quiet chrome. A dim icon-button whose
  * two speaker glyphs swap on aria-pressed — state lives in the attribute the
  * accessibility tree reads, so the icon can never disagree with it — and a

@@ -331,6 +331,25 @@ try {
 				fake.state.demo.cl_demospeed = demoSpeed[1] === '0' ? '0' : '1';
 				return;
 			}
+			const playDemo = /^playdemo\s+demos\/([a-z0-9_.-]+\.mvd)$/i.exec(line.trim());
+			if (playDemo) {
+				// The wasm engine owns both signals selectDemo() waits on: playdemo
+				// resets the consumed-packet cursor and Sys_SetWindowTitle includes
+				// cls.lastdemoname (client/cl_main.c). Mirror those boundaries, not
+				// any page-side knowledge of which picker option was selected.
+				fake.demoCursor = 0;
+				fake.state.demo.position = '0:00';
+				document.title = `FTEQW: ${playDemo[1]}`;
+				return;
+			}
+			const demoJump = /^demo_jump\s+(\d+):(\d{2})$/i.exec(line.trim());
+			if (demoJump && Number(demoJump[2]) < 60) {
+				// Engine-side readback for the fake lane: the command, not the
+				// button, owns both the consumed-packet cursor and reported point.
+				fake.demoCursor = (Number(demoJump[1]) * 60 + Number(demoJump[2])) * 10;
+				fake.state.demo.position = `${Number(demoJump[1])}:${demoJump[2]}`;
+				return;
+			}
 			if (line.trim().toLowerCase() === 'hud_reset_layout') {
 				for (const element of fake.state.elements) {
 					const base = resetDefaults.get(element.name);
@@ -1164,7 +1183,97 @@ try {
 	await page.waitForFunction(() => localStorage.getItem('ezhud.ui.scale') === '1.25');
 	console.log('  15 editor scale: 1440p minimums, visible presets, persistence seed, canvas and state propagation');
 
-	// ---- 16. volume ----------------------------------------------------------
+	// ---- 16. deterministic demo moments (#23) -------------------------------
+	// These are points in the bundled tb4gf match, not editor-owned timestamps.
+	// Start on the other bundled demo so the first control must select its own
+	// match and wait for the engine-owned title signal before it seeks.
+	await page.waitForFunction(() => document.querySelectorAll('[data-demo-jump]').length === 3);
+	await page.evaluate(() => { window.__fake.refuseDemo = false; });
+	await page.selectOption('#fte-demo', 'qw/demos/hudtest_src.mvd');
+	await page.waitForFunction(() => document.title.includes('hudtest_src.mvd'));
+
+	const fullHud = page.locator('[data-demo-jump="9:00"]');
+	const sentBeforeRunningMoment = (await sentLines()).length;
+	await fullHud.click();
+	await page.waitForFunction(() => window.__fake.state.demo.position === '9:00');
+	const runningMomentLines = (await sentLines()).slice(sentBeforeRunningMoment);
+	assert(JSON.stringify(runningMomentLines) === JSON.stringify([
+		'playdemo demos/tb4gf_book_vs_s.mvd',
+		'demo_jump 0:00',
+		'demo_jump 9:00',
+	]), `running Full HUD sent ${JSON.stringify(runningMomentLines)}`);
+	assert((await engineState()).demo.cl_demospeed === '1',
+		'selecting a moment paused normal playback');
+	const runningFromMoment = await page.evaluate(() => window.__fake.demoCursor);
+	await page.waitForTimeout(300);
+	assert(await page.evaluate(() => window.__fake.demoCursor) > runningFromMoment,
+		'the fake demo cursor did not continue after a running moment seek');
+
+	// Keep playback frozen for the repeatability and paused-edit cases.
+	await page.evaluate(() => window.FTEC.cbufadd('demo_setspeed 0\n'));
+	await page.waitForFunction(async () =>
+		(await import('/core/bridge.js')).currentBridge()?.lastState?.demo?.cl_demospeed === '0');
+	for (const expected of [
+		{ target: '9:00', label: 'Full HUD' },
+		{ target: '20:10', label: 'Scoreboard' },
+		{ target: '0:10', label: 'Quiet' },
+	]) {
+		const control = page.locator(`[data-demo-jump="${expected.target}"]`);
+		assert(await control.textContent() === expected.label,
+			`moment ${expected.target} has the wrong label`);
+		const sentBeforeMoment = (await sentLines()).length;
+		await control.click();
+		await page.waitForFunction((count) => window.__fake.sent.length >= count + 3,
+			sentBeforeMoment);
+		await page.waitForFunction((target) => window.__fake.state.demo.position === target,
+			expected.target);
+		const momentLines = (await sentLines()).slice(sentBeforeMoment);
+		assert(JSON.stringify(momentLines) === JSON.stringify([
+			'demo_setspeed 0', 'demo_jump 0:00', `demo_jump ${expected.target}`,
+		]), `${expected.label} sent ${JSON.stringify(momentLines)}`);
+		assert((await engineState()).demo.cl_demospeed === '0',
+			`${expected.label} unexpectedly resumed paused playback`);
+	}
+
+	// The same command must reset the engine-owned cursor to the same value,
+	// rather than accumulate a relative editor-side offset.
+	let sentBeforeRepeat = (await sentLines()).length;
+	await fullHud.click();
+	await page.waitForFunction((count) => window.__fake.sent.length >= count + 3,
+		sentBeforeRepeat);
+	const firstFullHudCursor = await page.evaluate(() => window.__fake.demoCursor);
+	sentBeforeRepeat = (await sentLines()).length;
+	await fullHud.click();
+	await page.waitForFunction((count) => window.__fake.sent.length >= count + 3,
+		sentBeforeRepeat);
+	await page.waitForTimeout(250);
+	assert(await page.evaluate(() => window.__fake.demoCursor) === firstFullHudCursor,
+		'two Full HUD seeks did not land on the same paused engine cursor');
+
+	// A placement gesture while the demo is paused still crosses the engine
+	// boundary and is present in the export. The moment controls must not own or
+	// block editor placement state.
+	await page.locator('.tree__row[data-name="health"]').click();
+	const pausedPos = page.locator('#f-health-pos_x');
+	await pausedPos.fill('33');
+	await pausedPos.press('Enter');
+	await page.waitForFunction(() => window.__fake.state.elements
+		.find((element) => element.name === 'health').pos_x === '33');
+	const pausedExport = await page.evaluate(async () =>
+		(await import('/core/bridge.js')).currentBridge().exportFullCfg());
+	assert(pausedExport.split('\n').includes('hud_health_pos_x "33"'),
+		'the paused placement edit did not reach the full export');
+	assert((await engineState()).demo.cl_demospeed === '0',
+		'the placement edit resumed demo playback');
+	await page.evaluate(async () => {
+		const bridge = (await import('/core/bridge.js')).currentBridge();
+		await bridge.setCvar('hud_health_pos_x', 16);
+		window.FTEC.cbufadd('demo_setspeed 100\n');
+	});
+	await page.waitForFunction(() => window.__fake.state.demo.cl_demospeed === '1');
+	console.log('  16 demo moments: own match selection, three seeks, repeatable point, paused edit + export');
+
+	// ---- 17. volume ----------------------------------------------------------
 	// The page's own sound knob (#10). The engine side is a plain cvar write, so
 	// the assertions are about the contract around it: the quiet boot default,
 	// the mute/unmute round trip, the imported line that must never apply, and
@@ -1226,7 +1335,7 @@ try {
 		.getPropertyValue('--ui-scale').trim()) === '1.25',
 		'the editor scale did not survive the reload');
 
-	console.log('  16 volume: quiet boot default, mute round trip, import refusal, persistence');
+	console.log('  17 volume: quiet boot default, mute round trip, import refusal, persistence');
 
 	// A second page at DPR 2 is the monitor-move half of #25. Playwright fixes
 	// deviceScaleFactor per browser context, so exercise that layout, then change
@@ -1290,7 +1399,7 @@ try {
 		`ftewebglcl.js should 404 here, got ${JSON.stringify(engineScript)}`);
 	assert(crashes.length === 0, `uncaught page errors: ${crashes.join('; ')}`);
 
-	console.log('Tier 3 FTE: 16 cases passed with no wasm (ftewebglcl.js 404 throughout)');
+	console.log('Tier 3 FTE: 17 cases passed with no wasm (ftewebglcl.js 404 throughout)');
 } catch (err) {
 	// A CI-only failure is undiagnosable from a TimeoutError alone; dump what
 	// the editor actually did before dying. Temporary debug aid — cheap enough

@@ -177,12 +177,16 @@ def main():
     expect_status(args.port, token, "hud_\x7fcontract 1")
     expect_status(args.port, token, "hud_face_pos_x " + "1" * 1024)
 
-    # Demo pause is one exact command, with the same percentage contract on
-    # ezQuake and FTE: 0% pauses and 100% restores cl_demospeed to 1. A prefix
-    # lookalike and command chaining remain forbidden after extending the list.
+    # Demo playback controls are exact commands on both backends. Pause keeps
+    # its percentage contract; seek admits the same absolute timestamp syntax
+    # the three visible moment buttons use. Prefix lookalikes and chaining stay
+    # forbidden after extending the list.
     expect_status(args.port, token, "demo_setspeedfoo 0")
     expect_status(args.port, token, "demo_setspeed 0;quit")
+    expect_status(args.port, token, "demo_jumpfoo 9:00")
+    expect_status(args.port, token, "demo_jump 9:00;quit")
     expect_status(args.port, token, "demo_setspeed 0", expected=200)
+    expect_status(args.port, token, "demo_jump 9:00", expected=200)
 
     def demo_speed():
         _, _, body = request(args.port, "GET", "/state", token)

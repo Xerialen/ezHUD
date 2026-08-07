@@ -90,7 +90,7 @@ test('send passes allowlisted commands through to cbufadd, newline included', as
 	assert.deepEqual(fake.sent, ['hud_recalculate\n', 'set hud_health_pos_x 12\n']);
 });
 
-test('demo speed is engine-read and percent commands pass exactly', async () => {
+test('demo speed and seek commands pass exactly while lookalikes stay refused', async () => {
 	const state = { ...oneElement, demo: { cl_demospeed: '1' } };
 	const fake = fakeEngine(state);
 	const bridge = new Bridge(fake);
@@ -98,8 +98,14 @@ test('demo speed is engine-read and percent commands pass exactly', async () => 
 
 	await bridge.send('demo_setspeed 0');
 	await bridge.send('demo_setspeed 100');
-	assert.deepEqual(fake.sent, ['demo_setspeed 0\n', 'demo_setspeed 100\n']);
-	for (const line of ['demo_setspeedfoo 0', 'demo_setspeed 0; quit']) {
+	await bridge.send('demo_jump 9:00');
+	assert.deepEqual(fake.sent, [
+		'demo_setspeed 0\n', 'demo_setspeed 100\n', 'demo_jump 9:00\n',
+	]);
+	for (const line of [
+		'demo_setspeedfoo 0', 'demo_setspeed 0; quit',
+		'demo_jumpfoo 9:00', 'demo_jump 9:00; quit',
+	]) {
 		await assert.rejects(() => bridge.send(line), (err) => {
 			assert.equal(err.status, 403);
 			return true;

@@ -783,8 +783,10 @@ qbool HUD_Web_CommandAllowed(const char *line)
 		 * the engine for the editor; there was no way to do this before. */
 		"hud_reset_layout",
 		/* Demo playback uses percent arguments on both supported engines:
-		 * demo_setspeed 0 pauses, demo_setspeed 100 restores cl_demospeed=1. */
-		"demo_setspeed"
+		 * demo_setspeed 0 pauses, demo_setspeed 100 restores cl_demospeed=1.
+		 * demo_jump is the engines' existing absolute seek command (seconds or
+		 * minutes:seconds); the page exposes only three authored timestamps. */
+		"demo_setspeed", "demo_jump"
 	};
 	const char *start;
 	const char *end;

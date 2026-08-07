@@ -128,7 +128,7 @@ Response `{"ok": true}`, or `403 {"ok": false, "error": "command not permitted"}
 **Allowlist** — cvar assignments whose name starts with `hud_`, `vid_`, `scr_`, `cl_hud`,
 plus the bare commands `hud_recalculate`, `vid_restart`, `cfg_save`, `move`, `align`,
 `place`, `toggleconsole`, `fontload`, `hud_export`, `hud_reset_layout`,
-`demo_setspeed`, plus the
+`demo_setspeed`, `demo_jump`, plus the
 `font_` prefix and `gl_consolefont`. Everything else is refused. No `exec`, no `quit`,
 no `rcon`, no aliases, no semicolon chaining.
 

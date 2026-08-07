@@ -55,6 +55,15 @@ const ENGINE_WAIT = 60000;
 // Editor-side waits: the DOM reacting to something the engine already did.
 const UI_WAIT = 20000;
 
+const DEMO_MOMENTS = [
+	{ target: '9:00', label: 'Full HUD' },
+	{ target: '20:10', label: 'Scoreboard' },
+	{ target: '0:10', label: 'Quiet' },
+];
+const DEMO_STATE_ELEMENTS = [
+	'key1', 'gun2', 'gun4', 'teamfrags', 'health', 'tracking',
+];
+
 // Import-map key, not a file path: index.html maps `${basePath}core/bridge.js`
 // to the FTE adapter, so importing that exact specifier from page context
 // hands back the same module instance app.js is polling -- and therefore the
@@ -237,6 +246,46 @@ const readDrawn = () => page.evaluate(async (spec) => {
 			pos_x: element.pos_x, pos_y: element.pos_y, rect: element.rect,
 		}));
 }, BRIDGE);
+
+// A compact projection of the engine-owned layout at a demo point. These
+// elements distinguish the three reviewed frames without depending on a page
+// clock or on tracker, whose false zero-area rect is independently tracked by
+// #87. Playback is frozen before every read, so three identical projections in
+// succession are a settled consumed-packet state rather than a timing guess.
+const readDemoMomentState = () => page.evaluate(async ([spec, names]) => {
+	const { currentBridge } = await import(spec);
+	const state = await currentBridge().state();
+	return {
+		speed: state.demo?.cl_demospeed ?? null,
+		elements: names.map((name) => {
+			const element = state.elements.find((entry) => entry.name === name);
+			return { name, rect: element?.rect ?? null };
+		}),
+	};
+}, [BRIDGE, DEMO_STATE_ELEMENTS]);
+
+const demoMomentSignature = (state) => JSON.stringify(state.elements);
+
+async function waitForDemoMoment(previousSignature, label) {
+	let lastSignature = null;
+	let stableReads = 0;
+	return eventually(async () => {
+		const state = await readDemoMomentState();
+		const signature = demoMomentSignature(state);
+		if (state.speed !== '0' || signature === previousSignature) {
+			lastSignature = null;
+			stableReads = 0;
+			return null;
+		}
+		if (signature === lastSignature) {
+			stableReads += 1;
+		} else {
+			lastSignature = signature;
+			stableReads = 1;
+		}
+		return stableReads >= 3 ? { state, signature } : null;
+	}, `${label} to settle in engine state while paused`, ENGINE_WAIT);
+}
 
 const waitLive = (label) => eventually(
 	async () => ((await readState()).live ? true : null), label, ENGINE_WAIT,
@@ -960,6 +1009,13 @@ try {
 			label: 'resume demo button', target: { selector: '#fte-pause' },
 			operation: { kind: 'click' }, expect: { cl_demospeed: '1' },
 		},
+		...DEMO_MOMENTS.map((moment) => ({
+			issue: 23,
+			label: `${moment.label} demo moment`,
+			target: { selector: `[data-demo-jump="${moment.target}"]` },
+			operation: { kind: 'click' },
+			moment,
+		})),
 		{
 			label: 'volume slider', target: { selector: '#fte-volume' },
 			operation: { kind: 'fill', value: '0.35' }, expect: { volume: '0.35' },
@@ -1137,7 +1193,7 @@ try {
 	];
 
 	let nextCase = 8;
-	for (const row of controlCases.filter((entry) => ![24, 25, 43].includes(entry.issue))) {
+	for (const row of controlCases.filter((entry) => ![23, 24, 25, 43].includes(entry.issue))) {
 		await proveControl(row);
 		const effect = row.expect
 			? Object.entries(row.expect).map(([name, value]) => `${name}=${value}`).join(', ')
@@ -1661,10 +1717,77 @@ try {
 		}, { name: candidate.name, original: dragSubjectOriginal }).catch(() => {});
 	}
 
-	// Case 36 resumes through the raw channel in its finally block. Wait for
-	// that engine state to reach the visible toggle before asking the toggle for
-	// its opposite; otherwise a deliberately stale aria-pressed=true would
-	// correctly request another resume rather than the pause this row expects.
+	// ---- #23 deterministic moments against the real wasm engine -------------
+	// Case 6 already selected the bundled tb4gf match. Drive each new authored
+	// button while paused, then compare compact engine-state projections: all
+	// three points must differ, and a second Scoreboard run must match the first.
+	// The exact demo_jump command/argument is independently asserted in tier 3F.
+	await eventually(async () => {
+		const state = await readState();
+		return state.demo?.cl_demospeed === '1'
+			&& await pauseButton.getAttribute('aria-pressed') === 'false'
+			&& await pauseButton.isEnabled() ? true : null;
+	}, 'normal playback to reach the pause toggle before demo moments', UI_WAIT);
+	await pauseButton.click();
+	await eventually(async () => (await readState()).demo?.cl_demospeed === '0'
+		&& await pauseButton.getAttribute('aria-pressed') === 'true' ? true : null,
+	'the demo moments to start from paused engine state', UI_WAIT);
+
+	const momentRows = new Map(controlCases
+		.filter((entry) => entry.issue === 23)
+		.map((row) => [row.moment.target, row]));
+	const momentStates = new Map();
+	let previousMoment = demoMomentSignature(await readDemoMomentState());
+	const momentSubjectOriginal = (await readState(candidate.name)).element;
+	try {
+		for (const target of ['20:10', '0:10', '9:00', '20:10']) {
+			const row = momentRows.get(target);
+			assert(row, `missing declarative 4F row for demo moment ${target}`);
+			await operateControl(row);
+			const settledMoment = await waitForDemoMoment(previousMoment, row.label);
+			const first = momentStates.get(target);
+			if (first) {
+				assert(settledMoment.signature === first,
+					`${row.label} was not repeatable: ${first} != ${settledMoment.signature}`);
+			} else {
+				momentStates.set(target, settledMoment.signature);
+				pass(nextCase++, `${row.label} — visible seek reached a settled paused engine state`);
+			}
+			previousMoment = settledMoment.signature;
+		}
+		assert(new Set(momentStates.values()).size === DEMO_MOMENTS.length,
+			`the three demo controls did not reach distinct engine states: ${JSON.stringify([...momentStates])}`);
+
+		// A visible placement edit while the same consumed-packet cursor is frozen
+		// must still cross into the engine and into the user's full config export.
+		await selectForPlacement(candidate.name);
+		const pausedPosition = String((Number(momentSubjectOriginal.pos_x) || 0) + 3);
+		const pausedControl = page.locator(`#f-${candidate.name}-pos_x`);
+		await pausedControl.fill(pausedPosition);
+		await pausedControl.press('Enter');
+		await eventually(async () => await readCvar(`hud_${candidate.name}_pos_x`) === pausedPosition
+			? true : null, `paused ${candidate.name} placement readback`, UI_WAIT);
+		const pausedExport = await readExport();
+		assert(pausedExport.split('\n').includes(`hud_${candidate.name}_pos_x "${pausedPosition}"`),
+			`paused placement omitted hud_${candidate.name}_pos_x "${pausedPosition}" from the export`);
+		assert((await readState()).demo?.cl_demospeed === '0',
+			'the paused placement edit resumed demo playback');
+		pass(nextCase++, 'Scoreboard repeated exactly; paused placement reached engine and full export');
+	} finally {
+		await page.evaluate(({ name, posX }) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) return;
+			channel.cbufadd(`set hud_${name}_pos_x ${posX}\nhud_recalculate\ndemo_setspeed 100\n`);
+		}, { name: candidate.name, posX: momentSubjectOriginal.pos_x }).catch(() => {});
+		await eventually(async () => (await readState()).demo?.cl_demospeed === '1'
+			? true : null, 'demo-moment cleanup to resume playback', UI_WAIT).catch(() => {});
+	}
+
+	// Case 36 resumes through the raw channel in its finally block, and #23's
+	// cleanup does the same. Wait for that engine state to reach the visible
+	// toggle before asking the toggle for its opposite; otherwise a deliberately
+	// stale aria-pressed=true would correctly request another resume rather than
+	// the pause this row expects.
 	await eventually(async () => {
 		const state = await readState();
 		return state.demo?.cl_demospeed === '1'
