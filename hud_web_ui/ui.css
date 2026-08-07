@@ -545,6 +545,32 @@ button:focus-visible,
 	overflow: hidden;
 }
 
+/* The selected element's engine-reported parent relationship. It sits below
+   element boxes and uses their projected rect centres; no placement arithmetic
+   is invented here. */
+.anchor-link {
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	pointer-events: none;
+	overflow: visible;
+}
+
+.anchor-link line {
+	stroke: var(--accent);
+	stroke-width: 1.5;
+	stroke-dasharray: 5 4;
+	vector-effect: non-scaling-stroke;
+	opacity: 0.9;
+}
+
+.anchor-link circle {
+	fill: var(--bg-stage);
+	stroke: var(--accent);
+	stroke-width: 2;
+	vector-effect: non-scaling-stroke;
+}
+
 .box {
 	position: absolute;
 	pointer-events: auto;
@@ -851,6 +877,19 @@ button:focus-visible,
 	cursor: help;
 }
 .field[data-inert="true"] input { opacity: 0.62; }
+
+.placement-workflow {
+	border-left: 2px solid var(--accent-deep);
+	background: var(--accent-wash-soft);
+}
+
+.placement-workflow__hint {
+	margin-bottom: 0;
+}
+
+.placement-workflow .notice {
+	margin: 9px 0 0;
+}
 
 #fonts { border-bottom: 1px solid var(--line); }
 #fonts .field { grid-template-columns: 92px minmax(0, 1fr); }

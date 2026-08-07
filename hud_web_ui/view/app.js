@@ -220,6 +220,16 @@ async function applyAll(changes) {
 
 const apply = (cvar, value) => applyAll([[cvar, value]]);
 
+function applyPlacement(item, value) {
+	const reason = model.placementRefusal(item.name, value);
+	if (reason) {
+		model.set({ placementError: { element: item.name, reason } });
+		return;
+	}
+	model.placementError = null;
+	return apply(`hud_${item.name}_place`, value);
+}
+
 function currentCvar(cvar) {
 	for (const element of model.elements) {
 		if (element.cvars && cvar in element.cvars) {
@@ -562,10 +572,19 @@ function renderOverlay() {
 	}
 	const displayScale = shown / natural;
 
+	const selected = model.selectedElement;
+	if (selected?.parent && selected.rect) {
+		const parent = model.element(selected.parent);
+		if (parent?.rect) {
+			el.overlay.append(anchorLink(selected, parent, s, p, displayScale));
+		}
+	}
+
 	for (const item of model.placedElements) {
 		const r = consoleToFrame(item.rect, s, p);
 		const box = document.createElement('div');
 		box.className = 'box';
+		box.dataset.name = item.name;
 		box.dataset.selected = String(item.name === model.selected);
 		// Selecting a container should show what moves with it.
 		box.dataset.child = String(item.parent != null && item.parent === model.selected);
@@ -593,6 +612,41 @@ function renderOverlay() {
 		}
 		el.overlay.append(box);
 	}
+}
+
+function anchorLink(child, parent, screen, physical, displayScale) {
+	const childRect = consoleToFrame(child.rect, screen, physical);
+	const parentRect = consoleToFrame(parent.rect, screen, physical);
+	const point = (rect) => ({
+		x: (rect.x + rect.w / 2) * displayScale,
+		y: (rect.y + rect.h / 2) * displayScale,
+	});
+	const from = point(childRect);
+	const to = point(parentRect);
+	const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+	svg.classList.add('anchor-link');
+	svg.dataset.child = child.name;
+	svg.dataset.anchor = parent.name;
+	svg.setAttribute('width', String(el.frame.clientWidth));
+	svg.setAttribute('height', String(el.frame.clientHeight));
+	svg.setAttribute('aria-hidden', 'true');
+	const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+	title.textContent = `${child.name} is anchored to ${parent.name}`;
+	const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+	line.setAttribute('x1', String(from.x));
+	line.setAttribute('y1', String(from.y));
+	line.setAttribute('x2', String(to.x));
+	line.setAttribute('y2', String(to.y));
+	const childDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+	childDot.setAttribute('cx', String(from.x));
+	childDot.setAttribute('cy', String(from.y));
+	childDot.setAttribute('r', '3');
+	const parentDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+	parentDot.setAttribute('cx', String(to.x));
+	parentDot.setAttribute('cy', String(to.y));
+	parentDot.setAttribute('r', '4');
+	svg.append(title, line, childDot, parentDot);
+	return svg;
 }
 
 // Corners that can move get a grab handle; corners the engine has pinned get an
@@ -829,7 +883,8 @@ function renderInspector() {
 	// The inspector is full of inputs the user is mid-edit in. Rebuilding it on a
 	// frame tick loses focus and caret position for no benefit.
 	if (!stale('inspector', model.elementFingerprint(model.selected), '|', model.selected,
-		'|', model.status, '|', model.palette.length, '|', [...pending].join(','))) {
+		'|', model.status, '|', model.palette.length, '|', [...pending].join(','),
+		'|', model.placementError?.element ?? '', '|', model.placementError?.reason ?? '')) {
 		return;
 	}
 	const item = model.selectedElement;
@@ -882,7 +937,35 @@ function renderInspector() {
 	const direction = model.directionControl(item);
 	const { placement, rest } = Model.partitionCvars(item, [direction?.param]);
 	if (placement.length) {
-		el.inspector.append(group('Placement', placement, item));
+		const primary = placement.filter((entry) =>
+			['place', 'align_x', 'align_y', 'order'].includes(entry.suffix));
+		const offsets = placement.filter((entry) => ['pos_x', 'pos_y'].includes(entry.suffix));
+		const advanced = placement.filter((entry) => entry.suffix === 'frame');
+		const workflow = group('Anchor & alignment', primary, item, {
+			className: 'placement-workflow',
+			labels: { place: 'Anchor', align_x: 'Horizontal', align_y: 'Vertical', order: 'Order' },
+		});
+		const explanation = document.createElement('p');
+		explanation.className = 'font-state placement-workflow__hint';
+		explanation.textContent = item.parent
+			? `Anchored to ${item.parent}. Dragging or editing below changes the fine-tune offset; moving ${item.parent} moves this element too.`
+			: 'Anchored to an engine screen region. Pick another element to make this relationship follow it.';
+		workflow.append(explanation);
+		if (model.placementError?.element === item.name) {
+			workflow.append(notice('Anchor refused', model.placementError.reason));
+		}
+		el.inspector.append(workflow);
+		if (offsets.length) {
+			el.inspector.append(group(item.parent ? 'Fine-tune offsets' : 'Raw coordinates', offsets, item, {
+				className: 'placement-offsets',
+				labels: item.parent
+					? { pos_x: 'Horizontal', pos_y: 'Vertical' }
+					: { pos_x: 'X coordinate', pos_y: 'Y coordinate' },
+			}));
+		}
+		if (advanced.length) {
+			el.inspector.append(group('Anchor frame', advanced, item));
+		}
 	}
 	if (direction) {
 		el.inspector.append(directionGroup(direction, item));
@@ -955,9 +1038,9 @@ function metrics(item) {
 	return dl;
 }
 
-function group(title, entries, item) {
+function group(title, entries, item, { className = '', labels = {} } = {}) {
 	const section = document.createElement('section');
-	section.className = 'group';
+	section.className = `group${className ? ` ${className}` : ''}`;
 	const h = document.createElement('h3');
 	h.className = 'group__title';
 	h.textContent = title;
@@ -969,7 +1052,7 @@ function group(title, entries, item) {
 		const id = `f-${item.name}-${entry.suffix}`;
 		const label = document.createElement('label');
 		label.htmlFor = id;
-		label.textContent = entry.suffix;
+		label.textContent = labels[entry.suffix] ?? entry.suffix;
 		label.title = entry.name;
 
 		let input;
@@ -987,10 +1070,14 @@ function group(title, entries, item) {
 			input.value = current;
 		} else if (entry.suffix === 'place') {
 			// Assigning an element to a group IS setting this cvar, so it must be a
-			// choice from what exists rather than a remembered string.
+			// choice from what exists rather than a remembered string. Cycle-forming
+			// values remain visible but disabled with their reason.
 			input = document.createElement('select');
 			for (const opt of model.placeOptions(item.name)) {
-				input.append(new Option(opt.label, opt.value));
+				const option = new Option(opt.label, opt.value);
+				option.disabled = opt.disabled;
+				if (opt.reason) option.title = opt.reason;
+				input.append(option);
 			}
 			const current = pending.get(entry.name) ?? entry.value;
 			if (![...input.options].some((o) => o.value === current)) {
@@ -1016,7 +1103,9 @@ function group(title, entries, item) {
 			label.title = `${entry.name} — ${inert}`;
 			input.title = inert;
 		}
-		input.addEventListener('change', () => apply(entry.name, input.value.trim()));
+		input.addEventListener('change', () => entry.suffix === 'place'
+			? applyPlacement(item, input.value.trim())
+			: apply(entry.name, input.value.trim()));
 		input.addEventListener('keydown', (ev) => {
 			if (ev.key === 'Enter') { input.blur(); }
 		});
@@ -1554,14 +1643,15 @@ function acceptDrop(node, place, verb) {
 		delete node.dataset.over;
 		delete el.groupPanel.dataset.dropping;
 		const name = ev.dataTransfer.getData('text/plain');
-		// An element placed on itself is rejected by HUD_FindPlace (`par != hud`)
-		// and silently falls back to the screen, so refuse it here where we can say
-		// nothing happened rather than let it look like a move that did nothing.
-		if (!name || place === name || place === `@${name}`) {
+		if (!name) {
 			return;
 		}
-		model.set({ selected: name });
-		apply(`hud_${name}_place`, place);
+		const item = model.element(name);
+		const reason = item ? model.placementRefusal(name, place) : 'The dragged element is no longer registered.';
+		model.set({ selected: name, placementError: reason ? { element: name, reason } : null });
+		if (!reason) {
+			applyPlacement(item, place);
+		}
 	});
 	node.title = node.title ? `${node.title}\n${verb} by dragging it here.` : `${verb} by dragging it here.`;
 }

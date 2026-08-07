@@ -105,7 +105,7 @@ const FIXTURE = {
 		}),
 		element('armor', {
 			pos_x: '16', pos_y: '60',
-			rect: { x: 16, y: 60, w: 64, h: 24 },
+			rect: { x: 16, y: 60, w: 48, h: 24 },
 			cvars: { hud_armor_scale: '1' },
 		}),
 		// Percentage-sized, which model.sizeControl() answers 'relative' for: no
@@ -287,6 +287,39 @@ try {
 		// command; the fake engine needs the same behaviour to keep this suite
 		// honest about the fix.
 		const resetDefaults = new Map(fake.state.elements.map((e) => [e.name, structuredClone(e)]));
+		const regions = new Set(['screen', 'top', 'view', 'sbar', 'ibar', 'hbar', 'sfree', 'ifree', 'hfree']);
+		const parentFromPlace = (value) => {
+			const name = String(value ?? '').replace(/^@/, '');
+			return regions.has(name) ? null : fake.state.elements.find((e) => e.name === name)?.name ?? null;
+		};
+		const aligned = (start, size, content, align, offset) => {
+			switch (align) {
+			case 'center': return start + Math.trunc((size - content) / 2) + offset;
+			case 'right': case 'bottom': return start + size - content + offset;
+			case 'before': return start - content + offset;
+			case 'after': return start + size + offset;
+			default: return start + offset;
+			}
+		};
+		// Minimal fake of the engine-owned placement boundary: enough to fold the
+		// fixture's screen/element anchors and recursively move children. Product
+		// code still consumes only rects exported by this side of the wire.
+		function reflow(element, seen = new Set()) {
+			if (!element?.rect || seen.has(element.name)) return;
+			seen.add(element.name);
+			const parent = element.parent ? fake.state.elements.find((e) => e.name === element.parent) : null;
+			const area = parent?.rect ?? {
+				x: 0, y: 0,
+				w: fake.state.screen.vid_width, h: fake.state.screen.vid_height,
+			};
+			element.rect.x = aligned(area.x, area.w, element.rect.w,
+				String(element.align_x).toLowerCase(), Number(element.pos_x) || 0);
+			element.rect.y = aligned(area.y, area.h, element.rect.h,
+				String(element.align_y).toLowerCase(), Number(element.pos_y) || 0);
+			for (const child of fake.state.elements.filter((e) => e.parent === element.name)) {
+				reflow(child, seen);
+			}
+		}
 
 		// What the engine would do with the line, not what it was told: a cvar
 		// the plugin never registered is set in the engine but absent from the
@@ -304,7 +337,7 @@ try {
 					if (!base) {
 						continue;
 					}
-					for (const field of ['place', 'align_x', 'align_y', 'pos_x', 'pos_y']) {
+					for (const field of ['place', 'parent', 'align_x', 'align_y', 'pos_x', 'pos_y']) {
 						element[field] = base[field];
 					}
 					element.shown = base.shown;
@@ -331,14 +364,8 @@ try {
 			}
 			const { element, suffix } = hit;
 			if (suffix === 'pos_x' || suffix === 'pos_y') {
-				// The engine re-lays-out from the new position; every fixture
-				// element is left/top aligned, so that is the rect plus the delta.
-				const axis = suffix === 'pos_x' ? 'x' : 'y';
-				const delta = Number(value) - (Number(element[suffix]) || 0);
 				element[suffix] = value;
-				if (element.rect) {
-					element.rect[axis] += delta;
-				}
+				reflow(element);
 				return;
 			}
 			if (suffix === 'show') {
@@ -347,6 +374,12 @@ try {
 			}
 			if (PLACEMENT.has(suffix)) {
 				element[suffix] = value;
+				if (suffix === 'place') {
+					element.parent = parentFromPlace(value);
+				}
+				if (suffix === 'place' || suffix === 'align_x' || suffix === 'align_y') {
+					reflow(element);
+				}
 				return;
 			}
 			if (Object.prototype.hasOwnProperty.call(element.cvars, cvar)) {
@@ -793,7 +826,126 @@ try {
 
 	console.log('  11 reload guard: engine key and beforeunload listeners released');
 
-	// ---- 12. reset positions -------------------------------------------------
+	// ---- 12. alignment-first editing (#32) ----------------------------------
+	// Start from authored controls, then judge only the fake engine's exported
+	// parent/cvars/rects. DOM geometry is used solely for the drag gesture and for
+	// the relationship line's presence, never as placement truth.
+	await page.locator('.tree__row[data-name="armor"]').click();
+	assert(await page.locator('#inspector .placement-workflow').count() === 1,
+		'the inspector has no first-class anchor/alignment workflow');
+	const setPlacementField = async (id, value) => {
+		const control = page.locator(`#${id}`);
+		await control.waitFor();
+		if (await control.evaluate((node) => node.tagName === 'SELECT')) {
+			await control.selectOption(String(value));
+		} else {
+			await control.fill(String(value));
+			await control.press('Enter');
+		}
+	};
+	await setPlacementField('f-armor-place', '@health');
+	await setPlacementField('f-armor-align_x', 'left');
+	await setPlacementField('f-armor-align_y', 'top');
+	await setPlacementField('f-armor-pos_x', '0');
+	await setPlacementField('f-armor-pos_y', '0');
+	await setPlacementField('f-armor-order', '7');
+	await page.waitForFunction(() => {
+		const armor = window.__fake.state.elements.find((e) => e.name === 'armor');
+		const health = window.__fake.state.elements.find((e) => e.name === 'health');
+		return armor.parent === 'health' && armor.order === '7'
+			&& armor.rect.x === health.rect.x && armor.rect.y === health.rect.y;
+	});
+	await page.waitForSelector('#overlay .anchor-link[data-child="armor"][data-anchor="health"]');
+
+	// One parent drag moves both engine rects by the same delta.
+	const beforeGroupDrag = await engineState();
+	await page.locator('.tree__row[data-name="health"]').click();
+	const parentBox = page.locator('#overlay .box[data-selected="true"]');
+	const parentBounds = await parentBox.boundingBox();
+	assert(parentBounds, 'anchored parent has no draggable overlay box');
+	await page.mouse.move(parentBounds.x + parentBounds.width / 2, parentBounds.y + parentBounds.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(parentBounds.x + parentBounds.width / 2 + 32,
+		parentBounds.y + parentBounds.height / 2, { steps: 4 });
+	await page.mouse.up();
+	await page.waitForFunction((previous) => window.__fake.state.elements
+		.find((e) => e.name === 'health').pos_x !== previous,
+		named(beforeGroupDrag, 'health').pos_x);
+	const afterGroupDrag = await engineState();
+	const parentDx = named(afterGroupDrag, 'health').rect.x - named(beforeGroupDrag, 'health').rect.x;
+	const childDx = named(afterGroupDrag, 'armor').rect.x - named(beforeGroupDrag, 'armor').rect.x;
+	assert(parentDx !== 0 && childDx === parentDx,
+		`parent/child engine rects did not move together: ${parentDx} vs ${childDx}`);
+
+	// Three alignments and a fine-tune offset are exact against engine rects.
+	await page.locator('.tree__row[data-name="armor"]').click();
+	for (const alignment of ['left', 'center', 'right']) {
+		await setPlacementField('f-armor-align_x', alignment);
+		await page.waitForFunction((wanted) => window.__fake.state.elements
+			.find((e) => e.name === 'armor').align_x === wanted, alignment);
+		const state = await engineState();
+		const parent = named(state, 'health').rect;
+		const child = named(state, 'armor').rect;
+		const expected = alignment === 'left' ? parent.x
+			: alignment === 'center' ? parent.x + Math.trunc((parent.w - child.w) / 2)
+				: parent.x + parent.w - child.w;
+		assert(child.x === expected,
+			`${alignment} engine alignment expected x=${expected}, got ${child.x}`);
+	}
+	await setPlacementField('f-armor-pos_x', '7');
+	await setPlacementField('f-armor-pos_y', '9');
+	await page.waitForFunction(() => window.__fake.state.elements
+		.find((e) => e.name === 'armor').pos_y === '9');
+	{
+		const state = await engineState();
+		const parent = named(state, 'health').rect;
+		const child = named(state, 'armor').rect;
+		assert(child.x === parent.x + parent.w - child.w + 7 && child.y === parent.y + 9,
+			`fine-tune offsets did not land on top of the anchor: ${JSON.stringify({ parent, child })}`);
+	}
+
+	// The relationship visualization follows a changed anchor.
+	await setPlacementField('f-armor-place', '@radar');
+	await page.waitForSelector('#overlay .anchor-link[data-child="armor"][data-anchor="radar"]');
+	await setPlacementField('f-armor-place', '@health');
+	await page.waitForSelector('#overlay .anchor-link[data-child="armor"][data-anchor="health"]');
+
+	// A parent cannot be anchored to its own descendant. The option remains
+	// visible so the refusal explains itself instead of silently disappearing.
+	await page.locator('.tree__row[data-name="health"]').click();
+	const cycleOption = page.locator('#f-health-place option[value="@armor"]');
+	assert(await cycleOption.isDisabled(), 'the descendant anchor option is not disabled');
+	assert(/unavailable.*cycle/i.test(await cycleOption.textContent()),
+		'the disabled cycle option does not state why it was refused');
+
+	// Export the relationship, disturb it, then feed those exact bytes through
+	// the shipping import path. Parent readback, not a frozen rect, is the pass.
+	const anchoredCfg = await page.evaluate(async () =>
+		(await import('/core/bridge.js')).currentBridge().exportFullCfg());
+	assert(anchoredCfg.split('\n').includes('hud_armor_place "@health"'),
+		'the full export omitted the anchor relationship');
+	assert(anchoredCfg.split('\n').includes('hud_armor_align_x "right"')
+		&& anchoredCfg.split('\n').includes('hud_armor_pos_x "7"')
+		&& anchoredCfg.split('\n').includes('hud_armor_pos_y "9"'),
+		'the full export omitted alignment or fine-tune offsets');
+	await page.evaluate(async () => {
+		const bridge = (await import('/core/bridge.js')).currentBridge();
+		await bridge.setCvar('hud_armor_place', 'screen');
+		await bridge.send('hud_recalculate');
+	});
+	await page.waitForFunction(() => window.__fake.state.elements
+		.find((e) => e.name === 'armor').parent === null);
+	await page.evaluate((text) => {
+		const transfer = new DataTransfer();
+		transfer.items.add(new File([text], 'anchored-roundtrip.cfg', { type: 'text/plain' }));
+		document.getElementById('fte-drop').dispatchEvent(
+			new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+	}, anchoredCfg);
+	await page.waitForFunction(() => window.__fake.state.elements
+		.find((e) => e.name === 'armor').parent === 'health');
+	console.log('  12 alignment-first: anchor/group move, 3 alignments, offsets, relationship line, cycle refusal, round trip');
+
+	// ---- 13. reset positions -------------------------------------------------
 	// The tracker cvar-wiring fix (fix/tracker-cvar-wiring): plugins/ezhud/hud.c
 	// gained HUD_ResetLayout_f, ported from ezQuake's engine-integration.diff, so
 	// the FTE-web preview's "Reset positions..." button (which has always sent
@@ -823,9 +975,9 @@ try {
 	assert(healthAfterReset.pos_x === '16' && healthAfterReset.pos_y === '24',
 		`reset did not restore health's registered pos_x/pos_y, got ${JSON.stringify(healthAfterReset)}`);
 
-	console.log('  12 reset positions: hud_reset_layout reverts a moved element to its registered default');
+	console.log('  13 reset positions: hud_reset_layout reverts a moved element to its registered default');
 
-	// ---- 13. editor window scaling (#25) ------------------------------------
+	// ---- 14. editor window scaling (#25) ------------------------------------
 	// The control scales editor chrome, never HUD coordinates. Its CSS change
 	// also has to wake FTE's resize glue because changing a custom property does
 	// not itself emit a browser resize event.
@@ -899,9 +1051,9 @@ try {
 	}, [screenAt125.vid_width, screenAt125.vid_height]);
 	await uiScale.selectOption('1.25');
 	await page.waitForFunction(() => localStorage.getItem('ezhud.ui.scale') === '1.25');
-	console.log('  13 editor scale: 1440p minimums, visible presets, persistence seed, canvas and state propagation');
+	console.log('  14 editor scale: 1440p minimums, visible presets, persistence seed, canvas and state propagation');
 
-	// ---- 14. volume ----------------------------------------------------------
+	// ---- 15. volume ----------------------------------------------------------
 	// The page's own sound knob (#10). The engine side is a plain cvar write, so
 	// the assertions are about the contract around it: the quiet boot default,
 	// the mute/unmute round trip, the imported line that must never apply, and
@@ -963,7 +1115,7 @@ try {
 		.getPropertyValue('--ui-scale').trim()) === '1.25',
 		'the editor scale did not survive the reload');
 
-	console.log('  14 volume: quiet boot default, mute round trip, import refusal, persistence');
+	console.log('  15 volume: quiet boot default, mute round trip, import refusal, persistence');
 
 	// A second page at DPR 2 is the monitor-move half of #25. Playwright fixes
 	// deviceScaleFactor per browser context, so exercise that layout, then change
@@ -1027,7 +1179,7 @@ try {
 		`ftewebglcl.js should 404 here, got ${JSON.stringify(engineScript)}`);
 	assert(crashes.length === 0, `uncaught page errors: ${crashes.join('; ')}`);
 
-	console.log('Tier 3 FTE: 14 cases passed with no wasm (ftewebglcl.js 404 throughout)');
+	console.log('Tier 3 FTE: 15 cases passed with no wasm (ftewebglcl.js 404 throughout)');
 } catch (err) {
 	// A CI-only failure is undiagnosable from a TimeoutError alone; dump what
 	// the editor actually did before dying. Temporary debug aid — cheap enough

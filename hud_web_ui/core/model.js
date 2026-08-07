@@ -254,6 +254,10 @@ export class Model {
 		this.showHidden = true;
 		this.showSpectator = true;
 		this.chromeVisible = true;
+		// A refused relationship belongs to the selected element. Keeping the
+		// reason in model state makes drag/drop and the inspector tell the same
+		// story instead of one silently ignoring a cycle.
+		this.placementError = null;
 		// The render is a separate stream from the state, and can fail on its own.
 		// frameReady is tracked rather than inferred from the <img>: it starts life
 		// holding a 1x1 placeholder, so naturalWidth is truthy before any real
@@ -831,17 +835,55 @@ export class Model {
 			.sort((a, b) => a.name.localeCompare(b.name));
 	}
 
-	// Every legal value for `place`, so assigning an element to a group is a
-	// choice from a list rather than a remembered string.
+	// Why the engine relationship must not be written. Following the proposed
+	// parent's already-resolved parent chain catches self-links, descendants and
+	// a malformed cycle imported from elsewhere before HUD_Recalculate can turn
+	// the selected elements undrawable.
+	placementRefusal(forElement, place) {
+		const raw = String(place ?? '');
+		const target = raw.replace(/^@/, '');
+		if (PLACE_REGIONS.includes(target)) {
+			return null;
+		}
+		if (target === forElement) {
+			return 'An element cannot be anchored to itself.';
+		}
+		let cursor = this.element(target);
+		if (!cursor) {
+			return `The anchor "${target}" is not registered.`;
+		}
+		const seen = new Set();
+		while (cursor) {
+			if (cursor.name === forElement) {
+				return `Anchoring ${forElement} to ${target} would create a placement cycle.`;
+			}
+			if (seen.has(cursor.name)) {
+				return `The anchor ${target} already belongs to a placement cycle.`;
+			}
+			seen.add(cursor.name);
+			cursor = cursor.parent ? this.element(cursor.parent) : null;
+		}
+		return null;
+	}
+
+	// Every engine-recognized value for `place`. Invalid relationships stay in
+	// the list as disabled choices with their reason: disappearing an option
+	// teaches nothing, while a named refusal lets the user repair the chain.
 	placeOptions(forElement) {
-		const anchors = this.elements
-			.map((e) => e.name)
-			.filter((n) => n !== forElement)
-			.sort();
+		const anchors = this.elements.map((e) => e.name).sort();
+		const option = (value, label) => {
+			const reason = this.placementRefusal(forElement, value);
+			return {
+				value,
+				label: reason ? `${label} — unavailable: ${reason}` : label,
+				disabled: Boolean(reason),
+				reason,
+			};
+		};
 		return [
-			...PLACE_REGIONS.map((r) => ({ value: r, label: r })),
-			...anchors.map((n) => ({ value: n, label: `${n} — outside frame` })),
-			...anchors.map((n) => ({ value: `@${n}`, label: `@${n} — inside frame` })),
+			...PLACE_REGIONS.map((r) => ({ value: r, label: r, disabled: false, reason: null })),
+			...anchors.map((n) => option(n, `${n} — outside frame`)),
+			...anchors.map((n) => option(`@${n}`, `@${n} — inside frame`)),
 		];
 	}
 

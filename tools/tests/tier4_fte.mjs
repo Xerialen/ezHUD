@@ -216,8 +216,10 @@ const readState = (name) => page.evaluate(async ([spec, wanted]) => {
 		demo: state.demo ?? null,
 		element: target
 			? {
-				name: target.name, place: target.place, align_x: target.align_x, align_y: target.align_y,
-				pos_x: target.pos_x, pos_y: target.pos_y, rect: target.rect ?? null,
+				name: target.name, place: target.place, parent: target.parent ?? null,
+				align_x: target.align_x, align_y: target.align_y,
+				pos_x: target.pos_x, pos_y: target.pos_y, order: target.order, frame: target.frame,
+				rect: target.rect ?? null,
 			}
 			: null,
 	};
@@ -230,7 +232,7 @@ const readDrawn = () => page.evaluate(async (spec) => {
 	return (state.elements ?? [])
 		.filter((element) => element.rect)
 		.map((element) => ({
-			name: element.name, place: element.place,
+			name: element.name, place: element.place, parent: element.parent ?? null,
 			align_x: element.align_x, align_y: element.align_y,
 			pos_x: element.pos_x, pos_y: element.pos_y, rect: element.rect,
 		}));
@@ -568,12 +570,11 @@ async function trackerClip(messageRows, timeout = 90000) {
 	const sx = canvasBox.width / state.screen.vid_width;
 	const sy = canvasBox.height / state.screen.vid_height;
 	const viewport = page.viewportSize();
-	// The pinned engine's classic-text tracker reports its right-aligned rect X
-	// from the New-HUD anchor while drawing at the mirrored screen coordinate;
-	// tools/fte-web/fragfile-proof.mjs established the same mapping against this
-	// dist. Width/Y still come straight from the state-tree rect.
-	const screenX = state.screen.vid_width - state.element.rect.x - state.element.rect.w;
-	const x = Math.max(0, canvasBox.x + screenX * sx);
+	// Consume the engine-reported rect directly. A tracker-specific mirror here
+	// would make the editor overlay disagree with the pixels while both appeared
+	// internally consistent, which is exactly the stale #61 workaround this
+	// Release 2 contract removes.
+	const x = Math.max(0, canvasBox.x + state.element.rect.x * sx);
 	const y = Math.max(0, canvasBox.y + state.element.rect.y * sy);
 	// The rect reserves r_tracker_messages rows even when only one retained frag
 	// is drawn. At the new console scale that unused tail reaches into the 3-D
@@ -1366,6 +1367,152 @@ try {
 		await proveControl(row);
 		pass(nextCase++, `${row.label} — chrome, canvas and state resized; HUD placement unchanged`);
 	}
+
+	// ---- #32 alignment-first workflow against the real wasm engine ----------
+	// The tracker pixel case deliberately hid editor outlines. Relationship
+	// visualization is the subject now, so restore the visible Overlay control.
+	if (!(await page.locator('#chrome').isChecked())) {
+		await page.locator('#chrome').click();
+	}
+	const alignmentPool = await readDrawn();
+	const anchorParent = alignmentPool.find((entry) => entry.name === candidate.name)
+		?? alignmentPool.find((entry) => !entry.parent);
+	const anchorChild = alignmentPool.find((entry) => entry.name !== anchorParent?.name
+		&& entry.name !== 'tracker'
+		&& entry.parent !== anchorParent?.name
+		&& anchorParent?.parent !== entry.name
+		&& entry.rect.w !== anchorParent?.rect.w);
+	assert(anchorParent && anchorChild,
+		`could not choose two independent drawn elements for #32: ${JSON.stringify(alignmentPool)}`);
+	const originals = {
+		parent: await readState(anchorParent.name),
+		child: await readState(anchorChild.name),
+	};
+	const selectForPlacement = async (name) => {
+		await page.locator(`.tree__row[data-name="${name}"]`).click();
+		await eventually(async () => await page.locator('#inspector .inspect__name').textContent() === name
+			? true : null, `the inspector to select ${name}`, UI_WAIT);
+	};
+	const setPlacementField = async (name, suffix, value) => {
+		await selectForPlacement(name);
+		const control = page.locator(`#f-${name}-${suffix}`);
+		await control.waitFor({ state: 'visible', timeout: UI_WAIT });
+		if (await control.evaluate((node) => node.tagName === 'SELECT')) {
+			await control.selectOption(String(value));
+		} else {
+			await control.fill(String(value));
+			await control.press('Enter');
+		}
+		await eventually(async () => await readCvar(`hud_${name}_${suffix}`) === String(value)
+			? true : null, `${name} ${suffix}=${value}`, UI_WAIT);
+	};
+	try {
+		await setPlacementField(anchorChild.name, 'place', `@${anchorParent.name}`);
+		await setPlacementField(anchorChild.name, 'align_x', 'left');
+		await setPlacementField(anchorChild.name, 'align_y', 'top');
+		await setPlacementField(anchorChild.name, 'pos_x', '0');
+		await setPlacementField(anchorChild.name, 'pos_y', '0');
+		await setPlacementField(anchorChild.name, 'order', '7');
+		const anchored = await eventually(async () => {
+			const parentState = await readState(anchorParent.name);
+			const childState = await readState(anchorChild.name);
+			return childState.element?.parent === anchorParent.name
+				&& childState.element.rect?.x === parentState.element.rect?.x
+				&& childState.element.rect?.y === parentState.element.rect?.y
+				? { parent: parentState.element, child: childState.element } : null;
+		}, 'the child engine rect to land on its parent anchor', UI_WAIT);
+		await page.locator(`#overlay .anchor-link[data-child="${anchorChild.name}"]`
+			+ `[data-anchor="${anchorParent.name}"]`).waitFor({ timeout: UI_WAIT });
+
+		// Moving the parent through the real overlay gesture must move both engine
+		// rects by one identical delta.
+		await selectForPlacement(anchorParent.name);
+		const parentBox = page.locator('#overlay .box[data-selected="true"]');
+		const parentBounds = await parentBox.boundingBox();
+		assert(parentBounds, `${anchorParent.name} has no draggable overlay box`);
+		await page.mouse.move(parentBounds.x + parentBounds.width / 2,
+			parentBounds.y + parentBounds.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(parentBounds.x + parentBounds.width / 2 + 30,
+			parentBounds.y + parentBounds.height / 2, { steps: 6 });
+		await page.mouse.up();
+		const movedPair = await eventually(async () => {
+			const parentState = (await readState(anchorParent.name)).element;
+			const childState = (await readState(anchorChild.name)).element;
+			return parentState.rect?.x !== anchored.parent.rect.x ? { parentState, childState } : null;
+		}, 'the anchored pair to move from one parent drag', UI_WAIT);
+		const parentDelta = movedPair.parentState.rect.x - anchored.parent.rect.x;
+		const childDelta = movedPair.childState.rect.x - anchored.child.rect.x;
+		assert(parentDelta !== 0 && childDelta === parentDelta,
+			`parent/child rect delta mismatch: ${parentDelta} vs ${childDelta}`);
+
+		// Alignment and offsets are all checked from engine rect readback.
+		for (const alignment of ['left', 'center', 'right']) {
+			await setPlacementField(anchorChild.name, 'align_x', alignment);
+			const pair = await eventually(async () => {
+				const parentState = (await readState(anchorParent.name)).element;
+				const childState = (await readState(anchorChild.name)).element;
+				return childState.align_x === alignment ? { parentState, childState } : null;
+			}, `${alignment} alignment readback`, UI_WAIT);
+			const expected = alignment === 'left' ? pair.parentState.rect.x
+				: alignment === 'center'
+					? pair.parentState.rect.x + Math.trunc((pair.parentState.rect.w - pair.childState.rect.w) / 2)
+					: pair.parentState.rect.x + pair.parentState.rect.w - pair.childState.rect.w;
+			assert(pair.childState.rect.x === expected,
+				`${alignment} expected engine x=${expected}, got ${pair.childState.rect.x}`);
+		}
+		await setPlacementField(anchorChild.name, 'pos_x', '7');
+		await setPlacementField(anchorChild.name, 'pos_y', '9');
+		const offsetPair = {
+			parent: (await readState(anchorParent.name)).element,
+			child: (await readState(anchorChild.name)).element,
+		};
+		assert(offsetPair.child.rect.x === offsetPair.parent.rect.x + offsetPair.parent.rect.w
+			- offsetPair.child.rect.w + 7
+			&& offsetPair.child.rect.y === offsetPair.parent.rect.y + 9,
+			`fine-tune offsets disagree with engine rects: ${JSON.stringify(offsetPair)}`);
+
+		await selectForPlacement(anchorParent.name);
+		const cycle = await page.locator(`#f-${anchorParent.name}-place option[value="@${anchorChild.name}"]`)
+			.evaluate((option) => ({ disabled: option.disabled, text: option.textContent }));
+		assert(cycle.disabled && /unavailable.*cycle/i.test(cycle.text),
+			`placement cycle was not refused with a reason: ${JSON.stringify(cycle)}`);
+
+		const relationshipCfg = await readExport();
+		assert(relationshipCfg.split('\n').includes(`hud_${anchorChild.name}_place "@${anchorParent.name}"`),
+			'the anchored full export omitted the relationship');
+		await page.evaluate(([name]) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			channel.cbufadd(`set hud_${name}_place screen\nhud_recalculate\n`);
+		}, [anchorChild.name]);
+		await eventually(async () => (await readState(anchorChild.name)).element?.parent === null
+			? true : null, 'the child relationship to be disturbed before re-import', UI_WAIT);
+		const relationshipTransfer = await page.evaluateHandle(([text, name]) => {
+			const data = new DataTransfer();
+			data.items.add(new File([text], name, { type: 'text/plain' }));
+			return data;
+		}, [relationshipCfg, 'alignment-roundtrip.cfg']);
+		await page.dispatchEvent('#fte-drop', 'drop', { dataTransfer: relationshipTransfer });
+		await eventually(async () => (await readState(anchorChild.name)).element?.parent === anchorParent.name
+			? true : null, 're-import to restore the parent relationship', UI_WAIT);
+		pass(nextCase++, `${anchorChild.name} anchored to ${anchorParent.name}: drag, 3 alignments, offsets, cycle refusal and relationship round trip`);
+	} finally {
+		await page.evaluate(({ parentName, childName, parent, child }) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) return;
+			for (const [name, value] of [
+				[`hud_${parentName}_pos_x`, parent.pos_x], [`hud_${parentName}_pos_y`, parent.pos_y],
+				[`hud_${childName}_place`, child.place], [`hud_${childName}_align_x`, child.align_x],
+				[`hud_${childName}_align_y`, child.align_y], [`hud_${childName}_pos_x`, child.pos_x],
+				[`hud_${childName}_pos_y`, child.pos_y], [`hud_${childName}_order`, child.order],
+			]) channel.cbufadd(`set ${name} ${value}\n`);
+			channel.cbufadd('hud_recalculate\n');
+		}, {
+			parentName: anchorParent.name, childName: anchorChild.name,
+			parent: originals.parent.element, child: originals.child.element,
+		}).catch(() => {});
+	}
+
 	// Case 36 resumes through the raw channel in its finally block. Wait for
 	// that engine state to reach the visible toggle before asking the toggle for
 	// its opposite; otherwise a deliberately stale aria-pressed=true would
