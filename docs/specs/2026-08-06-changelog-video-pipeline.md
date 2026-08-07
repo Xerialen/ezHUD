@@ -147,9 +147,9 @@ Stage 2 validates and copies those structured steps into `changedrop-script/1`.
   this lets capture-first time the spoken bookends without stretching a feature
   walkthrough to host unrelated narration. Release 1 holds each fixed bookend
   for 4.2 seconds: the mandated intro cannot be shortened, and its independently
-  measured 3.840-second render fits that hold within Stage 4's 0.5-second
-  tolerance. The old 3.2-second holds are deliberately retired. Each segment
-  identifies at least one contiguous `hold` with `fit: "narration"`. This is
+  measured 3.840-second render fits that hold inside Stage 4's two-second
+  quiet-picture bound. The old 3.2-second holds are deliberately retired. Each
+  segment identifies at least one contiguous `hold` with `fit: "narration"`. This is
   generated padding, not a claim about speaking rate; other holds and every
   resize, click, wait and highlight remain fixed visual actions. A fitted total
   above the five-second per-hold bound is split into contiguous bounded holds.
@@ -225,18 +225,24 @@ The operational loop is:
 2. Fixed action time is the measured Stage 3 duration minus explicitly marked
    narration-padding holds. A negative result within 25 ms is clamped to zero:
    pure-padding browser timers can straddle a scheduling boundary, while 25 ms
-   remains well below both the 100 ms minimum hold and the 500 ms fit tolerance.
-   Below -25 ms fails as a real script/timings disagreement. Fitted padding is
-   `local WAV duration - fixed action time`, rounded to integer milliseconds.
-   Prose and fixed actions remain unchanged; totals above the five-second
-   per-hold bound split into contiguous bounded holds.
+   remains well below both the 100 ms minimum hold and the narration fit
+   margins. Below -25 ms fails as a real script/timings disagreement. Fitted
+   padding is `local WAV duration + 0.250 s safety handle - fixed action time`,
+   rounded to integer milliseconds. The quarter-second handle plus the 0.100 s
+   overrun epsilon covers the observed 0.283 s short-side engine-readback drift
+   without concealing a segment-sized fault. Prose and fixed actions remain
+   unchanged; totals above the five-second per-hold bound split into contiguous
+   bounded holds.
 3. Stage 3 captures the fitted script for real. App-driven resize/click/wait
    timing stays observed rather than predicted; only explicit padding changes.
 4. `--phase validate` is local-only and cannot invoke the voice transport. It
    reopens the delivered WAVs, rechecks their hashes, formats and manifest
-   durations, then compares each local audio duration with the fitted capture
-   window using the fixed 0.5-second tolerance. Failure names the segment,
-   audio duration, capture duration, and tolerance.
+   durations, then applies an asymmetric edit gate. Narration may overrun its
+   fitted window by at most 0.100 s, enough for audio/frame boundary
+   quantisation but not audible spill into the next cut. A longer picture is a
+   valid quiet beat up to 2.000 s; beyond that it fails as likely dead air or a
+   lost action. Either failure names the segment, audio duration, capture
+   duration, and the applicable epsilon or bound.
 
 Failure handling continues to branch on `error_code`, never message text:
 
@@ -255,11 +261,12 @@ Failure handling continues to branch on `error_code`, never message text:
   fitter changes only marked padding, splits long padding into bounded holds,
   and makes old timings stale. WAV fixtures prove local format, hash, byte and
   duration validation without a service call.
-- **V1F (local close)** validation reopens the delivered artifacts and rejects
-  a fitted capture outside 0.5 seconds with segment and both durations named.
+- **V1F (local close)** validation reopens the delivered artifacts, rejects an
+  audio overrun above 0.100 s, permits quiet picture through 2.000 s, and rejects
+  larger undershoot as dead air, with segment and both durations named.
 - **V2 (online)** the complete narration set consists exactly of the natural
-  measure-phase WAVs, and every locally measured duration is within tolerance
-  of its fitted capture segment.
+  measure-phase WAVs; every fitted capture contains its narration without spill
+  and stays inside the dead-air bound.
 
 ### Stage 5 — mux (`changedrop-manifest/1`)
 

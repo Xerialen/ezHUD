@@ -35,11 +35,20 @@ const MAX_IDENTICAL_ATTEMPTS = 3;
 const ORDER_TIMEOUT_MS = 600_000;
 const MAX_OUTPUT_BYTES = 1_048_576;
 
-export const DURATION_TOLERANCE_SECONDS = 0.5;
+// A tenth of a second covers audio/frame boundary quantisation without
+// permitting narration to audibly spill into the next segment.
+export const NARRATION_OVERRUN_EPSILON_SECONDS = 0.1;
+// Up to two seconds of quiet picture is an ordinary editing beat. More than
+// that is long enough to indicate a lost action or accidental dead-air hold.
+export const MAX_NARRATION_UNDERSHOOT_SECONDS = 2.0;
+// The fitter deliberately leaves a quarter-second visual handle. Together
+// with the 100 ms overrun epsilon it covers the observed 283 ms short-side
+// engine-readback drift while staying far below the two-second dead-air bound.
+export const FIT_SAFETY_MARGIN_SECONDS = 0.25;
 // Pure-padding holds can measure a fraction under their declared timer because
 // browser clocks are sampled on opposite sides of a scheduling boundary. A
 // 25 ms allowance covers that boundary noise while remaining far below both
-// the 100 ms minimum hold and the 500 ms final duration tolerance.
+// the 100 ms minimum hold and narration fit margins.
 export const FIXED_ACTION_NEGATIVE_EPSILON_SECONDS = 0.025;
 
 const ERROR_EXIT_CODES = Object.freeze({
@@ -307,7 +316,9 @@ export function fitCaptureScript({ script, timings, measurements } = {}) {
 			throw new Error(`Measured fixed action time for segment "${segment.id}" is negative beyond the 25 ms timer-noise epsilon; timings and script disagree.`);
 		}
 		const fixedActionSeconds = rawFixedActionSeconds < 0 ? 0 : Number(rawFixedActionSeconds.toFixed(6));
-		const fittedPaddingMs = Math.round((measurement.duration_seconds - fixedActionSeconds) * 1000);
+		const fittedPaddingMs = Math.round((
+			measurement.duration_seconds + FIT_SAFETY_MARGIN_SECONDS - fixedActionSeconds
+		) * 1000);
 		if (fittedPaddingMs < 100) {
 			throw new Error(`Natural narration for segment "${segment.id}" leaves less than 100 ms for padding.`);
 		}
@@ -405,14 +416,19 @@ export function assertNarrationFitsCapture({ script, timings, narration } = {}) 
 		finiteNumber(entry.duration_seconds, `Narration "${entry.id}" audio duration`, { positive: true });
 		const captureDurationSeconds = timings.segments[index].duration_seconds;
 		const deltaSeconds = Number((entry.duration_seconds - captureDurationSeconds).toFixed(6));
-		if (Math.abs(deltaSeconds) > DURATION_TOLERANCE_SECONDS) {
-			throw new Error(`Narration fit failed for segment "${entry.id}": audio ${entry.duration_seconds.toFixed(3)}s, capture ${captureDurationSeconds.toFixed(3)}s, tolerance ${DURATION_TOLERANCE_SECONDS.toFixed(3)}s.`);
+		if (deltaSeconds > NARRATION_OVERRUN_EPSILON_SECONDS) {
+			throw new Error(`Narration fit failed for segment "${entry.id}": overrun; audio ${entry.duration_seconds.toFixed(3)}s, capture ${captureDurationSeconds.toFixed(3)}s, epsilon ${NARRATION_OVERRUN_EPSILON_SECONDS.toFixed(3)}s.`);
+		}
+		const quietPictureSeconds = Number(Math.max(0, -deltaSeconds).toFixed(6));
+		if (quietPictureSeconds > MAX_NARRATION_UNDERSHOOT_SECONDS) {
+			throw new Error(`Narration fit failed for segment "${entry.id}": dead air; audio ${entry.duration_seconds.toFixed(3)}s, capture ${captureDurationSeconds.toFixed(3)}s, undershoot bound ${MAX_NARRATION_UNDERSHOOT_SECONDS.toFixed(3)}s.`);
 		}
 		return {
 			id: entry.id,
 			audio_duration_seconds: entry.duration_seconds,
 			capture_duration_seconds: captureDurationSeconds,
 			delta_seconds: deltaSeconds,
+			quiet_picture_seconds: quietPictureSeconds,
 		};
 	});
 	return privacyChecked({ valid: true, segments }, 'Changedrop narration fit validation');

@@ -173,6 +173,62 @@ test('review revision: delivered WAV is measured locally from its bytes', async 
 	assert.throws(() => voice.inspectDeliveredWav(Buffer.from('not a wav')), /WAV|RIFF/i);
 });
 
+test('review blocker: narration fit is asymmetric for overrun, ordinary quiet picture, and bounded dead air', async () => {
+	assert.ifError(loadError);
+	assert.equal(voice.NARRATION_OVERRUN_EPSILON_SECONDS, 0.1);
+	assert.equal(voice.MAX_NARRATION_UNDERSHOOT_SECONDS, 2.0);
+	const { script, timings } = await inputs();
+	const narration = (snapDuration) => ({
+		schema_version: 'changedrop-narration/1',
+		project: 'ezhud',
+		voice_profile: 'xeri-en-v1',
+		segments: script.segments.map((segment, index) => ({
+			id: segment.id,
+			duration_seconds: index === 1 ? snapDuration : timings.segments[index].duration_seconds,
+		})),
+	});
+	assert.equal(voice.assertNarrationFitsCapture({
+		script, timings, narration: narration(1.045),
+	}).valid, true, '0.815 seconds of quiet picture should be valid');
+	assert.equal(voice.assertNarrationFitsCapture({
+		script, timings, narration: narration(1.96),
+	}).valid, true, 'the 0.100-second overrun epsilon should be inclusive');
+	assert.throws(() => voice.assertNarrationFitsCapture({
+		script, timings, narration: narration(1.961),
+	}), /snap-magnet.*overrun.*audio.*1\.961.*capture.*1\.860.*epsilon.*0\.100/i);
+
+	const deadAirTimings = structuredClone(timings);
+	deadAirTimings.segments[1].duration_seconds = 3.1;
+	deadAirTimings.segments[2].start_seconds = 4.3;
+	deadAirTimings.recording.duration_seconds = 5.1;
+	deadAirTimings.recording.container_duration_seconds = 6.02;
+	assert.equal(voice.assertNarrationFitsCapture({
+		script, timings: deadAirTimings, narration: narration(1.1),
+	}).valid, true, 'the 2.000-second quiet-picture bound should be inclusive');
+	assert.throws(() => voice.assertNarrationFitsCapture({
+		script, timings: deadAirTimings, narration: narration(1.099),
+	}), /snap-magnet.*dead air.*audio.*1\.099.*capture.*3\.100.*bound.*2\.000/i);
+});
+
+test('review blocker: padding fit adds a quarter-second visual safety handle', async () => {
+	assert.ifError(loadError);
+	assert.equal(voice.FIT_SAFETY_MARGIN_SECONDS, 0.25);
+	const { script, timings } = await inputs();
+	const durations = [3.84, 6.134, 3.88];
+	const fitted = voice.fitCaptureScript({
+		script,
+		timings,
+		measurements: script.segments.map((segment, index) => ({
+			id: segment.id,
+			duration_seconds: durations[index],
+		})),
+	});
+	for (const [index, segment] of fitted.segments.entries()) {
+		assert.ok(Math.abs(segment.projected_duration_seconds - durations[index] - 0.25) < 0.000001,
+			`${segment.id} did not retain the safety handle`);
+	}
+});
+
 test('review revision: local fit failure names segment and audio and capture durations', async () => {
 	assert.ifError(loadError);
 	assert.equal(typeof voice.assertNarrationFitsCapture, 'function');
@@ -240,8 +296,8 @@ test('case 2: delivery requests reject target and corrected bookends remain fit 
 	const outroHold = authoring.bookends.outro_walkthrough.find((step) => step.action === 'hold');
 	assert.equal(introHold.duration_ms, 4200);
 	assert.equal(outroHold.duration_ms, 4200);
-	assert.ok(Math.abs(3.840 - introHold.duration_ms / 1000) <= 0.5,
-		'known 3.840-second intro render does not fit corrected hold');
+	assert.ok(introHold.duration_ms / 1000 - 3.840 <= voice.MAX_NARRATION_UNDERSHOOT_SECONDS,
+		'known 3.840-second intro render exceeds the quiet-picture bound');
 	const staleCapture = structuredClone(timings);
 	staleCapture.segments[0].actions[0].duration_ms -= 1000;
 	assert.throws(() => voice.buildMeasurementRequests({ script, timings: staleCapture }),
@@ -284,9 +340,9 @@ test('review blocker: natural measurement fits explicit padding while fixed acti
 	assert.deepEqual(fitted.segments.map(({ id, fixed_action_seconds, fitted_padding_ms, fitted_hold_durations_ms }) => ({
 		id, fixed_action_seconds, fitted_padding_ms, fitted_hold_durations_ms,
 	})), [
-		{ id: 'intro', fixed_action_seconds: 0.01, fitted_padding_ms: 3830, fitted_hold_durations_ms: [3830] },
-		{ id: 'snap-magnet', fixed_action_seconds: 0.96, fitted_padding_ms: 5174, fitted_hold_durations_ms: [2587, 2587] },
-		{ id: 'outro', fixed_action_seconds: 0.01, fitted_padding_ms: 3870, fitted_hold_durations_ms: [3870] },
+		{ id: 'intro', fixed_action_seconds: 0.01, fitted_padding_ms: 4080, fitted_hold_durations_ms: [4080] },
+		{ id: 'snap-magnet', fixed_action_seconds: 0.96, fitted_padding_ms: 5424, fitted_hold_durations_ms: [2712, 2712] },
+		{ id: 'outro', fixed_action_seconds: 0.01, fitted_padding_ms: 4120, fitted_hold_durations_ms: [4120] },
 	]);
 	for (const [index, segment] of fitted.script.segments.entries()) {
 		const originalFixed = script.segments[index].walkthrough.filter((step) => step.fit !== 'narration');
@@ -341,10 +397,10 @@ test('review blocker: natural measurement fits explicit padding while fixed acti
 	assert.deepEqual(releaseFit.segments.map(({ id, fixed_action_seconds, fitted_padding_ms, fitted_hold_durations_ms }) => ({
 		id, fixed_action_seconds, fitted_padding_ms, fitted_hold_durations_ms,
 	})), [
-		{ id: 'intro', fixed_action_seconds: 0.001, fitted_padding_ms: 3839, fitted_hold_durations_ms: [3839] },
-		{ id: 'window-follow', fixed_action_seconds: 1.813, fitted_padding_ms: 1827, fitted_hold_durations_ms: [1827] },
-		{ id: 'pause-resume', fixed_action_seconds: 2.706, fitted_padding_ms: 5174, fitted_hold_durations_ms: [2587, 2587] },
-		{ id: 'outro', fixed_action_seconds: 0.001, fitted_padding_ms: 3879, fitted_hold_durations_ms: [3879] },
+		{ id: 'intro', fixed_action_seconds: 0.001, fitted_padding_ms: 4089, fitted_hold_durations_ms: [4089] },
+		{ id: 'window-follow', fixed_action_seconds: 1.813, fitted_padding_ms: 2077, fitted_hold_durations_ms: [2077] },
+		{ id: 'pause-resume', fixed_action_seconds: 2.706, fitted_padding_ms: 5424, fitted_hold_durations_ms: [2712, 2712] },
+		{ id: 'outro', fixed_action_seconds: 0.001, fitted_padding_ms: 4129, fitted_hold_durations_ms: [4129] },
 	]);
 });
 
@@ -361,8 +417,8 @@ test('review blocker: pure-padding timer under-run is clamped within a bounded e
 	jittered.segments[2].duration_seconds = 0.599789;
 	const fitted = voice.fitCaptureScript({ script, timings: jittered, measurements });
 	assert.equal(fitted.segments[2].fixed_action_seconds, 0);
-	assert.equal(fitted.segments[2].fitted_padding_ms, 3880);
-	assert.deepEqual(fitted.segments[2].fitted_hold_durations_ms, [3880]);
+	assert.equal(fitted.segments[2].fitted_padding_ms, 4130);
+	assert.deepEqual(fitted.segments[2].fitted_hold_durations_ms, [4130]);
 
 	const inconsistent = structuredClone(timings);
 	inconsistent.segments[2].duration_seconds = 0.574;
@@ -437,7 +493,7 @@ test('review mechanism: measure phase is offline-injectable and writes a closed 
 	let cursor = 0.1;
 	const observations = fittedScript.segments.map((segment, index) => {
 		const start_seconds = cursor;
-		const duration_seconds = narration.segments[index].duration_seconds;
+		const duration_seconds = narration.segments[index].duration_seconds + voice.FIT_SAFETY_MARGIN_SECONDS;
 		const highlights = segment.walkthrough.filter((step) => step.action === 'highlight').map((step, highlightIndex) => ({
 			timestamp_seconds: start_seconds + Math.min(0.1, duration_seconds / 2),
 			selector: step.selector,
@@ -476,12 +532,13 @@ test('review mechanism: measure phase is offline-injectable and writes a closed 
 	assert.deepEqual(validated, narration);
 
 	const mismatched = structuredClone(fittedTimings);
-	mismatched.segments[1].duration_seconds += 0.501;
+	mismatched.segments[1].duration_seconds += 2.001;
 	for (let index = 2; index < mismatched.segments.length; index += 1) {
-		mismatched.segments[index].start_seconds += 0.6;
-		for (const highlight of mismatched.segments[index].highlights) highlight.timestamp_seconds += 0.6;
+		mismatched.segments[index].start_seconds += 2.1;
+		for (const highlight of mismatched.segments[index].highlights) highlight.timestamp_seconds += 2.1;
 	}
-	mismatched.recording.duration_seconds += 0.6;
+	mismatched.recording.duration_seconds += 2.1;
+	mismatched.recording.container_duration_seconds += 2.1;
 	await writeFile(fittedTimingsPath, `${JSON.stringify(mismatched)}\n`, { mode: 0o600 });
 	await assert.rejects(voice.main({
 		env: { ...process.env, EZHUD_CHANGEDROP_ROOT: root },
@@ -492,7 +549,7 @@ test('review mechanism: measure phase is offline-injectable and writes a closed 
 			'--out', 'release/run/fit',
 		],
 		transport: async () => { validationCalls += 1; },
-	}), /snap-magnet.*audio.*capture.*tolerance/i);
+	}), /snap-magnet.*dead air.*audio.*capture.*undershoot bound/i);
 	assert.equal(validationCalls, 0);
 });
 
