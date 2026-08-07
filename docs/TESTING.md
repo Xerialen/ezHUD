@@ -194,12 +194,17 @@ mapping).
 
 ### Enforcement
 
-Three checks keep the convention live: the tier 4F control-coverage case in
+Four checks keep the convention live: the tier 4F control-coverage case in
 `tools/tests/tier4_fte.mjs` rejects a rendered control without a table row or
 explicit exemption; `.github/workflows/cases-gate.yml` checks issue Cases and
-the PR mapping (the `no-cases` label opts out docs/refactor/test-only PRs); and
-`.github/ISSUE_TEMPLATE/behaviour.md` starts behaviour issues with the required
-Cases shape.
+the PR mapping (the `no-cases` label opts out docs/refactor/test-only PRs);
+`.github/workflows/issue-cases-guard.yml` enforces that every `enhancement`
+issue carries a `## Cases` section (adding a `needs-cases` marker label and
+one idempotent guard comment when Cases are missing, removing both when Cases
+are added); and `.github/ISSUE_TEMPLATE/behaviour.md` starts behaviour issues
+with the required Cases shape (and defaults them to the `enhancement` label so
+the guard applies automatically). The `idea` label is permanently exempt — idea
+issues are never tagged or commented on.
 
 ---
 
