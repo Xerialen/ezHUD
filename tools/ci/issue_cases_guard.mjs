@@ -47,14 +47,17 @@ function normalizedLabelNames(labels) {
 export function decideIssueCasesGuard({ body = '', labels = [], hasGuardComment = false } = {}) {
 	const names = normalizedLabelNames(labels);
 	const isEnhancement = names.includes('enhancement');
+	const isIdea = names.includes('idea');
 	const needsCases = names.includes('needs-cases');
 
-	if (!isEnhancement) {
-		// Non-enhancement: only clean up stale needs-cases label.
+	// idea always wins — an idea issue is never subject to Cases enforcement,
+	// even when the template auto-assigned enhancement.
+	if (!isEnhancement || isIdea) {
+		// Non-enhancement / idea: only clean up stale needs-cases label.
 		return needsCases ? { removeLabel: 'needs-cases' } : {};
 	}
 
-	// Enhancement: check Cases heading.
+	// Enhancement (without idea): check Cases heading.
 	if (CASES_HEADING_RE.test(String(body))) {
 		// Cases present — remove marker label and guard comment if they exist.
 		const actions = {};
@@ -135,12 +138,13 @@ export async function main(env = process.env) {
 	const labels = parseLabels(env.ISSUE_LABELS);
 
 	// Only bother checking for prior guard comment when it might matter:
-	// enhancement + Cases present → we might need to delete it.
-	// enhancement + no Cases → we might need to avoid posting a duplicate.
+	// enhancement (without idea) + Cases → we might need to delete it.
+	// enhancement (without idea) + no Cases → we might need to avoid posting a duplicate.
+	// idea always wins, so skip the comment lookup entirely when idea is present.
 	const isEnhancement = labels.includes('enhancement');
-	const hasCases = CASES_HEADING_RE.test(String(body));
+	const isIdea = labels.includes('idea');
 	let priorComment = null;
-	if (isEnhancement) {
+	if (isEnhancement && !isIdea) {
 		priorComment = await findGuardComment(repo, issueNumber, token);
 	}
 

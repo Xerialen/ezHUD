@@ -63,6 +63,26 @@ test('idea issues are never touched', () => {
 	}), {});
 });
 
+// --- Case 3b: idea wins over enhancement ---
+
+test('idea label wins over enhancement — never gets label or comment', () => {
+	// The most common path: template gives enhancement, user adds idea.
+	// Case 2 in #51 says "idea issue never gets the label or comment" — no exceptions.
+	assert.deepEqual(decideIssueCasesGuard({
+		body: 'Just a thought, no Cases.',
+		labels: ['enhancement', 'idea'],
+		hasGuardComment: false,
+	}), {});
+
+	// Even with stale needs-cases label from a prior enhancement-only state,
+	// idea should clean it up.
+	assert.deepEqual(decideIssueCasesGuard({
+		body: 'No Cases.',
+		labels: ['enhancement', 'idea', 'needs-cases'],
+		hasGuardComment: true,
+	}), { removeLabel: 'needs-cases' });
+});
+
 // --- Case 4: cleanup needs-cases when enhancement is removed ---
 
 test('non-enhancement issues with stale needs-cases label get it cleaned up', () => {
