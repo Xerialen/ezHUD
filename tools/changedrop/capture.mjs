@@ -33,6 +33,13 @@ export const REPEAT_DURATION_TOLERANCE_SECONDS = 2.0;
 // rejects a receipt that describes content materially beyond its container.
 export const CONTAINER_CONTENT_EPSILON_SECONDS = 0.1;
 const DEVICE_SCALE_FACTOR = 2;
+// CSS viewport for the capture page. The recording surface must match this
+// pixel-for-pixel: Playwright's video recorder captures the CSS viewport,
+// not the device-pixel backing store, so a recordVideo.size larger than
+// viewport pads the output with flat background (tested: 75 % of every
+// frame was gray when they diverged). The 16:9 ratio matches every resize
+// step in the walkthrough DSL and the .stage__frame cap of 1920px.
+export const CAPTURE_VIEWPORT = Object.freeze({ width: 1920, height: 1080 });
 const ACCENT = '#ff4116';
 const LIGHT = '#fffaf2';
 const DARK = '#11100f';
@@ -686,10 +693,10 @@ async function runBrowserCapture({ script, dist, output }) {
 		const videoDirectory = path.join(output, '.video');
 		await mkdir(videoDirectory, { mode: 0o700 });
 		context = await browser.newContext({
-			viewport: { width: 1400, height: 788 },
+			viewport: { ...CAPTURE_VIEWPORT },
 			deviceScaleFactor: DEVICE_SCALE_FACTOR,
 			colorScheme: 'dark',
-			recordVideo: { dir: videoDirectory, size: { width: 2800, height: 1576 } },
+			recordVideo: { dir: videoDirectory, size: { ...CAPTURE_VIEWPORT } },
 		});
 		annotationContext = await browser.newContext({ viewport: { width: 550, height: 300 }, deviceScaleFactor: 1 });
 		const annotationPage = await annotationContext.newPage();
