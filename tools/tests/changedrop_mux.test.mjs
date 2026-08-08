@@ -198,6 +198,7 @@ async function prepareRun(t) {
 			.map((step) => step.duration_ms);
 		const fittedPaddingMs = fittedHoldDurations.reduce((sum, value) => sum + value, 0);
 		const fixedActionSeconds = Number((duration - fittedPaddingMs / 1000).toFixed(6));
+		const floorMs = Math.round((duration + voice.FIT_SAFETY_MARGIN_SECONDS) * 1000);
 		fitSegments.push({
 			id: segment.id,
 			kind: segment.kind,
@@ -212,6 +213,7 @@ async function prepareRun(t) {
 			fixed_action_seconds: fixedActionSeconds,
 			previous_padding_ms: previousPaddingById.get(segment.id),
 			fitted_padding_ms: fittedPaddingMs,
+			floor_ms: floorMs,
 			fitted_hold_durations_ms: fittedHoldDurations,
 			projected_duration_seconds: Number((fixedActionSeconds + fittedPaddingMs / 1000).toFixed(6)),
 		});

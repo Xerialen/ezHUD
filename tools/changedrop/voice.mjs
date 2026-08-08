@@ -50,6 +50,15 @@ export const FIT_SAFETY_MARGIN_SECONDS = 0.25;
 // 25 ms allowance covers that boundary noise while remaining far below both
 // the 100 ms minimum hold and narration fit margins.
 export const FIXED_ACTION_NEGATIVE_EPSILON_SECONDS = 0.025;
+// Ten seconds (10 000 ms) is the upper bound for a segment floor, matching the
+// existing 10-second surface budget. A bookend with a narration longer than
+// ~9.75 s has never been possible in practice — this bound makes that limit
+// explicit.  It applies to floor_ms directly (not to segment kind) so a third
+// segment type cannot accidentally inherit the gap.  For surfaces the existing
+// N + M ≤ 10 budget will fire first; this guard closes the bookend hole and
+// ensures one authoring error cannot hang a run through the floor any more than
+// MAX_HOLD_MS prevents it through a single hold.
+export const MAX_FLOOR_MS = 10_000;
 
 const ERROR_EXIT_CODES = Object.freeze({
 	E_SCHEMA_INVALID: 2,
@@ -310,35 +319,57 @@ export function fitCaptureScript({ script, timings, measurements } = {}) {
 		finiteNumber(measurement.duration_seconds, `Natural narration "${segment.id}" duration`, { positive: true });
 		const paddingIndices = segment.walkthrough.flatMap((step, stepIndex) => step.fit === 'narration' ? [stepIndex] : []);
 		if (paddingIndices.length === 0) throw new Error(`Segment "${segment.id}" has no narration padding hold.`);
+
+		// The timing pass action time is recorded for the receipt but no longer
+		// drives the fitted hold. With the floor, the hold is measured live in the
+		// recording run — ΔA ceases to be a quantity.
 		const previousPaddingMs = paddingIndices.reduce((sum, stepIndex) => sum + segment.walkthrough[stepIndex].duration_ms, 0);
 		const rawFixedActionSeconds = timings.segments[index].duration_seconds - previousPaddingMs / 1000;
 		if (rawFixedActionSeconds < -FIXED_ACTION_NEGATIVE_EPSILON_SECONDS) {
 			throw new Error(`Measured fixed action time for segment "${segment.id}" is negative beyond the 25 ms timer-noise epsilon; timings and script disagree.`);
 		}
 		const fixedActionSeconds = rawFixedActionSeconds < 0 ? 0 : Number(rawFixedActionSeconds.toFixed(6));
+
+		// Floor: the segment must last at least N + M, measured live in the
+		// recording run. This replaces the pre-computed padding and eliminates
+		// ΔA as a quantity. The floor hold waits until the segment's elapsed
+		// time reaches floor_ms, capped at MAX_HOLD_MS per individual wait
+		// with a stall guard of floor_ms + MAX_HOLD_MS.
+		const floorMs = Math.round((measurement.duration_seconds + FIT_SAFETY_MARGIN_SECONDS) * 1000);
+		if (floorMs < 100) {
+			throw new Error(`Natural narration for segment "${segment.id}" leaves less than 100 ms for the floor.`);
+		}
+		if (floorMs > MAX_FLOOR_MS) {
+			throw new Error(`Segment "${segment.id}" floor ${floorMs} ms exceeds the ${MAX_FLOOR_MS} ms upper bound. A narration longer than ~9.75 s cannot produce a valid floor — check the narration file.`);
+		}
+
+		// Computed for the receipt; not used to build the hold.
 		const fittedPaddingMs = Math.round((
 			measurement.duration_seconds + FIT_SAFETY_MARGIN_SECONDS - fixedActionSeconds
 		) * 1000);
-		if (fittedPaddingMs < 100) {
-			throw new Error(`Natural narration for segment "${segment.id}" leaves less than 100 ms for padding.`);
-		}
-		const fittedHoldDurationsMs = splitPadding(fittedPaddingMs);
+
 		const firstPaddingIndex = paddingIndices[0];
 		const paddingIndexSet = new Set(paddingIndices);
 		const paddingInstruction = segment.walkthrough[firstPaddingIndex].instruction;
+
+		// Build walkthrough: keep all non-narration steps unchanged. Replace the
+		// entire narration padding chain with a single floor hold at the position
+		// of the first narration hold. The floor hold carries `floor_ms` and is
+		// evaluated live in the recording run.
 		const walkthrough = segment.walkthrough.flatMap((step, stepIndex) => {
 			if (stepIndex === firstPaddingIndex) {
-				return fittedHoldDurationsMs.map((duration_ms) => ({
+				return [{
 					instruction: paddingInstruction,
 					action: 'hold',
-					duration_ms,
+					floor_ms: floorMs,
 					fit: 'narration',
-				}));
+				}];
 			}
 			if (paddingIndexSet.has(stepIndex)) return [];
 			return [copiedStep(step)];
 		});
-		const projectedDurationSeconds = Number((fixedActionSeconds + fittedPaddingMs / 1000).toFixed(6));
+
+		const projectedDurationSeconds = Number((measurement.duration_seconds + FIT_SAFETY_MARGIN_SECONDS).toFixed(6));
 		if (segment.kind === 'surface' && projectedDurationSeconds > 10) {
 			throw new Error(`Fitted segment "${segment.id}" exceeds the 10-second surface budget.`);
 		}
@@ -350,7 +381,8 @@ export function fitCaptureScript({ script, timings, measurements } = {}) {
 			fixed_action_seconds: fixedActionSeconds,
 			previous_padding_ms: previousPaddingMs,
 			fitted_padding_ms: fittedPaddingMs,
-			fitted_hold_durations_ms: fittedHoldDurationsMs,
+			floor_ms: floorMs,
+			fitted_hold_durations_ms: [],
 			projected_duration_seconds: projectedDurationSeconds,
 		});
 	}
@@ -612,6 +644,7 @@ export function buildFitReceipt({ fitted, script, requests, results } = {}) {
 			fixed_action_seconds: fit.fixed_action_seconds,
 			previous_padding_ms: fit.previous_padding_ms,
 			fitted_padding_ms: fit.fitted_padding_ms,
+			floor_ms: fit.floor_ms,
 			fitted_hold_durations_ms: [...fit.fitted_hold_durations_ms],
 			projected_duration_seconds: fit.projected_duration_seconds,
 		};
