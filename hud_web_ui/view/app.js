@@ -9,7 +9,8 @@ import {
 	needsRecalculate, parseColor, resizeTo, resizedRect,
 } from '../core/model.js';
 import {
-	consoleToFrame, displayDeltaToConsole, elementAt, quantize, scaleFactors,
+	consoleToFrame, displayDeltaToConsole, elementAt, normaliseElementName,
+	quantize, scaleFactors,
 } from '../core/geometry.js';
 import { magnetizeRect, snapToGrid } from '../core/snapping.js';
 import * as syslog from '../core/log.js';
@@ -499,6 +500,27 @@ function renderTree() {
 		}
 
 		row.dataset.name = item.name;
+
+		// Every tree row carries a data-changedrop attribute for the filming
+		// pipeline. The value is a kebab-case name prefixed with
+		// "hud-element-", validated against the DSL's
+		// [a-z0-9]+(?:-[a-z0-9]+)* pattern. Runs of non-alphanumeric
+		// characters are collapsed to a single hyphen and leading/trailing
+		// hyphens are trimmed. A name whose normalised value still fails the
+		// pattern is skipped with a console.warn rather than throwing — the
+		// invariant is enforced at test time; an editor must never break on
+		// an unanticipated engine name.
+		const { fragment, valid } = normaliseElementName(item.name);
+		if (!valid) {
+			console.warn(
+				`Element name "${item.name}" normalises to "${fragment}" ` +
+				`which does not match [a-z0-9]+(?:-[a-z0-9]+)* — ` +
+				`skipping data-changedrop`,
+			);
+		} else {
+			row.dataset.changedrop = `hud-element-${fragment}`;
+		}
+
 		const meta = document.createElement('span');
 		meta.className = 'tree__meta';
 		// Say what the engine knows: a drawn element has a real position, an

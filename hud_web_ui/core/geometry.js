@@ -45,6 +45,30 @@ export function quantize(value) {
 	return Math.trunc(value);
 }
 
+// Single source for element-name → data-changedrop normalisation.
+// Imported by view/app.js (editor) and tools/tests/selector_hooks.test.mjs
+// (test-time enforcement). Callers decide error handling — the normaliser
+// only reports validity; the editor warns, the test throws.
+
+const CHANGEDROP_VALUE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/**
+ * Normalise an element name to a kebab-case fragment.
+ *
+ * Collapses runs of non-alphanumeric characters to a single hyphen and trims
+ * leading/trailing hyphens. Returns the fragment and whether it is still valid
+ * (only possible when every character is non-alphanumeric, e.g. "___" → "").
+ *
+ * @param {string} name  Engine element name (e.g. "score__bar", "bar_", "_bar").
+ * @returns {{ fragment: string, valid: boolean }}
+ */
+export function normaliseElementName(name) {
+	const fragment = name.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '');
+	return { fragment, valid: CHANGEDROP_VALUE.test(fragment) };
+}
+
 // Hit test in console space, topmost (highest draw order) first.
 export function elementAt(elements, cx, cy) {
 	const hits = elements.filter(
