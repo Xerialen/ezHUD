@@ -37,20 +37,20 @@
     {
       "path": "captures.json",
       "role": "capture-manifest",
-      "bytes": 2337,
-      "sha256": "ec811e2b8a9bafc3aff8f8b18381f4978783e71e87034d02fd80604a8e9bee6e"
+      "bytes": 2335,
+      "sha256": "56c31c6cbcf67e4d29e6e45f9126e3756d5ac6d92e63b10692a3800c11f6df4c"
     },
     {
       "path": "annotations.json",
       "role": "annotation-manifest",
-      "bytes": 1253,
-      "sha256": "7f0bdb80595ceb62eb9881e30ac51835882c843f6ecc349bfe38fe66c2b4d96f"
+      "bytes": 1252,
+      "sha256": "f0670cff6a964eebb9ca7821d1f5edff0ea7824e92fea6503d72e03d2b08319b"
     },
     {
       "path": "captures/editor-size-focused.png",
       "role": "focused-source",
-      "bytes": 8832,
-      "sha256": "72e120969213a03295fcd02f1c37a5e811495ea063b8705ee45a4c6d50972300"
+      "bytes": 7611,
+      "sha256": "1e756fded2695be2fd959073dab906e3727e837d0a8aa61a6729cb06d10495e9"
     },
     {
       "path": "captures/anchor-focused.png",
@@ -61,20 +61,20 @@
     {
       "path": "captures/drag-assist-focused.png",
       "role": "focused-source",
-      "bytes": 72456,
-      "sha256": "aee67e5e2271830d7d39438999441b90e2c659eccda3d636e758462e84f503c2"
+      "bytes": 18531,
+      "sha256": "42a685090b9382ac5fd6517ae0cf9923624f767538ea1f3122e9d9392f8b722e"
     },
     {
       "path": "captures/demo-moments-focused.png",
       "role": "focused-source",
-      "bytes": 19299,
-      "sha256": "ca6293c6fef082607f62d53c0fb5cef2991ce88f8a918337fe95f87e9e1ca4d6"
+      "bytes": 12342,
+      "sha256": "929d8ea20b71fc751dc2f065300e18a37c88d8322e96a0154981de20d741704b"
     },
     {
       "path": "img/editor-size-focused-annotated.png",
       "role": "annotated-output",
-      "bytes": 10317,
-      "sha256": "0332940eb79e840170ba843a692215273684209b912628ad048e9315da59ed62"
+      "bytes": 9337,
+      "sha256": "2d464dff735b2c013fe66f326df3071e3829d4c7604253d8b0e91132b82b6a79"
     },
     {
       "path": "img/anchor-focused-annotated.png",
@@ -85,14 +85,14 @@
     {
       "path": "img/drag-assist-focused-annotated.png",
       "role": "annotated-output",
-      "bytes": 74236,
-      "sha256": "cba5f66c7c69e8d81c3fa0c5b3a159175beb6c34d4cedbd13c18b853e90e6b3a"
+      "bytes": 20296,
+      "sha256": "558be994a376aa6216945160ba64bf353e30d002d3d6d2d7ee04a19026f4f9a8"
     },
     {
       "path": "img/demo-moments-focused-annotated.png",
       "role": "annotated-output",
-      "bytes": 21023,
-      "sha256": "7b684ab761f8e359ac5ba35f711a51b47586a363308b4b5d917786638f483977"
+      "bytes": 13971,
+      "sha256": "3b86ba4c21108e576ba6c3c83e8f62d0bb687b748f0257e83a937e3b585e3519"
     }
   ],
   "tooling": {
@@ -104,8 +104,8 @@
       },
       {
         "path": "tools/release/annotate.mjs",
-        "bytes": 5547,
-        "sha256": "4ddb7aa74aa945f88b8793b77fb1daf6d1387bdefb2d00131291a4fcfd78ac9d"
+        "bytes": 7848,
+        "sha256": "23acf5b3b568426c7f6f7c89e2adb7480adf8536e30d595500dd14c9362de338"
       },
       {
         "path": "tools/release/paths.mjs",

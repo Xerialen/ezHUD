@@ -5,6 +5,7 @@ import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { inflateSync } from 'node:zlib';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const releaseDir = path.join(repo, 'docs/release-2');
@@ -23,12 +24,107 @@ async function sha256(file) {
 	};
 }
 
-async function pngDimensions(file) {
-	const bytes = await readFile(file);
+function decodePng(bytes, label) {
 	const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-	assert(bytes.subarray(0, 8).equals(signature), `${file} is not a PNG`);
-	assert.equal(bytes.toString('ascii', 12, 16), 'IHDR', `${file} has no leading IHDR`);
-	return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+	assert(bytes.subarray(0, 8).equals(signature), `${label} is not a PNG`);
+	let offset = 8;
+	let ihdr;
+	const idat = [];
+	while (offset < bytes.length) {
+		const length = bytes.readUInt32BE(offset);
+		const type = bytes.toString('ascii', offset + 4, offset + 8);
+		const start = offset + 8;
+		const end = start + length;
+		if (type === 'IHDR') ihdr = bytes.subarray(start, end);
+		if (type === 'IDAT') idat.push(bytes.subarray(start, end));
+		offset = end + 4;
+		if (type === 'IEND') break;
+	}
+	assert(ihdr && ihdr[8] === 8 && [2, 6].includes(ihdr[9]), `${label} must be 8-bit RGB/RGBA`);
+	const width = ihdr.readUInt32BE(0);
+	const height = ihdr.readUInt32BE(4);
+	const channels = ihdr[9] === 2 ? 3 : 4;
+	const stride = width * channels;
+	const inflated = inflateSync(Buffer.concat(idat));
+	const pixels = Buffer.alloc(width * height * channels);
+	let input = 0;
+	for (let y = 0; y < height; y += 1) {
+		const filter = inflated[input++];
+		assert(filter <= 4, `${label} uses unsupported PNG filter ${filter}`);
+		for (let x = 0; x < stride; x += 1) {
+			const row = y * stride;
+			const previous = row - stride;
+			const raw = inflated[input++];
+			const left = x >= channels ? pixels[row + x - channels] : 0;
+			const up = y > 0 ? pixels[previous + x] : 0;
+			const upperLeft = y > 0 && x >= channels ? pixels[previous + x - channels] : 0;
+			let value = raw;
+			if (filter === 1) value += left;
+			else if (filter === 2) value += up;
+			else if (filter === 3) value += Math.floor((left + up) / 2);
+			else if (filter === 4) {
+				const p = left + up - upperLeft;
+				const pa = Math.abs(p - left);
+				const pb = Math.abs(p - up);
+				const pc = Math.abs(p - upperLeft);
+				value += pa <= pb && pa <= pc ? left : pb <= pc ? up : upperLeft;
+			}
+			pixels[row + x] = value & 0xff;
+		}
+	}
+	return { width, height, channels, pixels };
+}
+
+async function readPng(file) {
+	return decodePng(await readFile(file), file);
+}
+
+async function pngDimensions(file) {
+	const { width, height } = await readPng(file);
+	return { width, height };
+}
+
+function pixel(image, x, y) {
+	const at = (y * image.width + x) * image.channels;
+	return [...image.pixels.subarray(at, at + 3)];
+}
+
+function badgeCandidates(target) {
+	const ring = {
+		x: target.x - RING_PADDING,
+		y: target.y - RING_PADDING,
+		w: target.w + 2 * RING_PADDING,
+		h: target.h + 2 * RING_PADDING,
+	};
+	const cy = Math.round(ring.y + ring.h / 2);
+	return {
+		left: { cx: ring.x - 9, cy },
+		right: { cx: ring.x + ring.w + 9, cy },
+	};
+}
+
+function litFraction(image, { cx, cy }) {
+	let lit = 0;
+	let total = 0;
+	for (let y = cy - 8; y <= cy + 8; y += 1) {
+		for (let x = cx - 8; x <= cx + 8; x += 1) {
+			if (x < 0 || y < 0 || x >= image.width || y >= image.height) continue;
+			total += 1;
+			if (pixel(image, x, y).some((channel) => channel > 70)) lit += 1;
+		}
+	}
+	return total ? lit / total : 1;
+}
+
+function accentCount(image, { cx, cy }, accent) {
+	let count = 0;
+	for (let y = cy - 8; y <= cy + 8; y += 1) {
+		for (let x = cx - 8; x <= cx + 8; x += 1) {
+			if (x < 0 || y < 0 || x >= image.width || y >= image.height) continue;
+			if (pixel(image, x, y).every((channel, index) => Math.abs(channel - accent[index]) <= 32)) count += 1;
+		}
+	}
+	return count;
 }
 
 function releasePath(relative, label) {
@@ -64,6 +160,14 @@ test('Release 2 evidence is focused, ring-only, and bound to capture selectors',
 	assert.deepEqual(captures.captures.map(({ id }) => id).sort(), expectedIds);
 	assert.deepEqual(annotations.assets.map(({ id }) => id).sort(), expectedIds);
 	const captureById = new Map(captures.captures.map((capture) => [capture.id, capture]));
+	assert.deepEqual(captureById.get('anchor').clip, { x: 1088, y: 350, w: 312, h: 300 },
+		'anchor crop is the approved unchanged reference');
+	assert.deepEqual(captureById.get('drag-assist').clip, { x: 1088, y: 40, w: 312, h: 118 },
+		'drag-assist crop must exclude the HUD SYSTEM block');
+	assert.deepEqual(captureById.get('demo-moments').clip, { x: 548, y: 604, w: 257, h: 88 },
+		'demo-moments crop must begin and end between complete controls/text');
+	assert(captureById.get('editor-size').clip.w / captureById.get('editor-size').clip.h < 3,
+		'editor-size crop must have margin below the 3:1 ceiling');
 
 	for (const asset of annotations.assets) {
 		const capture = captureById.get(asset.id);
@@ -96,6 +200,22 @@ test('Release 2 evidence is focused, ring-only, and bound to capture selectors',
 			w: asset.callouts[0].target.w + 2 * RING_PADDING,
 			h: asset.callouts[0].target.h + 2 * RING_PADDING,
 		}, sourceSize.width, sourceSize.height, `${asset.id}.ring`);
+	}
+});
+
+test('Release 2 badges conservatively move off source content', async () => {
+	const annotations = await readJson(path.join(releaseDir, 'annotations.json'));
+	for (const asset of annotations.assets) {
+		const source = await readPng(releasePath(asset.source, `${asset.id}.source`));
+		const output = await readPng(releasePath(asset.output, `${asset.id}.output`));
+		const candidates = badgeCandidates(asset.callouts[0].target);
+		const accent = [1, 3, 5].map((at) => Number.parseInt(asset.accent.slice(at, at + 2), 16));
+		const selected = Object.entries(candidates)
+			.filter(([, candidate]) => accentCount(output, candidate, accent) >= 40)
+			.map(([side]) => side);
+		assert.equal(selected.length, 1, `${asset.id} must render one badge side`);
+		assert(litFraction(source, candidates[selected[0]]) <= 0.02,
+			`${asset.id} badge lands on source content`);
 	}
 });
 
