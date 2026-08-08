@@ -70,7 +70,7 @@
       "surface": "anchor",
       "source": {
         "before": "Placement meant typing raw coordinates, and nothing on screen told you what an element was positioned against.",
-        "after": "The inspector leads with the anchor \u2014 a parent element or screen edge, an alignment and an order \u2014 and the stage draws the relationship. `pos_x` and `pos_y` become the offsets from that anchor. Raw coordinate entry is still there when you want it.",
+        "after": "The inspector leads with the anchor — a parent element or screen edge, an alignment and an order — and the stage draws the relationship. `pos_x` and `pos_y` become the offsets from that anchor. Raw coordinate entry is still there when you want it.",
         "value": "A drag reads as \"re-anchor plus offset\" instead of a number you have to reverse-engineer later."
       },
       "text": "Anchor an element to a parent, then nudge it. The stage shows the relationship.",
@@ -79,6 +79,11 @@
           "instruction": "Select the health element so the inspector shows its anchor.",
           "action": "click",
           "selector": "[data-changedrop=\"hud-element-health\"]"
+        },
+        {
+          "instruction": "Bring the anchor field into view; the inspector panel scrolls to it.",
+          "action": "click",
+          "selector": "#f-health-place"
         },
         {
           "instruction": "Wait for the anchor field to render for the selected element.",
@@ -101,6 +106,11 @@
           "action": "hold",
           "duration_ms": 3600,
           "fit": "narration"
+        },
+        {
+          "instruction": "Return the inspector panel to the top so the next segment starts where it expects.",
+          "action": "click",
+          "selector": "#drag-assist"
         }
       ]
     },
@@ -111,7 +121,7 @@
         "after": "Drags snap to a configurable grid and magnet to other elements' edges and centres, with guides showing what they caught. A visible toggle turns it off, and a held modifier bypasses it for one drag.",
         "value": "Alignment stops being a test of patience. The export still contains final positions and nothing else."
       },
-      "text": "Snap to a grid, magnet to other elements, hold Alt to bypass.",
+      "text": "Switch on the grid and the magnet, and drags land where you meant.",
       "walkthrough": [
         {
           "instruction": "Wait for the drag assistance block.",
@@ -130,7 +140,17 @@
           }
         },
         {
-          "instruction": "Hold while the narration explains grid, magnet and the Alt bypass.",
+          "instruction": "Switch snapping to a grid on, inside the ring.",
+          "action": "click",
+          "selector": "#snap-grid"
+        },
+        {
+          "instruction": "Switch magnet alignment on, so both assists are live.",
+          "action": "click",
+          "selector": "#snap-magnet"
+        },
+        {
+          "instruction": "Hold while the narration explains what the two assists now do.",
           "action": "hold",
           "duration_ms": 3400,
           "fit": "narration"
@@ -141,10 +161,10 @@
       "surface": "demo-moments",
       "source": {
         "before": "Pause existed, but you had to wait for a useful frame to appear before there was anything to line the HUD up against.",
-        "after": "Named preset moments open a match demo at a deterministic point \u2014 a frame with full HUD activity, a scoreboard moment, a quiet moment.",
+        "after": "Named preset moments open a match demo at a deterministic point — a frame with full HUD activity, a scoreboard moment, a quiet moment.",
         "value": "The frame you need is one click away instead of a wait, and it is the same frame every time."
       },
-      "text": "Jump straight to a frame worth aiming at.",
+      "text": "Press a named moment and a real match demo opens at that exact point, the same frame every time.",
       "walkthrough": [
         {
           "instruction": "Wait for the demo moments group.",
@@ -161,6 +181,11 @@
             "width": 720,
             "height": 360
           }
+        },
+        {
+          "instruction": "Press the full-HUD moment so the match demo opens at that point.",
+          "action": "click",
+          "selector": "#fte-moment-full"
         },
         {
           "instruction": "Hold while the narration explains the preset moments.",
