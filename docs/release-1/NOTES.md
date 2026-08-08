@@ -21,9 +21,22 @@ Evidence: img/pause-resume-focused-annotated.png
 ```json
 {
   "schema_version": "changedrop-value-summary/1",
-  "decision": "skip",
-  "skip_reason": "The changedrop pipeline was built after Release 1 shipped. No film was rendered for this release.",
-  "features": []
+  "decision": "render",
+  "skip_reason": null,
+  "features": [
+    {
+      "surface": "window-follow",
+      "before": "Resizing the browser could leave the game view at its boot size and overlay handles out of alignment.",
+      "after": "The live game view grows or shrinks with the browser, every overlay handle stays on its element, and the engine reports both virtual console size and true backing-store pixels.",
+      "value": "The editing-size readout and the HUD stay aligned with the picture on screen."
+    },
+    {
+      "surface": "pause-resume",
+      "before": "The editor had no Pause or Resume control, so lining up the HUD meant waiting for a useful demo frame.",
+      "after": "Pause and Resume sit beside the demo selector and follow the engine's real state, including console changes and an honest disabled reason on unsupported backends.",
+      "value": "You can stop on a quiet frame and adjust the HUD without losing the moment you wanted."
+    }
+  ]
 }
 ```
 
