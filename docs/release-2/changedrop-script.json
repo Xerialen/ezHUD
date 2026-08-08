@@ -142,7 +142,7 @@
         {
           "instruction": "Hold while the narration explains grid, magnet and the Alt bypass.",
           "action": "hold",
-          "duration_ms": 3400,
+          "duration_ms": 4000,
           "fit": "narration"
         }
       ]
