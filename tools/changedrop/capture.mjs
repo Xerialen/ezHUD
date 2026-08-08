@@ -826,7 +826,7 @@ async function executeStep({
 			// The iteration cap protects against a clock that never advances —
 			// the browser tab could be throttled, frozen, or detached. It does
 			// NOT protect against an absurd floor_ms; that guard lives in
-			// voice.mjs (MAX_FLOOR_MS, 10 000 ms), applied to floor_ms directly
+			// voice.mjs (MAX_FLOOR_MS, 30 000 ms), applied to floor_ms directly
 			// — no kind check — so bookends and future segment types are covered.
 			//
 			// With the floor, quiet = M + A_after where A_after is the elapsed

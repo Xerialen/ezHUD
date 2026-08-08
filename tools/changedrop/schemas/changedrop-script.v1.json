@@ -32,10 +32,9 @@
           },
           "text": {"type": "string", "minLength": 1},
           "estimated_duration_seconds": {
-            "description": "Authoring estimate; the 10-second feature budget applies to kind=surface, while V2 measures all audio.",
+            "description": "Authoring estimate; the 15-second feature guideline is advisory for kind=surface, while V2 measures all audio.",
             "type": "number",
-            "exclusiveMinimum": 0,
-            "maximum": 10.0
+            "exclusiveMinimum": 0
           },
           "walkthrough": {"$ref": "#/$defs/fitWalkthrough"}
         }

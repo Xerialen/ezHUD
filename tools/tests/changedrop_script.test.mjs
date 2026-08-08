@@ -15,10 +15,15 @@ const repo = path.resolve(here, '../..');
 const execFileAsync = promisify(execFile);
 
 let authorChangedropScript;
+let maxSurfaceGuidelineSeconds;
 let wordsPerSecond;
 let loadError;
 try {
-	({ authorChangedropScript, WORDS_PER_SECOND: wordsPerSecond } = await import('../changedrop/script.mjs'));
+	({
+		authorChangedropScript,
+		MAX_SURFACE_GUIDELINE_SECONDS: maxSurfaceGuidelineSeconds,
+		WORDS_PER_SECOND: wordsPerSecond,
+	} = await import('../changedrop/script.mjs'));
 } catch (error) {
 	loadError = error;
 }
@@ -154,6 +159,35 @@ test('case 3: each changed surface has one budgeted segment and a keyed walkthro
 		assert.equal(segment.id, segment.surface);
 		assert.ok(segment.estimated_duration_seconds <= 15.0, `${segment.surface} exceeds 15.0 seconds`);
 	}
+});
+
+test('15-second surface target is advisory and remains valid under the published script schema', async () => {
+	assert.ifError(loadError);
+	assert.equal(maxSurfaceGuidelineSeconds, 15.0);
+	const { summary, authoring } = await renderFixture();
+	const longAuthoring = structuredClone(authoring);
+	longAuthoring.treatments[0].text = Array.from({ length: 36 }, (_, index) => `narration${index + 1}`).join(' ');
+
+	const warnings = [];
+	const originalWarn = console.warn;
+	let script;
+	console.warn = (...values) => warnings.push(values.join(' '));
+	try {
+		script = authorChangedropScript(summary, longAuthoring, {
+			authoringPath: 'docs/release-1/changedrop-script.json',
+		});
+	} finally {
+		console.warn = originalWarn;
+	}
+	assert.ok(script.segments[1].estimated_duration_seconds > maxSurfaceGuidelineSeconds);
+	assert.ok(warnings.some((warning) => /guideline.*proceed|proceed.*guideline/i.test(warning)));
+
+	const schema = JSON.parse(await readFile(
+		path.join(repo, 'tools', 'changedrop', 'schemas', 'changedrop-script.v1.json'), 'utf8'));
+	const estimateContract = schema.properties.segments.items.properties.estimated_duration_seconds;
+	assert.equal('maximum' in estimateContract, false, 'the advisory estimate must not remain a schema gate');
+	assert.match(estimateContract.description, /15-second.*guideline.*advisory/i);
+	assert.deepEqual(schemaErrors(script, schema), []);
 });
 
 test('case 4: authored prose is non-empty, unique, source-bound, and not a triple concatenation', async () => {
