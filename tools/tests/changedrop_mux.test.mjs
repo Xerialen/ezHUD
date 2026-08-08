@@ -384,6 +384,44 @@ test('review blocker: ffmpeg trims the capture lead-in and uses the content dura
 	assert.equal(args.join(' ').includes('trim=duration=22.543'), false);
 });
 
+test('case M1b: output duration is checked against trimmed content (content − trimStart)', async () => {
+	assert.ifError(loadError);
+	const observations = await fixture('mux-media-observations.json');
+
+	// With trimStart = 2.0, the expected trimmed content is 4.1 − 2.0 = 2.1.
+	// The output probe already reports 4.1 (the fixture has no trim).
+	// A non-zero trimStart makes the untrimmed output mismatch.
+	const tooLong = structuredClone(observations.output);
+	tooLong.duration_seconds = 4.1;
+	assert.throws(() => mux.assertMuxMediaGates({
+		captureContentDurationSeconds: 4.1,
+		captureContainerDurationSeconds: 5.02,
+		captureProbe: observations.capture,
+		outputProbe: tooLong,
+		trimStart: 2.0,
+	}), /output duration.*4\.1.*trimmed capture content.*2\.1.*tolerance.*0\.500/i,
+		'output must be checked against content − trimStart, not untrimmed content');
+
+	// With the correct output = content − trimStart, it passes.
+	const correct = structuredClone(observations.output);
+	correct.duration_seconds = 2.1;
+	assert.equal(mux.assertMuxMediaGates({
+		captureContentDurationSeconds: 4.1,
+		captureContainerDurationSeconds: 5.02,
+		captureProbe: observations.capture,
+		outputProbe: correct,
+		trimStart: 2.0,
+	}), true);
+
+	// Default trimStart = 0 preserves existing behavior.
+	assert.equal(mux.assertMuxMediaGates({
+		captureContentDurationSeconds: 4.1,
+		captureContainerDurationSeconds: 5.02,
+		captureProbe: observations.capture,
+		outputProbe: observations.output,
+	}), true);
+});
+
 test('case M1: output duration must equal the fitted capture within the stated tolerance', async () => {
 	assert.ifError(loadError);
 	assert.equal(mux.OUTPUT_DURATION_TOLERANCE_SECONDS, 0.5);

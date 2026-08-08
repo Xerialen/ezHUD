@@ -264,6 +264,7 @@ export function assertMuxMediaGates({
 	captureContainerDurationSeconds,
 	captureProbe,
 	outputProbe,
+	trimStart = 0,
 } = {}) {
 	finiteNumber(captureContentDurationSeconds, 'Fitted capture content duration', { positive: true });
 	finiteNumber(captureContainerDurationSeconds, 'Fitted capture container duration', { positive: true });
@@ -276,9 +277,9 @@ export function assertMuxMediaGates({
 	if (captureDelta > OUTPUT_DURATION_TOLERANCE_SECONDS) {
 		throw new Error(`Fitted capture probe duration ${captureProbe.duration_seconds.toFixed(3)}s differs from container receipt ${captureContainerDurationSeconds.toFixed(3)}s beyond tolerance ${OUTPUT_DURATION_TOLERANCE_SECONDS.toFixed(3)}s.`);
 	}
-	const outputDelta = Math.abs(outputProbe.duration_seconds - captureContentDurationSeconds);
+	const outputDelta = Math.abs(outputProbe.duration_seconds - (captureContentDurationSeconds - trimStart));
 	if (outputDelta > OUTPUT_DURATION_TOLERANCE_SECONDS) {
-		throw new Error(`Mux output duration ${outputProbe.duration_seconds.toFixed(3)}s differs from fitted capture content ${captureContentDurationSeconds.toFixed(3)}s beyond tolerance ${OUTPUT_DURATION_TOLERANCE_SECONDS.toFixed(3)}s.`);
+		throw new Error(`Mux output duration ${outputProbe.duration_seconds.toFixed(3)}s differs from trimmed capture content ${(captureContentDurationSeconds - trimStart).toFixed(3)}s beyond tolerance ${OUTPUT_DURATION_TOLERANCE_SECONDS.toFixed(3)}s.`);
 	}
 	const captureVideos = captureProbe.streams.filter((stream) => stream.codec_type === 'video').length;
 	if (captureVideos !== 1) throw new Error('Fitted capture must contain exactly one video stream.');
@@ -659,6 +660,7 @@ export async function main({
 			captureContainerDurationSeconds: timings.recording.container_duration_seconds,
 			captureProbe,
 			outputProbe,
+			trimStart: timings.segments[0].start_seconds,
 		});
 		const manifest = buildManifest({
 			release: identity.release,
