@@ -90,6 +90,13 @@
       "text": "Pause now holds frames steady, so you can edit the HUD without losing your moment.",
       "walkthrough": [
         {
+          "instruction": "Ring the Pause control while it still reads Pause.",
+          "action": "highlight",
+          "selector": "#fte-pause",
+          "badge": 1,
+          "crop": {"width": 550, "height": 300}
+        },
+        {
           "instruction": "Pause the running demo from the editor control.",
           "action": "click",
           "selector": "#fte-pause"
@@ -99,13 +106,6 @@
           "action": "wait-for",
           "selector": "#fte-pause",
           "state": "pressed"
-        },
-        {
-          "instruction": "Ring the changed Pause control.",
-          "action": "highlight",
-          "selector": "#fte-pause",
-          "badge": 1,
-          "crop": {"width": 550, "height": 300}
         },
         {
           "instruction": "Hold on the steady demo frame.",

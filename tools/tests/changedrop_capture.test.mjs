@@ -246,3 +246,196 @@ test('supporting contract: closed safe DSL, bounded runtime, schema/privacy, npm
 		return true;
 	});
 });
+
+test('review blocker: recording surface matches the CSS viewport pixel-for-pixel', async () => {
+	assert.ifError(loadError);
+	const vp = capture.CAPTURE_VIEWPORT;
+	assert.ok(vp && typeof vp.width === 'number' && typeof vp.height === 'number',
+		'CAPTURE_VIEWPORT must be exported with numeric width and height');
+	assert.ok(vp.width >= 1280 && vp.width <= 3840,
+		`CAPTURE_VIEWPORT width ${vp.width} is outside the 1280-3840 range`);
+	assert.ok(vp.height >= 720 && vp.height <= 2160,
+		`CAPTURE_VIEWPORT height ${vp.height} is outside the 720-2160 range`);
+	// Both viewport and recordVideo.size must spread the same constant so they
+	// can never silently diverge. A mismatch caused the 75 % grey-padding defect.
+	const source = await readFile(path.join(repo, 'tools', 'changedrop', 'capture.mjs'), 'utf8');
+	const viewportLine = source.match(/viewport:\s*\{\s*\.\.\.CAPTURE_VIEWPORT\s*\}/);
+	assert.ok(viewportLine, 'context viewport must spread CAPTURE_VIEWPORT');
+	const recordingLine = source.match(/recordVideo:\s*\{[^}]*size:\s*\{\s*\.\.\.CAPTURE_VIEWPORT\s*\}/);
+	assert.ok(recordingLine, 'recordVideo.size must spread the same CAPTURE_VIEWPORT');
+});
+
+test('review blocker: delivered frame must be filled — no flat-grey quadrants', async (t) => {
+	assert.ifError(loadError);
+	assert.equal(typeof capture.assertFrameFilled, 'function');
+
+	const w = 1400;
+	const h = 788;
+	const midY = Math.floor(h / 2);
+	const midX = Math.floor(w / 2);
+
+	// Helper: fill an entire frame with one colour.
+	const solidFrame = ([r, g, b]) => {
+		const buf = Buffer.alloc(w * h * 3);
+		for (let i = 0; i < w * h; i++) {
+			buf[i * 3] = r;
+			buf[i * 3 + 1] = g;
+			buf[i * 3 + 2] = b;
+		}
+		return buf;
+	};
+
+	// A four-colour frame with distinct non-grey quadrants must pass.
+	const fourColor = Buffer.alloc(w * h * 3);
+	const darkBlue = [10, 20, 80];
+	const darkGreen = [10, 80, 20];
+	const darkRed = [80, 10, 20];
+	const gold = [200, 160, 40];
+	for (let y = 0; y < h; y++) {
+		const rowBase = y * w * 3;
+		const leftColor = y < midY ? darkBlue : darkRed;
+		const rightColor = y < midY ? darkGreen : gold;
+		for (let x = 0; x < w; x++) {
+			const idx = rowBase + x * 3;
+			const [r, g, b] = x < midX ? leftColor : rightColor;
+			fourColor[idx] = r;
+			fourColor[idx + 1] = g;
+			fourColor[idx + 2] = b;
+		}
+	}
+	capture.assertFrameFilled(fourColor, w, h);
+
+	// A flat-grey frame (all quadrants at 128, mean 128, σ = 0) must be rejected.
+	const flatGrey = Buffer.alloc(w * h * 3, 128);
+	assert.throws(() => capture.assertFrameFilled(flatGrey, w, h),
+		/flat grey|unfilled padding/i);
+
+	// A frame with one flat-grey quadrant must be rejected.
+	const partialPad = solidFrame(darkBlue);
+	// Overwrite bottom-right quadrant with flat grey.
+	for (let y = midY; y < h; y++) {
+		const rowBase = y * w * 3;
+		for (let x = midX; x < w; x++) {
+			const idx = rowBase + x * 3;
+			partialPad[idx] = 128;
+			partialPad[idx + 1] = 128;
+			partialPad[idx + 2] = 128;
+		}
+	}
+	assert.throws(() => capture.assertFrameFilled(partialPad, w, h),
+		/flat grey|unfilled padding/i);
+
+	// Checkerboard: 40 and 216, mean ≈ 128, σ ≈ 88. Must PASS — high variation
+	// proves real content even though mean lands in the grey band.
+	const checker = Buffer.alloc(w * h * 3);
+	for (let y = 0; y < h; y++) {
+		const rowBase = y * w * 3;
+		for (let x = 0; x < w; x++) {
+			const idx = rowBase + x * 3;
+			const v = ((x + y) & 1) ? 216 : 40;
+			checker[idx] = v;
+			checker[idx + 1] = v;
+			checker[idx + 2] = v;
+		}
+	}
+	capture.assertFrameFilled(checker, w, h);
+
+	// A dark panel whose mean happens to land near 128 (e.g. RGB 100,100,184 →
+	// luminance 128) but has real variation must pass.
+	const variedMidGrey = Buffer.alloc(w * h * 3);
+	for (let y = 0; y < h; y++) {
+		const rowBase = y * w * 3;
+		for (let x = 0; x < w; x++) {
+			const idx = rowBase + x * 3;
+			// Base of 100 gives luminance 100, plus a column gradient of ±30.
+			const offset = Math.round(30 * Math.sin((x / w) * Math.PI * 4));
+			const v = 100 + offset;
+			variedMidGrey[idx] = v;
+			variedMidGrey[idx + 1] = v;
+			variedMidGrey[idx + 2] = v;
+		}
+	}
+	capture.assertFrameFilled(variedMidGrey, w, h);
+
+	// Buffer too small must throw.
+	assert.throws(() => capture.assertFrameFilled(Buffer.alloc(10), 1400, 788));
+
+	// Non-Buffer must throw.
+	assert.throws(() => capture.assertFrameFilled('not-a-buffer', 1400, 788));
+});
+
+test('review blocker: validateRecordingFrame catches padding on real generated videos', async (t) => {
+	assert.ifError(loadError);
+	if (typeof capture.validateRecordingFrame !== 'function') {
+		t.diagnostic('validateRecordingFrame not exported — skipping integration test');
+		return;
+	}
+
+	const { spawn } = await import('node:child_process');
+	const { mkdtemp, rm } = await import('node:fs/promises');
+	const { tmpdir } = await import('node:os');
+	const path = await import('node:path');
+
+	const dir = await mkdtemp(path.join(tmpdir(), 'changedrop-vrf-'));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+
+	const generate = (name, filter) => new Promise((resolve, reject) => {
+		const out = path.join(dir, name);
+		const child = spawn('ffmpeg', [
+			'-v', 'error',
+			'-f', 'lavfi',
+			'-i', filter,
+			'-pix_fmt', 'yuv420p',
+			'-t', '6',
+			'-y', out,
+		], { stdio: ['ignore', 'pipe', 'pipe'] });
+		const chunks = [];
+		child.stderr.on('data', (chunk) => chunks.push(chunk));
+		child.once('error', reject);
+		child.once('close', (code) => {
+			if (code !== 0) {
+				const msg = Buffer.concat(chunks).toString('utf8').trim();
+				return reject(new Error(`ffmpeg failed generating ${name}: ${msg}`));
+			}
+			resolve(out);
+		});
+	});
+
+	// 1. Normal content: testsrc with varied colours — must pass.
+	const goodVideo = await generate('good.webm', 'testsrc=size=320x240:rate=25:duration=6');
+	await capture.validateRecordingFrame(goodVideo, { width: 320, height: 240 });
+
+	// 2. Flat grey padding: every pixel is 0x808080 — must be rejected.
+	const greyVideo = await generate('grey.webm', 'color=color=0x808080:size=320x240:rate=25:duration=6');
+	await assert.rejects(
+		capture.validateRecordingFrame(greyVideo, { width: 320, height: 240 }),
+		/flat grey|unfilled padding/i,
+	);
+
+	// 3. Short recording: 1 second forces the -ss 2 fallback to first frame — must pass.
+	const shortParams = 'testsrc=size=320x240:rate=25:duration=1';
+	const shortVideo = await new Promise((resolve, reject) => {
+		const out = path.join(dir, 'short.webm');
+		const child = spawn('ffmpeg', [
+			'-v', 'error', '-f', 'lavfi', '-i', shortParams,
+			'-pix_fmt', 'yuv420p', '-t', '1', '-y', out,
+		], { stdio: ['ignore', 'pipe', 'pipe'] });
+		const chunks = [];
+		child.stderr.on('data', (chunk) => chunks.push(chunk));
+		child.once('error', reject);
+		child.once('close', (code) => {
+			if (code !== 0) {
+				const msg = Buffer.concat(chunks).toString('utf8').trim();
+				return reject(new Error(`ffmpeg failed generating short.webm: ${msg}`));
+			}
+			resolve(out);
+		});
+	});
+	await capture.validateRecordingFrame(shortVideo, { width: 320, height: 240 });
+
+	// 4. Wrong dimensions must be rejected (before any frame extraction).
+	await assert.rejects(
+		capture.validateRecordingFrame(goodVideo, { width: 640, height: 480 }),
+		/dimensions.*match|do not match/i,
+	);
+});

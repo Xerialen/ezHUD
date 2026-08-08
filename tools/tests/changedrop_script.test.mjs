@@ -7,7 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-const INTRO = "Hey guys, it's Xeri with another changedrop.";
+const INTRO = "Hey guys, it's Xerial. Here's what's new in ezHUD.";
 const OUTRO = "Be safe, and don't walk on spawns.";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtureDir = path.join(here, 'fixtures', 'changedrop');

@@ -57,7 +57,7 @@ Schemas are committed under `tools/changedrop/schemas/<name>.v1.json`. Every
 stage validates its input against the previous stage's schema and refuses to
 guess at a malformed handoff.
 
-Wired as `npm run changedrop:analyze|script|capture|voice|mux|run`.
+Wired as `npm run changedrop:analyze|script|capture|voice|mux|run|review`.
 
 ## 3. Artifact locations, and the privacy line
 
@@ -139,7 +139,7 @@ when an entry is stale or missing. Every walkthrough step retains a required
 human `instruction` and carries one machine action from the closed Stage 3 DSL;
 Stage 2 validates and copies those structured steps into `changedrop-script/1`.
 
-- Exact intro: `Hey guys, it's Xeri with another changedrop.`
+- Exact intro: `Hey guys, it's Xerial. Here's what's new in ezHUD.`
 - Exact outro: `Be safe, and don't walk on spawns.`
 - **S1** both bookends match byte-for-byte, appear exactly once, first and last.
   They are standalone bookend segments with their own walkthroughs and timings.
