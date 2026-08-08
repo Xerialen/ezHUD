@@ -14,7 +14,8 @@
     "segments",
     "capture",
     "output",
-    "publish"
+    "publish",
+    "trim_start_s"
   ],
   "properties": {
     "schema_version": {"const": "changedrop-manifest/1"},
