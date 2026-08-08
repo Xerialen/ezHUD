@@ -828,7 +828,8 @@ test('hold floor RED: run 3 drag-assist numbers fail the old pre-computed expres
 	assert.ok(floorOverrun <= voice.NARRATION_OVERRUN_EPSILON_SECONDS,
 		`GREEN: floor overrun ${floorOverrun.toFixed(3)}s must be within the ${voice.NARRATION_OVERRUN_EPSILON_SECONDS}s epsilon`);
 	assert.equal(Number(floorSegment.toFixed(3)), RUN3_DRAG_ASSIST.floor_segment);
-	// With the floor, quiet == M by construction — dead-air gate is a readout of M.
+	// Drag-assist has no actions after its hold, so quiet == M here.
+	// For segments with post-hold actions (anchor), quiet = M + A_after.
 	const quiet = Math.max(0, -floorOverrun);
 	assert.equal(quiet, RUN3_DRAG_ASSIST.M);
 });
@@ -969,26 +970,30 @@ test('hold floor TOTAL FILM LENGTH: projected total equals Σ max(A, N + M) on f
 	}
 });
 
-test('hold floor DEAD-AIR GATE is labeled a readout of M, not a pacing check', async () => {
+test('hold floor DEAD-AIR GATE is the live verification that the executor held the floor', async () => {
 	assert.ifError(loadError);
-	// With the floor, quiet == M by construction for every segment.
-	// The dead-air gate in assertNarrationFitsCapture can never fail.
-	// This is documented in the code and must be visible in the source.
+	// With the floor, quiet = M + A_after where A_after is the elapsed time
+	// of actions following the hold.  For most segments A_after ≈ 0 and
+	// quiet ≈ M = 0.25 s; for anchor it is ~0.9 s.
+	//
+	// The dead-air gate is NOT a no-op — it is the only runtime check that
+	// the executor actually held the floor.  If the hold is skipped (e.g.
+	// maxIterations = 0), quiet spikes past the 2.0 s bound and the gate
+	// fires.  That makes it load-bearing, not decorative.
 
 	// Verify that FIT_SAFETY_MARGIN_SECONDS (M) equals the expected 0.25 s.
 	assert.equal(voice.FIT_SAFETY_MARGIN_SECONDS, 0.25);
 
 	// Check that the capture source documents the floor's effect on the dead-air gate.
 	const captureSource = await readFile(path.join(repo, 'tools', 'changedrop', 'capture.mjs'), 'utf8');
-	assert.match(captureSource, /quiet == M.*construction|dead-air gate.*readout.*M|readout of M/i,
-		'capture.mjs must document that the dead-air gate becomes a readout of M');
+	assert.match(captureSource, /quiet = M \+ A_after|A_after|live verification.*floor.*held/i,
+		'capture.mjs must document that quiet = M + A_after and the gate verifies the hold');
 
 	// Check that the voice source documents it too.
 	const voiceSource = await readFile(path.join(repo, 'tools', 'changedrop', 'voice.mjs'), 'utf8');
 	assert.match(voiceSource, /ΔA.*ceases to be a quantity|ΔA.*quantity|ceases to be a quantity|no longer.*ΔA/i,
 		'voice.mjs must document that ΔA ceases to be a quantity');
 
-	// The MAX_NARRATION_UNDERSHOOT_SECONDS gate still exists but with the floor
-	// it can never fire because quiet == M = 0.25 s ≪ 2.00 s by construction.
+	// The gate exists and its bound is unchanged — it catches a skipped hold.
 	assert.equal(voice.MAX_NARRATION_UNDERSHOOT_SECONDS, 2.0);
 });

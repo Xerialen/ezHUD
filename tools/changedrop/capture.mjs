@@ -825,8 +825,13 @@ async function executeStep({
 			// voice.mjs (MAX_FLOOR_MS, 10 000 ms), applied to floor_ms directly
 			// — no kind check — so bookends and future segment types are covered.
 			//
-			// With the floor, quiet == M by construction — the dead-air gate
-			// becomes a readout of M, not a pacing check.
+			// With the floor, quiet = M + A_after where A_after is the elapsed
+			// time of actions that follow the hold.  For segments with the hold
+			// last, A_after ≈ 0 and quiet ≈ M; for anchor (whose hold is followed
+			// by a click) it is ~0.9 s.  The dead-air gate remains a live
+			// verification: if the executor skips the hold, quiet spikes past the
+			// 2.0 s bound and the gate fires — it is the only runtime check that
+			// the floor was actually held.
 			const maxIterations = Math.ceil(step.floor_ms / MAX_HOLD_MS) + 2;
 			let iterations = 0;
 			while (iterations < maxIterations) {
