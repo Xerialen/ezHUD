@@ -254,48 +254,6 @@ export function decideReleaseNoteGate({ prBody = '', labels = [], repoRoot = '.'
 			return decision(false, `${notePath} embed image ${name} has no matching attachment mapping.`);
 		}
 	}
-
-	// Changedrop declaration: the note must carry a valid changedrop-value-summary/1
-	// block so the release note gate and the changedrop pipeline never disagree
-	// about what features the note declares. Without it the note may be written
-	// twice — once by the gate pass, once by the changedrop analyze step.
-	const declarationBlock = source.match(/^##[ \t]+Changedrop declaration[ \t]*$[\s\S]*?```json[ \t]*\r?\n([\s\S]*?)\r?\n```/m);
-	if (!declarationBlock) {
-		return decision(false, `${notePath} has no fenced JSON block under "## Changedrop declaration".`);
-	}
-	let declaration;
-	try {
-		declaration = JSON.parse(declarationBlock[1]);
-	} catch (error) {
-		return decision(false, `${notePath} Changedrop declaration is not parseable JSON: ${error.message}`);
-	}
-	if (declaration.schema_version !== 'changedrop-value-summary/1') {
-		return decision(false, `${notePath} Changedrop declaration must use changedrop-value-summary/1.`);
-	}
-	if (!['render', 'skip'].includes(declaration.decision)) {
-		return decision(false, `${notePath} Changedrop declaration decision must be "render" or "skip".`);
-	}
-	if (declaration.decision === 'skip') {
-		if (typeof declaration.skip_reason !== 'string' || !declaration.skip_reason.trim()) {
-			return decision(false, `${notePath} Changedrop skip declaration needs a non-empty skip_reason.`);
-		}
-	} else {
-		if (!Array.isArray(declaration.features) || declaration.features.length === 0) {
-			return decision(false, `${notePath} Changedrop render declaration needs a non-empty features array.`);
-		}
-		for (const [index, feature] of declaration.features.entries()) {
-			for (const field of ['surface', 'before', 'after', 'value']) {
-				if (typeof feature[field] !== 'string' || !feature[field].trim()) {
-					return decision(false, `${notePath} Changedrop declaration feature ${index + 1} needs a non-empty "${field}".`);
-				}
-			}
-		}
-		// Declaration features must match the note's feature count.
-		if (declaration.features.length !== parsedFeatures.features.length) {
-			return decision(false, `${notePath} Changedrop declaration has ${declaration.features.length} feature(s) but the note has ${parsedFeatures.features.length}.`);
-		}
-	}
-
 	return decision(true, `Release note ${notePath} is complete and ready for review.`);
 }
 

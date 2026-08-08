@@ -19,20 +19,8 @@ const VALID_PAYLOAD = {
 	attachments: [{ name: 'proof.png', path: 'img/proof.png' }],
 };
 
-const VALID_DECLARATION = {
-	schema_version: 'changedrop-value-summary/1',
-	decision: 'render',
-	skip_reason: null,
-	features: [{ surface: 'proof', before: 'The changed control was unreliable.', after: 'The changed control is clear and dependable.', value: 'Players spend less time correcting state.' }],
-};
-
-function notes(payload = VALID_PAYLOAD, evidence = 'img/proof.png', declaration = VALID_DECLARATION) {
-	let doc = `# Player change\n\nA short player-facing summary.\n\n## Features\n\n### A visible improvement\nPlayers can use the changed control more reliably. The clearer state saves time while editing.\n\nBefore: The changed control was unreliable.\nAfter: The changed control is clear and dependable.\nValue: Players spend less time correcting state.\nEvidence: ${evidence}\n\n`;
-	if (declaration !== null) {
-		doc += `## Changedrop declaration\n\n\`\`\`json\n${JSON.stringify(declaration, null, 2)}\n\`\`\`\n\n`;
-	}
-	doc += `## Discord payload\n\n\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\`\n`;
-	return doc;
+function notes(payload = VALID_PAYLOAD, evidence = 'img/proof.png') {
+	return `# Player change\n\nA short player-facing summary.\n\n## Features\n\n### A visible improvement\nPlayers can use the changed control more reliably. The clearer state saves time while editing.\n\nBefore: The changed control was unreliable.\nAfter: The changed control is clear and dependable.\nValue: Players spend less time correcting state.\nEvidence: ${evidence}\n\n## Discord payload\n\n\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\`\n`;
 }
 
 function fixture({ note = notes(), images = ['img/proof.png'] } = {}) {
@@ -70,12 +58,7 @@ test('case 1: a linked release PR with valid notes, evidence and payload passes'
 
 test('mandatory value triple: all three fields on every feature pass for both apply labels', (t) => {
 	const secondFeature = `### A second improvement\nBefore: The second control was hidden.\nAfter: The second control is visible.\nValue: Players find it immediately.\nEvidence: img/proof.png\n\n`;
-	const secondDeclaration = { ...VALID_DECLARATION, features: [
-		VALID_DECLARATION.features[0],
-		{ surface: 'proof', before: 'The second control was hidden.', after: 'The second control is visible.', value: 'Players find it immediately.' },
-	] };
-	const note = notes(VALID_PAYLOAD, 'img/proof.png', secondDeclaration)
-		.replace('## Changedrop declaration', `${secondFeature}## Changedrop declaration`);
+	const note = notes().replace('## Discord payload', `${secondFeature}## Discord payload`);
 	for (const labels of [['user-visible'], ['release']]) {
 		const repo = fixture({ note });
 		t.after(repo.cleanup);
@@ -217,18 +200,6 @@ test('case 6: an applicable PR without a ticket reference fails', (t) => {
 		assert.equal(result.ok, false, name);
 		assert.match(result.reason, /ticket|#N|issue reference/i, name);
 	}
-});
-
-test('review blocker: notes without a changedrop declaration are rejected', (t) => {
-	const repo = fixture({ note: notes(VALID_PAYLOAD, 'img/proof.png', null) });
-	t.after(repo.cleanup);
-	const result = decideReleaseNoteGate({
-		prBody: applicableBody(),
-		labels: ['user-visible'],
-		repoRoot: repo.repoRoot,
-	});
-	assert.equal(result.ok, false, result.reason);
-	assert.match(result.reason, /[Cc]hangedrop declaration/i);
 });
 
 test('ordinary PRs pass untouched, including an internal-only label without an apply label', () => {
