@@ -246,3 +246,96 @@ test('supporting contract: closed safe DSL, bounded runtime, schema/privacy, npm
 		return true;
 	});
 });
+
+test('review blocker: recording surface matches the CSS viewport pixel-for-pixel', async () => {
+	assert.ifError(loadError);
+	const vp = capture.CAPTURE_VIEWPORT;
+	assert.ok(vp && typeof vp.width === 'number' && typeof vp.height === 'number',
+		'CAPTURE_VIEWPORT must be exported with numeric width and height');
+	assert.ok(vp.width >= 1280 && vp.width <= 3840,
+		`CAPTURE_VIEWPORT width ${vp.width} is outside the 1280-3840 range`);
+	assert.ok(vp.height >= 720 && vp.height <= 2160,
+		`CAPTURE_VIEWPORT height ${vp.height} is outside the 720-2160 range`);
+	// Both viewport and recordVideo.size must spread the same constant so they
+	// can never silently diverge. A mismatch caused the 75 % grey-padding defect.
+	const source = await readFile(path.join(repo, 'tools', 'changedrop', 'capture.mjs'), 'utf8');
+	const viewportLine = source.match(/viewport:\s*\{\s*\.\.\.CAPTURE_VIEWPORT\s*\}/);
+	assert.ok(viewportLine, 'context viewport must spread CAPTURE_VIEWPORT');
+	const recordingLine = source.match(/recordVideo:\s*\{[^}]*size:\s*\{\s*\.\.\.CAPTURE_VIEWPORT\s*\}/);
+	assert.ok(recordingLine, 'recordVideo.size must spread the same CAPTURE_VIEWPORT');
+});
+
+test('review blocker: delivered frame must be filled — no flat-grey quadrants', async (t) => {
+	assert.ifError(loadError);
+	assert.equal(typeof capture.assertFrameFilled, 'function');
+
+	// Synthetic frame with varied content: every quadrant has a distinct colour.
+	const w = 1400;
+	const h = 788;
+	const makeFrame = (colorTop, colorBottom) => {
+		const buf = Buffer.alloc(w * h * 3);
+		const midY = Math.floor(h / 2);
+		for (let y = 0; y < h; y++) {
+			const rowBase = y * w * 3;
+			const isTop = y < midY;
+			for (let x = 0; x < w; x++) {
+				const idx = rowBase + x * 3;
+				const [r, g, b] = isTop ? colorTop : colorBottom;
+				buf[idx] = r;
+				buf[idx + 1] = g;
+				buf[idx + 2] = b;
+			}
+		}
+		return buf;
+	};
+
+	// A frame where every quadrant has distinct, non-grey content must pass.
+	const darkBlue = [10, 20, 80];
+	const darkGreen = [10, 80, 20];
+	const darkRed = [80, 10, 20];
+	const gold = [200, 160, 40];
+	// Build a four-quadrant frame: top half has two colours, bottom half has two.
+	const fourColor = Buffer.alloc(w * h * 3);
+	const midY = Math.floor(h / 2);
+	const midX = Math.floor(w / 2);
+	for (let y = 0; y < h; y++) {
+		const rowBase = y * w * 3;
+		const leftColor = y < midY ? darkBlue : darkRed;
+		const rightColor = y < midY ? darkGreen : gold;
+		for (let x = 0; x < w; x++) {
+			const idx = rowBase + x * 3;
+			const [r, g, b] = x < midX ? leftColor : rightColor;
+			fourColor[idx] = r;
+			fourColor[idx + 1] = g;
+			fourColor[idx + 2] = b;
+		}
+	}
+	// Should not throw — no quadrant is grey.
+	capture.assertFrameFilled(fourColor, w, h);
+
+	// A flat-grey frame (all quadrants at 128,128,128) must be rejected.
+	const flatGrey = Buffer.alloc(w * h * 3, 128);
+	assert.throws(() => capture.assertFrameFilled(flatGrey, w, h),
+		/flat grey|unfilled padding/i);
+
+	// A frame where only the bottom-right quadrant is flat grey must be rejected.
+	const partialPad = makeFrame(darkBlue, darkGreen);
+	// Overwrite bottom-right quadrant with flat grey.
+	for (let y = midY; y < h; y++) {
+		const rowBase = y * w * 3;
+		for (let x = midX; x < w; x++) {
+			const idx = rowBase + x * 3;
+			partialPad[idx] = 128;
+			partialPad[idx + 1] = 128;
+			partialPad[idx + 2] = 128;
+		}
+	}
+	assert.throws(() => capture.assertFrameFilled(partialPad, w, h),
+		/flat grey|unfilled padding/i);
+
+	// Buffer too small must throw.
+	assert.throws(() => capture.assertFrameFilled(Buffer.alloc(10), 1400, 788));
+
+	// Non-Buffer must throw.
+	assert.throws(() => capture.assertFrameFilled('not-a-buffer', 1400, 788));
+});

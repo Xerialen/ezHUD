@@ -33,6 +33,12 @@ export const REPEAT_DURATION_TOLERANCE_SECONDS = 2.0;
 // rejects a receipt that describes content materially beyond its container.
 export const CONTAINER_CONTENT_EPSILON_SECONDS = 0.1;
 const DEVICE_SCALE_FACTOR = 2;
+// CSS viewport for the capture page. The recording surface must match this
+// pixel-for-pixel: Playwright's video recorder captures the CSS viewport,
+// not the device-pixel backing store, so a recordVideo.size larger than
+// viewport pads the output with flat background (tested: 75 % of every
+// frame was gray when they diverged).
+export const CAPTURE_VIEWPORT = Object.freeze({ width: 1400, height: 788 });
 const ACCENT = '#ff4116';
 const LIGHT = '#fffaf2';
 const DARK = '#11100f';
@@ -271,6 +277,114 @@ export function probeRecordingDuration(file) {
 		}, PROBE_TIMEOUT_MS);
 		timer.unref?.();
 	});
+}
+
+// Flat-grey detection threshold. Playwright padding produces near-uniform 127–129
+// luminance across padded quadrants. A quadrant whose mean luminance falls in the
+// [128 - GREY_TOLERANCE, 128 + GREY_TOLERANCE] band is considered flat grey.
+const GREY_CENTER = 128;
+const GREY_TOLERANCE = 3;
+
+/**
+ * Check that no quadrant of a decoded frame is flat grey.
+ *
+ * @param {Buffer} pixels  - raw RGB bytes (width × height × 3), row-major
+ * @param {number}  width   - frame width in pixels
+ * @param {number}  height  - frame height in pixels
+ * @throws if any quadrant mean luminance is within the flat-grey band
+ */
+export function assertFrameFilled(pixels, width, height) {
+	if (!Buffer.isBuffer(pixels)) throw new Error('Frame pixels must be a Buffer.');
+	if (!Number.isInteger(width) || width < 1 || !Number.isInteger(height) || height < 1) {
+		throw new Error('Frame dimensions must be positive integers.');
+	}
+	const expected = width * height * 3;
+	if (pixels.length < expected) throw new Error(`Frame buffer is too small (need ${expected}, got ${pixels.length}).`);
+
+	const qw = Math.floor(width / 2);
+	const qh = Math.floor(height / 2);
+	const quadrants = [
+		{ name: 'TL', ox: 0, oy: 0, w: qw, h: qh },
+		{ name: 'TR', ox: qw, oy: 0, w: width - qw, h: qh },
+		{ name: 'BL', ox: 0, oy: qh, w: qw, h: height - qh },
+		{ name: 'BR', ox: qw, oy: qh, w: width - qw, h: height - qh },
+	];
+
+	for (const q of quadrants) {
+		let sum = 0;
+		for (let y = q.oy; y < q.oy + q.h; y++) {
+			const rowBase = y * width * 3;
+			for (let x = q.ox; x < q.ox + q.w; x++) {
+				const idx = rowBase + x * 3;
+				sum += (pixels[idx] + pixels[idx + 1] + pixels[idx + 2]) / 3;
+			}
+		}
+		const mean = sum / (q.w * q.h);
+		if (mean >= GREY_CENTER - GREY_TOLERANCE && mean <= GREY_CENTER + GREY_TOLERANCE) {
+			throw new Error(`Frame quadrant ${q.name} is flat grey (mean luminance ${mean.toFixed(2)}), indicating unfilled padding.`);
+		}
+	}
+}
+
+/**
+ * Validate a captured video: dimensions must match the expected viewport and no
+ * quadrant of a sampled frame may be flat grey.
+ *
+ * Uses ffprobe for dimensions and ffmpeg to extract a single raw RGB frame.
+ *
+ * @param {string} file             - path to the webm recording
+ * @param {{width: number, height: number}} expected - expected frame dimensions
+ * @throws if validation fails
+ */
+export async function validateRecordingFrame(file, expected) {
+	// 1. Check dimensions via ffprobe.
+	const dimensions = await new Promise((resolve, reject) => {
+		const child = spawn('ffprobe', [
+			'-v', 'error',
+			'-select_streams', 'v:0',
+			'-show_entries', 'stream=width,height',
+			'-of', 'csv=p=0',
+			file,
+		], { stdio: ['ignore', 'pipe', 'pipe'] });
+		let stdout = '';
+		child.stdout.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
+		child.once('error', () => reject(new Error('Could not probe recording dimensions.')));
+		child.once('close', (code) => {
+			if (code !== 0) return reject(new Error('ffprobe exited non-zero on recording.'));
+			const [w, h] = stdout.trim().split(',').map(Number);
+			if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1) {
+				return reject(new Error('Could not parse recording dimensions.'));
+			}
+			resolve({ width: w, height: h });
+		});
+		setTimeout(() => { child.kill('SIGKILL'); reject(new Error('Dimension probe timed out.')); }, PROBE_TIMEOUT_MS);
+	});
+
+	if (dimensions.width !== expected.width || dimensions.height !== expected.height) {
+		throw new Error(`Recording dimensions ${dimensions.width}x${dimensions.height} do not match expected ${expected.width}x${expected.height}.`);
+	}
+
+	// 2. Extract one frame as raw RGB24 and check quadrant luminance.
+	const pixels = await new Promise((resolve, reject) => {
+		const child = spawn('ffmpeg', [
+			'-v', 'error',
+			'-i', file,
+			'-vframes', '1',
+			'-f', 'rawvideo',
+			'-pix_fmt', 'rgb24',
+			'-',
+		], { stdio: ['ignore', 'pipe', 'pipe'] });
+		const chunks = [];
+		child.stdout.on('data', (chunk) => chunks.push(chunk));
+		child.once('error', () => reject(new Error('Could not extract frame from recording.')));
+		child.once('close', (code) => {
+			if (code !== 0) return reject(new Error('ffmpeg exited non-zero extracting frame.'));
+			resolve(Buffer.concat(chunks));
+		});
+		setTimeout(() => { child.kill('SIGKILL'); reject(new Error('Frame extraction timed out.')); }, PROBE_TIMEOUT_MS);
+	});
+
+	assertFrameFilled(pixels, dimensions.width, dimensions.height);
 }
 
 export async function recordingMetadata(file, measuredDurationSeconds, containerDurationSeconds) {
@@ -686,10 +800,10 @@ async function runBrowserCapture({ script, dist, output }) {
 		const videoDirectory = path.join(output, '.video');
 		await mkdir(videoDirectory, { mode: 0o700 });
 		context = await browser.newContext({
-			viewport: { width: 1400, height: 788 },
+			viewport: { ...CAPTURE_VIEWPORT },
 			deviceScaleFactor: DEVICE_SCALE_FACTOR,
 			colorScheme: 'dark',
-			recordVideo: { dir: videoDirectory, size: { width: 2800, height: 1576 } },
+			recordVideo: { dir: videoDirectory, size: { ...CAPTURE_VIEWPORT } },
 		});
 		annotationContext = await browser.newContext({ viewport: { width: 550, height: 300 }, deviceScaleFactor: 1 });
 		const annotationPage = await annotationContext.newPage();
@@ -746,6 +860,8 @@ async function runBrowserCapture({ script, dist, output }) {
 		await bounded(video.saveAs(recordingPath), deadline, 'video save');
 		await chmod(recordingPath, 0o600);
 		await rm(videoDirectory, { recursive: true, force: true });
+		await bounded(
+			validateRecordingFrame(recordingPath, CAPTURE_VIEWPORT), deadline, 'recording frame validation');
 		const containerDurationSeconds = await bounded(
 			probeRecordingDuration(recordingPath), deadline, 'recording duration probe');
 		const recording = await recordingMetadata(
