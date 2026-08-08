@@ -306,6 +306,10 @@ export function assertFrameFilled(pixels, width, height) {
 		throw new Error('Frame dimensions must be positive integers.');
 	}
 	const expected = width * height * 3;
+	// This length guard is load-bearing, not defensive: a truncated buffer
+	// would read undefined past its end, producing NaN for every pixel.
+	// NaN compares false against both the mean-band and stddev conditions,
+	// so a truncated frame would be silently declared filled without this check.
 	if (pixels.length < expected) throw new Error(`Frame buffer is too small (need ${expected}, got ${pixels.length}).`);
 
 	const qw = Math.floor(width / 2);
