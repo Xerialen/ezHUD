@@ -26,17 +26,21 @@ const SELECTOR_PATTERN = /^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\[data-changedrop="[a
 const DATA_CHANGEDROP_VALUE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 // Normalise an element name to a kebab-case data-changedrop value.
-// Must produce a value that matches [a-z0-9]+(?:-[a-z0-9]+)* and must
-// assert its own result so a future name that becomes invalid is caught
-// at generation time rather than at filming.
+// Collapses runs of non-alphanumeric characters to a single hyphen and
+// trims leading/trailing hyphens. Must produce a value that matches
+// [a-z0-9]+(?:-[a-z0-9]+)*. A name whose normalised form is still
+// invalid (only possible when every character is non-alphanumeric) is
+// caught with a throw so the invariant is enforced at test time.
 function normaliseElementName(name) {
-	const value = `hud-element-${name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
-	if (!DATA_CHANGEDROP_VALUE.test(value.slice('hud-element-'.length))) {
+	const fragment = name.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '');
+	if (!DATA_CHANGEDROP_VALUE.test(fragment)) {
 		throw new Error(
-			`data-changedrop value "${value}" (from "${name}") does not match [a-z0-9]+(?:-[a-z0-9]+)*`,
+			`data-changedrop value "hud-element-${fragment}" (from "${name}") does not match [a-z0-9]+(?:-[a-z0-9]+)*`,
 		);
 	}
-	return value;
+	return `hud-element-${fragment}`;
 }
 
 await test('id="fte-moments" exists in index-fte.html', async (t) => {
@@ -77,19 +81,38 @@ await test('normaliseElementName produces valid data-changedrop values', async (
 		);
 	}
 
-	// A name with consecutive non-alphanumeric chars (e.g. score__bar)
-	// normalises to score--bar which has a double hyphen —
-	// rejected by DATA_CHANGEDROP_VALUE.
+	// Names with consecutive non-alphanumeric chars collapse to a single
+	// hyphen (e.g. score__bar -> score-bar, bar_ -> bar, _bar -> bar).
+	const collapseCases = [
+		{ name: 'score__bar', expected: 'hud-element-score-bar' },
+		{ name: 'bar_', expected: 'hud-element-bar' },
+		{ name: '_bar', expected: 'hud-element-bar' },
+		{ name: 'mp3__time', expected: 'hud-element-mp3-time' },
+	];
+
+	for (const { name, expected } of collapseCases) {
+		const value = normaliseElementName(name);
+		assert.equal(value, expected, `normaliseElementName("${name}")`);
+		const fullSelector = `[data-changedrop="${value}"]`;
+		assert.ok(
+			SELECTOR_PATTERN.test(fullSelector),
+			`"[data-changedrop=${value}]" must match SELECTOR_PATTERN`,
+		);
+	}
+
+	// A double hyphen is still rejected by DATA_CHANGEDROP_VALUE — the
+	// collapse normaliser prevents it, but a hand-edited value won't pass.
 	assert.ok(
 		!DATA_CHANGEDROP_VALUE.test('score--bar'),
 		'score--bar (double hyphen) must NOT pass DATA_CHANGEDROP_VALUE',
 	);
 
-	// Verify the normaliser asserts its own result on invalid output.
+	// A name consisting entirely of non-alphanumeric characters (e.g. ___)
+	// normalises to an empty string, which fails CHANGEDROP_VALUE.
 	assert.throws(
-		() => normaliseElementName('score__bar'),
+		() => normaliseElementName('___'),
 		/data-changedrop.*does not match/,
-		'normaliseElementName must throw on a name whose normalised form is invalid',
+		'normaliseElementName must throw on a name whose normalised form is empty',
 	);
 });
 

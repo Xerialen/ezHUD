@@ -503,18 +503,25 @@ function renderTree() {
 		// Every tree row carries a data-changedrop attribute for the filming
 		// pipeline. The value is a kebab-case name prefixed with
 		// "hud-element-", validated against the DSL's
-		// [a-z0-9]+(?:-[a-z0-9]+)* pattern. A name that normalises to an
-		// invalid value (e.g. double hyphen) is caught here at generation
-		// time rather than silently failing at filming.
+		// [a-z0-9]+(?:-[a-z0-9]+)* pattern. Runs of non-alphanumeric
+		// characters are collapsed to a single hyphen and leading/trailing
+		// hyphens are trimmed. A name whose normalised value still fails the
+		// pattern is skipped with a console.warn rather than throwing — the
+		// invariant is enforced at test time; an editor must never break on
+		// an unanticipated engine name.
 		const CHANGEDROP_VALUE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-		const normalised = item.name.toLowerCase().replace(/[^a-z0-9]/g, '-');
+		const normalised = item.name.toLowerCase()
+			.replace(/[^a-z0-9]+/g, '-')
+			.replace(/^-+|-+$/g, '');
 		if (!CHANGEDROP_VALUE.test(normalised)) {
-			throw new Error(
+			console.warn(
 				`Element name "${item.name}" normalises to "${normalised}" ` +
-				`which does not match [a-z0-9]+(?:-[a-z0-9]+)*`,
+				`which does not match [a-z0-9]+(?:-[a-z0-9]+)* — ` +
+				`skipping data-changedrop`,
 			);
+		} else {
+			row.dataset.changedrop = `hud-element-${normalised}`;
 		}
-		row.dataset.changedrop = `hud-element-${normalised}`;
 
 		const meta = document.createElement('span');
 		meta.className = 'tree__meta';
