@@ -106,6 +106,11 @@
           "action": "hold",
           "duration_ms": 3600,
           "fit": "narration"
+        },
+        {
+          "instruction": "Return the inspector panel to the top so the next segment starts where it expects.",
+          "action": "click",
+          "selector": "#drag-assist"
         }
       ]
     },
@@ -118,11 +123,6 @@
       },
       "text": "Snap to a grid, magnet to other elements, hold Alt to bypass.",
       "walkthrough": [
-        {
-          "instruction": "Scroll the drag assistance block back into view after the anchor segment.",
-          "action": "click",
-          "selector": "#drag-assist"
-        },
         {
           "instruction": "Wait for the drag assistance block.",
           "action": "wait-for",
@@ -142,7 +142,7 @@
         {
           "instruction": "Hold while the narration explains grid, magnet and the Alt bypass.",
           "action": "hold",
-          "duration_ms": 4000,
+          "duration_ms": 3400,
           "fit": "narration"
         }
       ]
