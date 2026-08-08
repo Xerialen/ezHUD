@@ -119,6 +119,11 @@
       "text": "Snap to a grid, magnet to other elements, hold Alt to bypass.",
       "walkthrough": [
         {
+          "instruction": "Scroll the drag assistance block back into view after the anchor segment.",
+          "action": "click",
+          "selector": "#drag-assist"
+        },
+        {
           "instruction": "Wait for the drag assistance block.",
           "action": "wait-for",
           "selector": "#drag-assist",
