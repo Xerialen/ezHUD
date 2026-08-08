@@ -21,7 +21,7 @@ import { pathToFileURL } from 'node:url';
 const INPUT_SCHEMA_VERSION = 'changedrop-script/1';
 const OUTPUT_SCHEMA_VERSION = 'changedrop-timings/1';
 const ROOT_VARIABLE = 'EZHUD_CHANGEDROP_ROOT';
-const INTRO = "Hey guys, it's Xeri with another changedrop.";
+const INTRO = "Hey guys, it's Xerial. Here's what's new in ezHUD.";
 const OUTRO = "Be safe, and don't walk on spawns.";
 const MAX_WAIT_MS = 120_000;
 // Engine-polled controls can cross several browser/engine readback cycles. A
@@ -689,7 +689,7 @@ async function runBrowserCapture({ script, dist, output }) {
 			viewport: { width: 1400, height: 788 },
 			deviceScaleFactor: DEVICE_SCALE_FACTOR,
 			colorScheme: 'dark',
-			recordVideo: { dir: videoDirectory, size: { width: 1400, height: 788 } },
+			recordVideo: { dir: videoDirectory, size: { width: 2800, height: 1576 } },
 		});
 		annotationContext = await browser.newContext({ viewport: { width: 550, height: 300 }, deviceScaleFactor: 1 });
 		const annotationPage = await annotationContext.newPage();
