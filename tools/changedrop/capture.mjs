@@ -404,7 +404,7 @@ export async function validateRecordingFrame(file, expected) {
 	//    duration ffmpeg produces zero bytes — fall back to the first frame.
 	const extractFrame = async (seek) => new Promise((resolve, reject) => {
 		const args = ['-v', 'error', '-i', file, '-vframes', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'];
-		if (seek !== null) args.splice(1, 0, '-ss', String(seek));
+		if (seek !== null) args.splice(2, 0, '-ss', String(seek));
 		const child = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
 		const chunks = [];
 		let settled = false;

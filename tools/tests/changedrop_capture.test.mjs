@@ -363,3 +363,79 @@ test('review blocker: delivered frame must be filled — no flat-grey quadrants'
 	// Non-Buffer must throw.
 	assert.throws(() => capture.assertFrameFilled('not-a-buffer', 1400, 788));
 });
+
+test('review blocker: validateRecordingFrame catches padding on real generated videos', async (t) => {
+	assert.ifError(loadError);
+	if (typeof capture.validateRecordingFrame !== 'function') {
+		t.diagnostic('validateRecordingFrame not exported — skipping integration test');
+		return;
+	}
+
+	const { spawn } = await import('node:child_process');
+	const { mkdtemp, rm } = await import('node:fs/promises');
+	const { tmpdir } = await import('node:os');
+	const path = await import('node:path');
+
+	const dir = await mkdtemp(path.join(tmpdir(), 'changedrop-vrf-'));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+
+	const generate = (name, filter) => new Promise((resolve, reject) => {
+		const out = path.join(dir, name);
+		const child = spawn('ffmpeg', [
+			'-v', 'error',
+			'-f', 'lavfi',
+			'-i', filter,
+			'-pix_fmt', 'yuv420p',
+			'-t', '6',
+			'-y', out,
+		], { stdio: ['ignore', 'pipe', 'pipe'] });
+		const chunks = [];
+		child.stderr.on('data', (chunk) => chunks.push(chunk));
+		child.once('error', reject);
+		child.once('close', (code) => {
+			if (code !== 0) {
+				const msg = Buffer.concat(chunks).toString('utf8').trim();
+				return reject(new Error(`ffmpeg failed generating ${name}: ${msg}`));
+			}
+			resolve(out);
+		});
+	});
+
+	// 1. Normal content: testsrc with varied colours — must pass.
+	const goodVideo = await generate('good.webm', 'testsrc=size=320x240:rate=25:duration=6');
+	await capture.validateRecordingFrame(goodVideo, { width: 320, height: 240 });
+
+	// 2. Flat grey padding: every pixel is 0x808080 — must be rejected.
+	const greyVideo = await generate('grey.webm', 'color=color=0x808080:size=320x240:rate=25:duration=6');
+	await assert.rejects(
+		capture.validateRecordingFrame(greyVideo, { width: 320, height: 240 }),
+		/flat grey|unfilled padding/i,
+	);
+
+	// 3. Short recording: 1 second forces the -ss 2 fallback to first frame — must pass.
+	const shortParams = 'testsrc=size=320x240:rate=25:duration=1';
+	const shortVideo = await new Promise((resolve, reject) => {
+		const out = path.join(dir, 'short.webm');
+		const child = spawn('ffmpeg', [
+			'-v', 'error', '-f', 'lavfi', '-i', shortParams,
+			'-pix_fmt', 'yuv420p', '-t', '1', '-y', out,
+		], { stdio: ['ignore', 'pipe', 'pipe'] });
+		const chunks = [];
+		child.stderr.on('data', (chunk) => chunks.push(chunk));
+		child.once('error', reject);
+		child.once('close', (code) => {
+			if (code !== 0) {
+				const msg = Buffer.concat(chunks).toString('utf8').trim();
+				return reject(new Error(`ffmpeg failed generating short.webm: ${msg}`));
+			}
+			resolve(out);
+		});
+	});
+	await capture.validateRecordingFrame(shortVideo, { width: 320, height: 240 });
+
+	// 4. Wrong dimensions must be rejected (before any frame extraction).
+	await assert.rejects(
+		capture.validateRecordingFrame(goodVideo, { width: 640, height: 480 }),
+		/dimensions.*match|do not match/i,
+	);
+});
