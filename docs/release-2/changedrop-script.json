@@ -81,6 +81,11 @@
           "selector": "[data-changedrop=\"hud-element-health\"]"
         },
         {
+          "instruction": "Bring the anchor field into view; the inspector panel scrolls to it.",
+          "action": "click",
+          "selector": "#f-health-place"
+        },
+        {
           "instruction": "Wait for the anchor field to render for the selected element.",
           "action": "wait-for",
           "selector": "#f-health-place",
