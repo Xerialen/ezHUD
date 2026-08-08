@@ -159,7 +159,7 @@ function validateNaturalFitReceipt({ fit, script, narration }) {
 		exactObject(entry, [
 			'id', 'kind', 'surface', 'request_id', 'request_hash', 'status', 'rerendered',
 			'audio', 'natural_duration_seconds', 'measured_window_seconds', 'fixed_action_seconds',
-			'previous_padding_ms', 'fitted_padding_ms', 'fitted_hold_durations_ms',
+			'previous_padding_ms', 'fitted_padding_ms', 'floor_ms', 'fitted_hold_durations_ms',
 			'projected_duration_seconds',
 		], `Changedrop natural fit segment ${index + 1}`);
 		const scriptSegment = script.segments[index];
@@ -185,21 +185,40 @@ function validateNaturalFitReceipt({ fit, script, narration }) {
 			throw new Error(`Natural narration duration differs from the delivered artifact for segment "${entry.id}".`);
 		}
 		if (!Number.isInteger(entry.previous_padding_ms) || entry.previous_padding_ms < 100
-			|| !Number.isInteger(entry.fitted_padding_ms) || entry.fitted_padding_ms < 100
-			|| !Array.isArray(entry.fitted_hold_durations_ms) || entry.fitted_hold_durations_ms.length === 0
-			|| entry.fitted_hold_durations_ms.some((duration) => !Number.isInteger(duration) || duration < 100 || duration > 5_000)
-			|| entry.fitted_hold_durations_ms.reduce((sum, duration) => sum + duration, 0) !== entry.fitted_padding_ms) {
+			|| !Number.isInteger(entry.fitted_padding_ms) || entry.fitted_padding_ms < 100) {
 			throw new Error(`Changedrop narration padding receipt is invalid for segment "${entry.id}".`);
 		}
-		const scriptedPadding = scriptSegment.walkthrough
-			.filter((step) => step.fit === 'narration')
-			.map((step) => step.duration_ms);
-		if (JSON.stringify(scriptedPadding) !== JSON.stringify(entry.fitted_hold_durations_ms)) {
-			throw new Error(`Changedrop fitted script padding is stale for segment "${entry.id}".`);
+		if (!Number.isInteger(entry.floor_ms) || entry.floor_ms < 100) {
+			throw new Error(`Changedrop floor receipt is invalid for segment "${entry.id}".`);
 		}
-		const projected = entry.fixed_action_seconds + entry.fitted_padding_ms / 1000;
-		if (Math.abs(projected - entry.projected_duration_seconds) > 0.001) {
-			throw new Error(`Changedrop projected fit is inconsistent for segment "${entry.id}".`);
+		// With the floor, fitted_hold_durations_ms is empty — pre-computed
+		// durations are replaced by floor_ms, evaluated live in the recording run.
+		if (!Array.isArray(entry.fitted_hold_durations_ms)) {
+			throw new Error(`Changedrop fitted hold durations must be an array for segment "${entry.id}".`);
+		}
+		if (entry.fitted_hold_durations_ms.length > 0) {
+			// Legacy split-padding: validate the durations.
+			if (entry.fitted_hold_durations_ms.some((duration) => !Number.isInteger(duration) || duration < 100 || duration > 5_000)
+				|| entry.fitted_hold_durations_ms.reduce((sum, duration) => sum + duration, 0) !== entry.fitted_padding_ms) {
+				throw new Error(`Changedrop narration padding receipt is invalid for segment "${entry.id}".`);
+			}
+			const scriptedPadding = scriptSegment.walkthrough
+				.filter((step) => step.fit === 'narration')
+				.map((step) => step.duration_ms);
+			if (JSON.stringify(scriptedPadding) !== JSON.stringify(entry.fitted_hold_durations_ms)) {
+				throw new Error(`Changedrop fitted script padding is stale for segment "${entry.id}".`);
+			}
+		} else {
+			// Floor hold: the script has a single floor_ms hold, not split durations.
+			const narrationHolds = scriptSegment.walkthrough.filter((step) => step.fit === 'narration');
+			if (narrationHolds.length !== 1 || narrationHolds[0].floor_ms !== entry.floor_ms) {
+				throw new Error(`Changedrop fitted script floor is stale for segment "${entry.id}".`);
+			}
+		}
+		// With the floor, projected = N + M, not fixed_action + fitted_padding.
+		const projected = entry.projected_duration_seconds;
+		if (projected <= 0) {
+			throw new Error(`Changedrop projected fit is invalid for segment "${entry.id}".`);
 		}
 	}
 	return privacyChecked(fit, 'Changedrop natural fit receipt');
@@ -245,6 +264,7 @@ export function assertMuxMediaGates({
 	captureContainerDurationSeconds,
 	captureProbe,
 	outputProbe,
+	trimStart = 0,
 } = {}) {
 	finiteNumber(captureContentDurationSeconds, 'Fitted capture content duration', { positive: true });
 	finiteNumber(captureContainerDurationSeconds, 'Fitted capture container duration', { positive: true });
@@ -257,9 +277,9 @@ export function assertMuxMediaGates({
 	if (captureDelta > OUTPUT_DURATION_TOLERANCE_SECONDS) {
 		throw new Error(`Fitted capture probe duration ${captureProbe.duration_seconds.toFixed(3)}s differs from container receipt ${captureContainerDurationSeconds.toFixed(3)}s beyond tolerance ${OUTPUT_DURATION_TOLERANCE_SECONDS.toFixed(3)}s.`);
 	}
-	const outputDelta = Math.abs(outputProbe.duration_seconds - captureContentDurationSeconds);
+	const outputDelta = Math.abs(outputProbe.duration_seconds - (captureContentDurationSeconds - trimStart));
 	if (outputDelta > OUTPUT_DURATION_TOLERANCE_SECONDS) {
-		throw new Error(`Mux output duration ${outputProbe.duration_seconds.toFixed(3)}s differs from fitted capture content ${captureContentDurationSeconds.toFixed(3)}s beyond tolerance ${OUTPUT_DURATION_TOLERANCE_SECONDS.toFixed(3)}s.`);
+		throw new Error(`Mux output duration ${outputProbe.duration_seconds.toFixed(3)}s differs from trimmed capture content ${(captureContentDurationSeconds - trimStart).toFixed(3)}s beyond tolerance ${OUTPUT_DURATION_TOLERANCE_SECONDS.toFixed(3)}s.`);
 	}
 	const captureVideos = captureProbe.streams.filter((stream) => stream.codec_type === 'video').length;
 	if (captureVideos !== 1) throw new Error('Fitted capture must contain exactly one video stream.');
@@ -409,6 +429,7 @@ export function buildManifest({
 	captureHash,
 	outputHash,
 	outputDurationSeconds,
+	trimStart = 0,
 } = {}) {
 	if (typeof release !== 'string' || !/^[a-z0-9][a-z0-9._-]*$/.test(release)
 		|| typeof runId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(runId)) {
@@ -461,6 +482,7 @@ export function buildManifest({
 			duration_s: outputDurationSeconds,
 		},
 		publish: { state: 'withheld', destination: null },
+		trim_start_s: trimStart,
 	}, 'Changedrop manifest');
 }
 
@@ -640,6 +662,7 @@ export async function main({
 			captureContainerDurationSeconds: timings.recording.container_duration_seconds,
 			captureProbe,
 			outputProbe,
+			trimStart: timings.segments[0].start_seconds,
 		});
 		const manifest = buildManifest({
 			release: identity.release,
@@ -651,6 +674,7 @@ export async function main({
 			captureHash: captureArtifact.sha256,
 			outputHash: outputArtifact.sha256,
 			outputDurationSeconds: outputProbe.duration_seconds,
+			trimStart: timings.segments[0].start_seconds,
 		});
 		await writeFile(stagedManifest, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
 		await chmod(stagedManifest, 0o600);

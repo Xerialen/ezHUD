@@ -139,6 +139,16 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": ["action", "floor_ms", "fit"],
+          "properties": {
+            "action": {"const": "hold"},
+            "floor_ms": {"type": "integer", "minimum": 100},
+            "fit": {"const": "narration"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["action", "selector", "badge", "crop"],
           "properties": {
             "action": {"const": "highlight"},

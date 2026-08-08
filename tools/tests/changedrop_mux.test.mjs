@@ -198,6 +198,7 @@ async function prepareRun(t) {
 			.map((step) => step.duration_ms);
 		const fittedPaddingMs = fittedHoldDurations.reduce((sum, value) => sum + value, 0);
 		const fixedActionSeconds = Number((duration - fittedPaddingMs / 1000).toFixed(6));
+		const floorMs = Math.round((duration + voice.FIT_SAFETY_MARGIN_SECONDS) * 1000);
 		fitSegments.push({
 			id: segment.id,
 			kind: segment.kind,
@@ -212,6 +213,7 @@ async function prepareRun(t) {
 			fixed_action_seconds: fixedActionSeconds,
 			previous_padding_ms: previousPaddingById.get(segment.id),
 			fitted_padding_ms: fittedPaddingMs,
+			floor_ms: floorMs,
 			fitted_hold_durations_ms: fittedHoldDurations,
 			projected_duration_seconds: Number((fixedActionSeconds + fittedPaddingMs / 1000).toFixed(6)),
 		});
@@ -382,6 +384,44 @@ test('review blocker: ffmpeg trims the capture lead-in and uses the content dura
 	assert.equal(args.join(' ').includes('trim=duration=22.543'), false);
 });
 
+test('case M1b: output duration is checked against trimmed content (content − trimStart)', async () => {
+	assert.ifError(loadError);
+	const observations = await fixture('mux-media-observations.json');
+
+	// With trimStart = 2.0, the expected trimmed content is 4.1 − 2.0 = 2.1.
+	// The output probe already reports 4.1 (the fixture has no trim).
+	// A non-zero trimStart makes the untrimmed output mismatch.
+	const tooLong = structuredClone(observations.output);
+	tooLong.duration_seconds = 4.1;
+	assert.throws(() => mux.assertMuxMediaGates({
+		captureContentDurationSeconds: 4.1,
+		captureContainerDurationSeconds: 5.02,
+		captureProbe: observations.capture,
+		outputProbe: tooLong,
+		trimStart: 2.0,
+	}), /output duration.*4\.1.*trimmed capture content.*2\.1.*tolerance.*0\.500/i,
+		'output must be checked against content − trimStart, not untrimmed content');
+
+	// With the correct output = content − trimStart, it passes.
+	const correct = structuredClone(observations.output);
+	correct.duration_seconds = 2.1;
+	assert.equal(mux.assertMuxMediaGates({
+		captureContentDurationSeconds: 4.1,
+		captureContainerDurationSeconds: 5.02,
+		captureProbe: observations.capture,
+		outputProbe: correct,
+		trimStart: 2.0,
+	}), true);
+
+	// Default trimStart = 0 preserves existing behavior.
+	assert.equal(mux.assertMuxMediaGates({
+		captureContentDurationSeconds: 4.1,
+		captureContainerDurationSeconds: 5.02,
+		captureProbe: observations.capture,
+		outputProbe: observations.output,
+	}), true);
+});
+
 test('case M1: output duration must equal the fitted capture within the stated tolerance', async () => {
 	assert.ifError(loadError);
 	assert.equal(mux.OUTPUT_DURATION_TOLERANCE_SECONDS, 0.5);
@@ -502,6 +542,12 @@ test('case manifest: offline fixture mux emits a private changedrop-manifest/1 i
 	assert.equal(manifest.capture.duration_s, 4.1);
 	assert.equal(manifest.output.duration_s, 4.1);
 	assert.equal(manifest.output.basename, 'changedrop.mp4');
+	assert.equal(manifest.trim_start_s, 0.4,
+		'manifest must record trim_start_s so film coordinates = measured_start_s − trim_start_s');
+	assert.deepEqual(manifest.segments.map((s) => s.measured_start_s), [0.4, 1.12, 3.01],
+		'measured_start_s must stay in capture coordinates — trim is recorded in trim_start_s, not applied in-place');
+	assert.deepEqual(manifest.segments.map((s) => +(s.measured_start_s - manifest.trim_start_s).toFixed(3)), [0.0, 0.72, 2.61],
+		'film coordinate = measured_start_s − trim_start_s must match adelay origins');
 	assert.deepEqual(manifest.segments.map((entry) => entry.narration.sha256),
 		run.narration.segments.map((entry) => entry.audio.sha256));
 	const schema = JSON.parse(await readFile(

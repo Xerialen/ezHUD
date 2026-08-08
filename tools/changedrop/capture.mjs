@@ -112,18 +112,38 @@ function validateWalkthrough(value, at, { setup = false } = {}) {
 			exactObject(step, ['instruction', 'action', 'selector'], label);
 			validateSelector(step.selector, label);
 			break;
-		case 'hold':
-			exactObject(step, step.fit === undefined
-				? ['instruction', 'action', 'duration_ms']
-				: ['instruction', 'action', 'duration_ms', 'fit'], label);
-			if (!Number.isInteger(step.duration_ms) || step.duration_ms < 100 || step.duration_ms > MAX_HOLD_MS) {
-				throw new Error(`${label} hold duration must be between 100 and 5000 ms.`);
+		case 'hold': {
+			const hasFloorMs = step.floor_ms !== undefined;
+			const hasDurationMs = step.duration_ms !== undefined;
+			if (!hasFloorMs && !hasDurationMs) {
+				throw new Error(`${label} hold must specify duration_ms or floor_ms.`);
 			}
-			if (step.fit !== undefined && step.fit !== 'narration') {
-				throw new Error(`${label} hold fit must be narration.`);
+			if (hasFloorMs && hasDurationMs) {
+				throw new Error(`${label} hold must not specify both duration_ms and floor_ms.`);
 			}
-			if (setup && step.fit !== undefined) throw new Error(`${label} cannot fit narration during setup.`);
+			if (hasFloorMs) {
+				exactObject(step, ['instruction', 'action', 'floor_ms', 'fit'], label);
+				if (!Number.isInteger(step.floor_ms) || step.floor_ms < 100) {
+					throw new Error(`${label} hold floor must be a positive integer of at least 100 ms.`);
+				}
+				if (step.fit !== 'narration') {
+					throw new Error(`${label} floor hold must fit narration.`);
+				}
+				if (setup) throw new Error(`${label} cannot fit narration during setup.`);
+			} else {
+				exactObject(step, step.fit === undefined
+					? ['instruction', 'action', 'duration_ms']
+					: ['instruction', 'action', 'duration_ms', 'fit'], label);
+				if (!Number.isInteger(step.duration_ms) || step.duration_ms < 100 || step.duration_ms > MAX_HOLD_MS) {
+					throw new Error(`${label} hold duration must be between 100 and 5000 ms.`);
+				}
+				if (step.fit !== undefined && step.fit !== 'narration') {
+					throw new Error(`${label} hold fit must be narration.`);
+				}
+				if (setup && step.fit !== undefined) throw new Error(`${label} cannot fit narration during setup.`);
+			}
 			break;
+		}
 		case 'highlight': {
 			exactObject(step, ['instruction', 'action', 'selector', 'badge', 'crop'], label);
 			if (setup) throw new Error(`${label} highlight is not allowed during setup.`);
@@ -149,7 +169,10 @@ function validateWalkthrough(value, at, { setup = false } = {}) {
 function assertNarrationPadding(walkthrough, at) {
 	const indices = walkthrough.flatMap((step, index) => step.fit === 'narration' ? [index] : []);
 	if (indices.length === 0) throw new Error(`${at} must contain a narration-fitted hold.`);
-	if (indices.some((index, offset) => offset > 0 && index !== indices[offset - 1] + 1)) {
+	// Floor holds replace split-padding chains: a single floor hold at the end
+	// of the walkthrough is valid on its own. Only check contiguity when there
+	// are multiple narration holds (the legacy split-padding case).
+	if (indices.length > 1 && indices.some((index, offset) => offset > 0 && index !== indices[offset - 1] + 1)) {
 		throw new Error(`${at} narration-fitted holds must be contiguous.`);
 	}
 }
@@ -769,6 +792,7 @@ async function executeStep({
 	segmentId,
 	highlightIndex,
 	captureStart,
+	segmentStart,
 	activeRing,
 }) {
 	const timeout = Math.min(MAX_WAIT_MS, remainingMs(deadline));
@@ -789,7 +813,43 @@ async function executeStep({
 		await bounded(page.locator(step.selector).click({ timeout }), deadline, 'click');
 		return null;
 	case 'hold':
-		await bounded(page.waitForTimeout(step.duration_ms), deadline, 'hold');
+		if (step.floor_ms !== undefined) {
+			// Floor hold: wait until the segment has lasted at least floor_ms.
+			// Each individual wait is capped at MAX_HOLD_MS so a single authoring
+			// typo cannot hang a run (MAX_HOLD_MS is a stall guard, not an
+			// esthetic limit — capture.mjs:51).
+			//
+			// The iteration cap protects against a clock that never advances —
+			// the browser tab could be throttled, frozen, or detached. It does
+			// NOT protect against an absurd floor_ms; that guard lives in
+			// voice.mjs (MAX_FLOOR_MS, 10 000 ms), applied to floor_ms directly
+			// — no kind check — so bookends and future segment types are covered.
+			//
+			// With the floor, quiet = M + A_after where A_after is the elapsed
+			// time of actions that follow the hold.  For segments with the hold
+			// last, A_after ≈ 0 and quiet ≈ M; for anchor (whose hold is followed
+			// by a click) it is ~0.9 s.
+			// Both gates together are the only runtime check that the floor was
+			// held correctly: overrun fires if the hold was skipped (segment too
+			// short for narration), dead-air fires if the floor waited too long
+			// (segment outlasts narration by > 2 s).
+			const maxIterations = Math.ceil(step.floor_ms / MAX_HOLD_MS) + 2;
+			let iterations = 0;
+			while (iterations < maxIterations) {
+				const elapsed = performance.now() - segmentStart;
+				const remaining = step.floor_ms - elapsed;
+				if (remaining <= 0) break;
+				iterations += 1;
+				const waitMs = Math.min(remaining, MAX_HOLD_MS);
+				await bounded(page.waitForTimeout(waitMs), deadline, 'floor hold');
+			}
+			const finalElapsed = performance.now() - segmentStart;
+			if (finalElapsed < step.floor_ms) {
+				throw new Error(`Floor hold stall guard for segment "${segmentId}": elapsed ${(finalElapsed).toFixed(0)} ms < floor ${step.floor_ms} ms after ${iterations} iterations.`);
+			}
+		} else {
+			await bounded(page.waitForTimeout(step.duration_ms), deadline, 'hold');
+		}
 		return null;
 	case 'highlight': {
 		if (!segmentId) throw new Error('Highlight action requires a timed segment.');
@@ -873,7 +933,7 @@ async function runBrowserCapture({ script, dist, output }) {
 			deadline, 'page load');
 		const activeRing = { selector: null };
 		for (const step of script.setup) {
-			await executeStep({ page, annotationPage, step, deadline, output, captureStart, activeRing });
+			await executeStep({ page, annotationPage, step, deadline, output, captureStart, segmentStart: captureStart, activeRing });
 		}
 		const observations = [];
 		for (const segment of script.segments) {
@@ -891,6 +951,7 @@ async function runBrowserCapture({ script, dist, output }) {
 					segmentId: segment.id,
 					highlightIndex,
 					captureStart,
+					segmentStart: segmentStarted,
 					activeRing,
 				});
 				if (highlight) highlights.push(highlight);

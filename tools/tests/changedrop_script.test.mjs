@@ -257,8 +257,10 @@ test('supporting contract: schemas, privacy, private CLI output, input validatio
 	assert.equal(authoringSchema.properties.treatments.items.properties.source.additionalProperties, false);
 	const authoredActions = authoringSchema.$defs.step.oneOf.map((branch) => branch.properties.action.const);
 	const emittedActions = schema.$defs.step.oneOf.map((branch) => branch.properties.action.const);
-	assert.deepEqual(authoredActions, ['wait-for', 'resize', 'click', 'hold', 'highlight']);
-	assert.deepEqual(emittedActions, authoredActions);
+	// The schema now has two hold variants (duration_ms and floor_ms), so the
+	// action constants list will have a duplicate. The set of actions must match.
+	assert.deepEqual([...new Set(authoredActions)], ['wait-for', 'resize', 'click', 'hold', 'highlight']);
+	assert.deepEqual([...new Set(emittedActions)], [...new Set(authoredActions)]);
 	assert.ok(authoringSchema.$defs.step.oneOf.every((branch) => branch.additionalProperties === false));
 	assert.ok(schema.$defs.step.oneOf.every((branch) => branch.additionalProperties === false));
 	assert.equal(authoringSchema.properties.bookends.properties.intro_walkthrough.$ref, '#/$defs/fitWalkthrough');

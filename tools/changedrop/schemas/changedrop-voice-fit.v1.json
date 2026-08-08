@@ -27,7 +27,7 @@
         "required": [
           "id", "kind", "surface", "request_id", "request_hash", "status", "rerendered",
           "audio", "natural_duration_seconds", "measured_window_seconds", "fixed_action_seconds",
-          "previous_padding_ms", "fitted_padding_ms", "fitted_hold_durations_ms",
+          "previous_padding_ms", "fitted_padding_ms", "floor_ms", "fitted_hold_durations_ms",
           "projected_duration_seconds"
         ],
         "properties": {
@@ -52,9 +52,10 @@
           "fixed_action_seconds": {"type": "number", "minimum": 0},
           "previous_padding_ms": {"type": "integer", "minimum": 100},
           "fitted_padding_ms": {"type": "integer", "minimum": 100},
+          "floor_ms": {"type": "integer", "minimum": 100},
           "fitted_hold_durations_ms": {
             "type": "array",
-            "minItems": 1,
+            "minItems": 0,
             "items": {"type": "integer", "minimum": 100, "maximum": 5000}
           },
           "projected_duration_seconds": {"type": "number", "exclusiveMinimum": 0}

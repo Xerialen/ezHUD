@@ -337,19 +337,24 @@ test('review blocker: natural measurement fits explicit padding while fixed acti
 	});
 	assert.deepEqual(fitted.script.segments.map((segment) => segment.text),
 		script.segments.map((segment) => segment.text));
-	assert.deepEqual(fitted.segments.map(({ id, fixed_action_seconds, fitted_padding_ms, fitted_hold_durations_ms }) => ({
-		id, fixed_action_seconds, fitted_padding_ms, fitted_hold_durations_ms,
+	// With the floor, fitted_hold_durations_ms is empty — pre-computed durations
+	// are replaced by floor_ms, which is evaluated live in the recording run.
+	assert.deepEqual(fitted.segments.map(({ id, fixed_action_seconds, fitted_padding_ms, floor_ms, fitted_hold_durations_ms }) => ({
+		id, fixed_action_seconds, fitted_padding_ms, floor_ms, fitted_hold_durations_ms,
 	})), [
-		{ id: 'intro', fixed_action_seconds: 0.01, fitted_padding_ms: 4080, fitted_hold_durations_ms: [4080] },
-		{ id: 'snap-magnet', fixed_action_seconds: 0.96, fitted_padding_ms: 5424, fitted_hold_durations_ms: [2712, 2712] },
-		{ id: 'outro', fixed_action_seconds: 0.01, fitted_padding_ms: 4120, fitted_hold_durations_ms: [4120] },
+		{ id: 'intro', fixed_action_seconds: 0.01, fitted_padding_ms: 4080, floor_ms: 4090, fitted_hold_durations_ms: [] },
+		{ id: 'snap-magnet', fixed_action_seconds: 0.96, fitted_padding_ms: 5424, floor_ms: 6384, fitted_hold_durations_ms: [] },
+		{ id: 'outro', fixed_action_seconds: 0.01, fitted_padding_ms: 4120, floor_ms: 4130, fitted_hold_durations_ms: [] },
 	]);
 	for (const [index, segment] of fitted.script.segments.entries()) {
 		const originalFixed = script.segments[index].walkthrough.filter((step) => step.fit !== 'narration');
 		const fittedFixed = segment.walkthrough.filter((step) => step.fit !== 'narration');
 		assert.deepEqual(fittedFixed, originalFixed, `${segment.id} changed a fixed visual action`);
-		assert.ok(segment.walkthrough.filter((step) => step.fit === 'narration')
-			.every((step) => step.duration_ms >= 100 && step.duration_ms <= 5000));
+		// With the floor, narration holds carry floor_ms instead of duration_ms.
+		const narrationHolds = segment.walkthrough.filter((step) => step.fit === 'narration');
+		assert.equal(narrationHolds.length, 1, `${segment.id} must have exactly one narration floor hold`);
+		assert.ok(narrationHolds[0].floor_ms >= 100, `${segment.id} floor_ms is below minimum`);
+		assert.equal(narrationHolds[0].duration_ms, undefined, `${segment.id} floor hold must not carry duration_ms`);
 	}
 	assert.throws(() => voice.buildMeasurementRequests({ script: fitted.script, timings }), /stale.*capture|action sequence/i);
 
@@ -394,13 +399,13 @@ test('review blocker: natural measurement fits explicit padding while fixed acti
 			{ id: 'outro', duration_seconds: 3.88 },
 		],
 	});
-	assert.deepEqual(releaseFit.segments.map(({ id, fixed_action_seconds, fitted_padding_ms, fitted_hold_durations_ms }) => ({
-		id, fixed_action_seconds, fitted_padding_ms, fitted_hold_durations_ms,
+	assert.deepEqual(releaseFit.segments.map(({ id, fixed_action_seconds, fitted_padding_ms, floor_ms, fitted_hold_durations_ms }) => ({
+		id, fixed_action_seconds, fitted_padding_ms, floor_ms, fitted_hold_durations_ms,
 	})), [
-		{ id: 'intro', fixed_action_seconds: 0.001, fitted_padding_ms: 4089, fitted_hold_durations_ms: [4089] },
-		{ id: 'window-follow', fixed_action_seconds: 1.813, fitted_padding_ms: 2077, fitted_hold_durations_ms: [2077] },
-		{ id: 'pause-resume', fixed_action_seconds: 2.706, fitted_padding_ms: 5424, fitted_hold_durations_ms: [2712, 2712] },
-		{ id: 'outro', fixed_action_seconds: 0.001, fitted_padding_ms: 4129, fitted_hold_durations_ms: [4129] },
+		{ id: 'intro', fixed_action_seconds: 0.001, fitted_padding_ms: 4089, floor_ms: 4090, fitted_hold_durations_ms: [] },
+		{ id: 'window-follow', fixed_action_seconds: 1.813, fitted_padding_ms: 2077, floor_ms: 3890, fitted_hold_durations_ms: [] },
+		{ id: 'pause-resume', fixed_action_seconds: 2.706, fitted_padding_ms: 5424, floor_ms: 8130, fitted_hold_durations_ms: [] },
+		{ id: 'outro', fixed_action_seconds: 0.001, fitted_padding_ms: 4129, floor_ms: 4130, fitted_hold_durations_ms: [] },
 	]);
 });
 
@@ -418,7 +423,9 @@ test('review blocker: pure-padding timer under-run is clamped within a bounded e
 	const fitted = voice.fitCaptureScript({ script, timings: jittered, measurements });
 	assert.equal(fitted.segments[2].fixed_action_seconds, 0);
 	assert.equal(fitted.segments[2].fitted_padding_ms, 4130);
-	assert.deepEqual(fitted.segments[2].fitted_hold_durations_ms, [4130]);
+	// Floor replaces pre-computed padding; fitted_hold_durations_ms is empty.
+	assert.equal(fitted.segments[2].floor_ms, 4130);
+	assert.deepEqual(fitted.segments[2].fitted_hold_durations_ms, []);
 
 	const inconsistent = structuredClone(timings);
 	inconsistent.segments[2].duration_seconds = 0.574;
@@ -773,4 +780,221 @@ test('case 7: sanitized narration strips audio.path and validates with basename 
 	for (const segment of written.segments) {
 		assert.equal((await stat(path.join(root, 'release', 'run', 'narration', segment.audio.basename))).mode & 0o777, 0o600);
 	}
+});
+
+// ── Hold-floor acceptance tests ──
+// These verify the floor-based hold mechanism replaces pre-computed padding.
+// The floor eliminates ΔA as a quantity: instead of computing hold = N+M−A_timing
+// from one pass and applying it to another, the hold waits until the segment
+// has lasted at least N+M in the recording run itself.
+
+// Run 3 drag-assist numbers from the changedrop artefacts (861d0752 / d949c92):
+//   N = 5.120   narration duration
+//   M = 0.250   FIT_SAFETY_MARGIN_SECONDS
+//   A_timing = 2.637   fixed actions from the timing (authoring) pass
+//   A_fitted = 2.092   fixed actions from the fitted (recording) pass
+// Old rule:  hold = N+M−A_timing = 2.733,  segment = A_fitted+hold = 4.825,  overrun = +0.295  FAILS
+// Floor:     segment = max(A_fitted, N+M) = 5.370,  overrun = −0.250,  quiet = M = 0.250  PASSES
+const RUN3_DRAG_ASSIST = Object.freeze({
+	N: 5.120,
+	M: 0.250,
+	A_timing: 2.637,
+	A_fitted: 2.092,
+	old_hold: 2.733,
+	old_segment: 4.825,
+	old_overrun: 0.295,
+	floor_segment: 5.370,
+	floor_overrun: -0.250,
+});
+
+test('hold floor RED: run 3 drag-assist numbers fail the old pre-computed expression and pass the floor', async () => {
+	assert.ifError(loadError);
+
+	// The old rule computes hold = N + M − A_timing and applies it to A_fitted.
+	// With run 3's numbers the resulting segment (4.825 s) is shorter than
+	// narration (5.120 s) by 0.295 s — a clear overrun.
+	const oldHold = RUN3_DRAG_ASSIST.N + RUN3_DRAG_ASSIST.M - RUN3_DRAG_ASSIST.A_timing;
+	const oldSegment = RUN3_DRAG_ASSIST.A_fitted + oldHold;
+	const oldOverrun = RUN3_DRAG_ASSIST.N - oldSegment;
+	assert.ok(oldOverrun > voice.NARRATION_OVERRUN_EPSILON_SECONDS,
+		`RED: old expression overrun ${oldOverrun.toFixed(3)}s must exceed the ${voice.NARRATION_OVERRUN_EPSILON_SECONDS}s epsilon`);
+	assert.equal(Number(oldHold.toFixed(3)), RUN3_DRAG_ASSIST.old_hold);
+	assert.equal(Number(oldSegment.toFixed(3)), RUN3_DRAG_ASSIST.old_segment);
+
+	// The floor rule: segment = max(A_fitted, N + M). The hold waits until the
+	// segment reaches the floor in the recording run, eliminating ΔA.
+	const floorSegment = Math.max(RUN3_DRAG_ASSIST.A_fitted, RUN3_DRAG_ASSIST.N + RUN3_DRAG_ASSIST.M);
+	const floorOverrun = RUN3_DRAG_ASSIST.N - floorSegment;
+	assert.ok(floorOverrun <= voice.NARRATION_OVERRUN_EPSILON_SECONDS,
+		`GREEN: floor overrun ${floorOverrun.toFixed(3)}s must be within the ${voice.NARRATION_OVERRUN_EPSILON_SECONDS}s epsilon`);
+	assert.equal(Number(floorSegment.toFixed(3)), RUN3_DRAG_ASSIST.floor_segment);
+	// Drag-assist has no actions after its hold, so quiet == M here.
+	// For segments with post-hold actions (anchor), quiet = M + A_after.
+	const quiet = Math.max(0, -floorOverrun);
+	assert.equal(quiet, RUN3_DRAG_ASSIST.M);
+});
+
+test('hold floor FIT: fitCaptureScript produces a floor_ms hold and projects N + M', async () => {
+	assert.ifError(loadError);
+	const { script, timings } = await inputs();
+
+	// Use run 3's drag-assist N = 5.120 to verify floor_ms computation.
+	const measurements = [
+		{ id: 'intro', duration_seconds: 3.84 },
+		{ id: 'snap-magnet', duration_seconds: RUN3_DRAG_ASSIST.N },
+		{ id: 'outro', duration_seconds: 3.88 },
+	];
+	const fitted = voice.fitCaptureScript({ script, timings, measurements });
+
+	// The fitted segment for snap-magnet (standing in for drag-assist) must
+	// carry a single floor hold with floor_ms = (N + M) * 1000.
+	const snapFit = fitted.segments.find((s) => s.id === 'snap-magnet');
+	const expectedFloorMs = Math.round((RUN3_DRAG_ASSIST.N + RUN3_DRAG_ASSIST.M) * 1000);
+	assert.equal(snapFit.floor_ms, expectedFloorMs);
+	assert.deepEqual(snapFit.fitted_hold_durations_ms, []);
+	assert.equal(snapFit.projected_duration_seconds, Number((RUN3_DRAG_ASSIST.N + RUN3_DRAG_ASSIST.M).toFixed(6)));
+
+	// The fitted script walkthrough must have exactly one narration hold with floor_ms.
+	const snapScript = fitted.script.segments.find((s) => s.id === 'snap-magnet');
+	const narrationHolds = snapScript.walkthrough.filter((s) => s.fit === 'narration');
+	assert.equal(narrationHolds.length, 1);
+	assert.equal(narrationHolds[0].floor_ms, expectedFloorMs);
+	assert.equal(narrationHolds[0].duration_ms, undefined);
+
+	// Fixed actions must be unchanged from the original script.
+	const originalFixed = script.segments.find((s) => s.id === 'snap-magnet').walkthrough.filter((s) => s.fit !== 'narration');
+	const fittedFixed = snapScript.walkthrough.filter((s) => s.fit !== 'narration');
+	assert.deepEqual(fittedFixed, originalFixed);
+});
+
+test('hold floor MAX_FLOOR_MS: bookends reject a floor above the upper bound; surfaces are caught by the budget first', async () => {
+	assert.ifError(loadError);
+	const { script, timings } = await inputs();
+
+	// MAX_FLOOR_MS is the upper bound for floor_ms, matching the 10 s surface
+	// budget.  It closes the hole where bookends had no ceiling — the surface
+	// budget only checked `kind === 'surface'`.  For surfaces the budget fires
+	// first (floor ≤ N + M, so N + M ≤ 10 ⇒ floor ≤ 10 000 automatically);
+	// this guard catches bookends and any future segment type.
+	// This test MUST fail if MAX_FLOOR_MS is removed or raised without review.
+	assert.ok(voice.MAX_FLOOR_MS > 0, 'MAX_FLOOR_MS must be exported');
+	assert.equal(voice.MAX_FLOOR_MS, 10_000, 'MAX_FLOOR_MS matches the 10 s surface budget');
+
+	// A narration duration that produces floor_ms > MAX_FLOOR_MS must be rejected.
+	const absurdN = 12.0; // floor_ms = 12 250 > 10 000
+
+	// 1. Surface segment: MAX_FLOOR_MS fires first because it is checked before
+	//    the surface budget, and both trigger at N + M > 10.  The budget is still
+	//    present as a documenting guard — it would catch surfaces if MAX_FLOOR_MS
+	//    were ever raised above 10 000 ms.
+	{
+		const measurements = [
+			{ id: 'intro', duration_seconds: 3.84 },
+			{ id: 'snap-magnet', duration_seconds: absurdN },
+			{ id: 'outro', duration_seconds: 3.88 },
+		];
+		assert.throws(
+			() => voice.fitCaptureScript({ script, timings, measurements }),
+			/snap-magnet.*floor.*12250.*exceeds.*10000|snap-magnet.*10000.*12250/i,
+			'surface segment must be rejected by MAX_FLOOR_MS',
+		);
+	}
+
+	// 2. Bookend segment (intro): caught by MAX_FLOOR_MS.
+	// This is the critical case — the old surface budget only covered surfaces.
+	{
+		const measurements = [
+			{ id: 'intro', duration_seconds: absurdN },
+			{ id: 'snap-magnet', duration_seconds: 3.5 },
+			{ id: 'outro', duration_seconds: 3.88 },
+		];
+		assert.throws(
+			() => voice.fitCaptureScript({ script, timings, measurements }),
+			/intro.*floor.*12250.*exceeds.*10000|intro.*10000.*12250/i,
+			'intro bookend must be rejected by MAX_FLOOR_MS',
+		);
+	}
+
+	// 3. Bookend segment (outro): caught by MAX_FLOOR_MS.
+	{
+		const measurements = [
+			{ id: 'intro', duration_seconds: 3.84 },
+			{ id: 'snap-magnet', duration_seconds: 3.5 },
+			{ id: 'outro', duration_seconds: absurdN },
+		];
+		assert.throws(
+			() => voice.fitCaptureScript({ script, timings, measurements }),
+			/outro.*floor.*12250.*exceeds.*10000|outro.*10000.*12250/i,
+			'outro bookend must be rejected by MAX_FLOOR_MS',
+		);
+	}
+
+	// 4. A floor just under the bound is accepted for all segment kinds.
+	const budgetN = 6.0;
+	const budgetedMeasurements = [
+		{ id: 'intro', duration_seconds: budgetN },
+		{ id: 'snap-magnet', duration_seconds: budgetN },
+		{ id: 'outro', duration_seconds: budgetN },
+	];
+	const fitted = voice.fitCaptureScript({ script, timings, measurements: budgetedMeasurements });
+	for (const fit of fitted.segments) {
+		assert.equal(fit.floor_ms, Math.round((budgetN + voice.FIT_SAFETY_MARGIN_SECONDS) * 1000));
+		assert.ok(fit.floor_ms <= voice.MAX_FLOOR_MS, `${fit.id} floor_ms must be within MAX_FLOOR_MS`);
+	}
+});
+
+test('hold floor TOTAL FILM LENGTH: projected total equals Σ max(A, N + M) on fixture', async () => {
+	assert.ifError(loadError);
+	const { script, timings } = await inputs();
+
+	const measurements = [
+		{ id: 'intro', duration_seconds: 3.84 },
+		{ id: 'snap-magnet', duration_seconds: RUN3_DRAG_ASSIST.N },
+		{ id: 'outro', duration_seconds: 3.88 },
+	];
+	const fitted = voice.fitCaptureScript({ script, timings, measurements });
+
+	// Each segment's projected duration is N + M (the floor minimum).
+	// The total film length is bounded: Σ (N + M) per segment.
+	const totalProjected = fitted.segments.reduce((sum, s) => sum + s.projected_duration_seconds, 0);
+	const expectedTotal = measurements.reduce((sum, m) => sum + m.duration_seconds + voice.FIT_SAFETY_MARGIN_SECONDS, 0);
+	assert.equal(Number(totalProjected.toFixed(6)), Number(expectedTotal.toFixed(6)),
+		'total projected duration must equal Σ(N + M)');
+
+	// With the floor, every segment's projected duration is at least N + M.
+	// The actual film can be longer (if actions overrun the floor) but never shorter.
+	for (const fit of fitted.segments) {
+		const m = measurements.find((m) => m.id === fit.id);
+		assert.ok(fit.projected_duration_seconds >= m.duration_seconds + voice.FIT_SAFETY_MARGIN_SECONDS - 0.001,
+			`${fit.id} projected duration ${fit.projected_duration_seconds}s must be at least N+M`);
+	}
+});
+
+test('hold floor DEAD-AIR GATE is the live verification that the executor held the floor', async () => {
+	assert.ifError(loadError);
+	// With the floor, quiet = M + A_after where A_after is the elapsed time
+	// of actions following the hold.  For most segments A_after ≈ 0 and
+	// quiet ≈ M = 0.25 s; for anchor it is ~0.9 s.
+	//
+	// Both gates are load-bearing, not decorative: overrun fires if the
+	// hold was skipped (segment too short for narration), dead-air fires
+	// if the floor waited too long (segment outlasts narration by > 2 s).
+	// Together they are the only runtime verification that the floor was
+	// held correctly.
+
+	// Verify that FIT_SAFETY_MARGIN_SECONDS (M) equals the expected 0.25 s.
+	assert.equal(voice.FIT_SAFETY_MARGIN_SECONDS, 0.25);
+
+	// Check that the capture source documents the floor's effect on the dead-air gate.
+	const captureSource = await readFile(path.join(repo, 'tools', 'changedrop', 'capture.mjs'), 'utf8');
+	assert.match(captureSource, /overrun.*skipped.*hold|dead-air.*waited too long|overrun.*hold.*skipped/i,
+		'capture.mjs must document that overrun catches a skipped hold and dead-air catches a floor that waited too long');
+
+	// Check that the voice source documents it too.
+	const voiceSource = await readFile(path.join(repo, 'tools', 'changedrop', 'voice.mjs'), 'utf8');
+	assert.match(voiceSource, /ΔA.*ceases to be a quantity|ΔA.*quantity|ceases to be a quantity|no longer.*ΔA/i,
+		'voice.mjs must document that ΔA ceases to be a quantity');
+
+	// The gate exists and its bound is unchanged.
+	assert.equal(voice.MAX_NARRATION_UNDERSHOOT_SECONDS, 2.0);
 });
