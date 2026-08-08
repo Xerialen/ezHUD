@@ -14,6 +14,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { normaliseElementName } from '../../hud_web_ui/core/geometry.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
@@ -25,17 +26,13 @@ const SELECTOR_PATTERN = /^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\[data-changedrop="[a
 
 const DATA_CHANGEDROP_VALUE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-// Normalise an element name to a kebab-case data-changedrop value.
-// Collapses runs of non-alphanumeric characters to a single hyphen and
-// trims leading/trailing hyphens. Must produce a value that matches
-// [a-z0-9]+(?:-[a-z0-9]+)*. A name whose normalised form is still
-// invalid (only possible when every character is non-alphanumeric) is
-// caught with a throw so the invariant is enforced at test time.
-function normaliseElementName(name) {
-	const fragment = name.toLowerCase()
-		.replace(/[^a-z0-9]+/g, '-')
-		.replace(/^-+|-+$/g, '');
-	if (!DATA_CHANGEDROP_VALUE.test(fragment)) {
+// Wrapper: the shared module returns { fragment, valid }; the test
+// constructs the full data-changedrop value from the fragment and
+// enforces validity — the shared normaliser reports invalidity but
+// never throws (the editor warns instead).
+function normalisedValue(name) {
+	const { fragment, valid } = normaliseElementName(name);
+	if (!valid) {
 		throw new Error(
 			`data-changedrop value "hud-element-${fragment}" (from "${name}") does not match [a-z0-9]+(?:-[a-z0-9]+)*`,
 		);
@@ -70,8 +67,8 @@ await test('normaliseElementName produces valid data-changedrop values', async (
 	];
 
 	for (const { name, expected } of testCases) {
-		const value = normaliseElementName(name);
-		assert.equal(value, expected, `normaliseElementName("${name}")`);
+		const value = normalisedValue(name);
+		assert.equal(value, expected, `normalisedValue("${name}")`);
 
 		// Must be valid as a full [data-changedrop="..."] selector.
 		const fullSelector = `[data-changedrop="${value}"]`;
@@ -79,6 +76,14 @@ await test('normaliseElementName produces valid data-changedrop values', async (
 			SELECTOR_PATTERN.test(fullSelector),
 			`"[data-changedrop=${value}]" must match SELECTOR_PATTERN`,
 		);
+	}
+
+	// Verify the shared module returns { fragment, valid } without throwing.
+	// The test wrapper is what throws; the module itself reports invalidity.
+	{
+		const direct = normaliseElementName('score__bar');
+		assert.equal(direct.fragment, 'score-bar');
+		assert.equal(direct.valid, true);
 	}
 
 	// Names with consecutive non-alphanumeric chars collapse to a single
@@ -91,8 +96,8 @@ await test('normaliseElementName produces valid data-changedrop values', async (
 	];
 
 	for (const { name, expected } of collapseCases) {
-		const value = normaliseElementName(name);
-		assert.equal(value, expected, `normaliseElementName("${name}")`);
+		const value = normalisedValue(name);
+		assert.equal(value, expected, `normalisedValue("${name}")`);
 		const fullSelector = `[data-changedrop="${value}"]`;
 		assert.ok(
 			SELECTOR_PATTERN.test(fullSelector),
@@ -107,12 +112,17 @@ await test('normaliseElementName produces valid data-changedrop values', async (
 		'score--bar (double hyphen) must NOT pass DATA_CHANGEDROP_VALUE',
 	);
 
-	// A name consisting entirely of non-alphanumeric characters (e.g. ___)
-	// normalises to an empty string, which fails CHANGEDROP_VALUE.
+	// The shared module returns { fragment: "", valid: false } — it never
+	// throws. The test wrapper translates that into a throw.
+	{
+		const direct = normaliseElementName('___');
+		assert.equal(direct.fragment, '');
+		assert.equal(direct.valid, false);
+	}
 	assert.throws(
-		() => normaliseElementName('___'),
+		() => normalisedValue('___'),
 		/data-changedrop.*does not match/,
-		'normaliseElementName must throw on a name whose normalised form is empty',
+		'normalisedValue must throw on a name whose normalised form is empty',
 	);
 });
 

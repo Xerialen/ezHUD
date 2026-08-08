@@ -9,7 +9,8 @@ import {
 	needsRecalculate, parseColor, resizeTo, resizedRect,
 } from '../core/model.js';
 import {
-	consoleToFrame, displayDeltaToConsole, elementAt, quantize, scaleFactors,
+	consoleToFrame, displayDeltaToConsole, elementAt, normaliseElementName,
+	quantize, scaleFactors,
 } from '../core/geometry.js';
 import { magnetizeRect, snapToGrid } from '../core/snapping.js';
 import * as syslog from '../core/log.js';
@@ -509,18 +510,15 @@ function renderTree() {
 		// pattern is skipped with a console.warn rather than throwing — the
 		// invariant is enforced at test time; an editor must never break on
 		// an unanticipated engine name.
-		const CHANGEDROP_VALUE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-		const normalised = item.name.toLowerCase()
-			.replace(/[^a-z0-9]+/g, '-')
-			.replace(/^-+|-+$/g, '');
-		if (!CHANGEDROP_VALUE.test(normalised)) {
+		const { fragment, valid } = normaliseElementName(item.name);
+		if (!valid) {
 			console.warn(
-				`Element name "${item.name}" normalises to "${normalised}" ` +
+				`Element name "${item.name}" normalises to "${fragment}" ` +
 				`which does not match [a-z0-9]+(?:-[a-z0-9]+)* — ` +
 				`skipping data-changedrop`,
 			);
 		} else {
-			row.dataset.changedrop = `hud-element-${normalised}`;
+			row.dataset.changedrop = `hud-element-${fragment}`;
 		}
 
 		const meta = document.createElement('span');
