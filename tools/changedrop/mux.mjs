@@ -222,7 +222,7 @@ async function verifyDeliveredNarration({ directory, script, timings, narration,
 		}
 		files.push({ id: entry.id, file, sha256: artifact.sha256, duration_seconds: wav.duration_seconds });
 	}
-	assertNarrationFitsCapture({ script, timings, narration });
+	assertNarrationFitsCapture({ script, timings, narration, trimOffset: timings.segments[0].start_seconds });
 	return files;
 }
 
