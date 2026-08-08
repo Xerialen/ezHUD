@@ -247,6 +247,28 @@ const readDrawn = () => page.evaluate(async (spec) => {
 		}));
 }, BRIDGE);
 
+// #87 covers four empty/non-drawing paths. Native ezQuake still publishes
+// unrelated zero-area layouts (for example frags with hud_frags_notintp 1 in
+// teamplay), so this contract deliberately rejects non-positive rects only for
+// tracker, ownfrags, tracking and net rather than claiming a global invariant.
+const readRectContract = () => page.evaluate(async (spec) => {
+	const { currentBridge } = await import(spec);
+	const state = await currentBridge().state();
+	const covered = new Set(['tracker', 'ownfrags', 'tracking', 'net']);
+	const byName = (name) => state.elements.find((element) => element.name === name);
+	return {
+		screen: state.screen,
+		tracker: byName('tracker')?.rect ?? null,
+		ownfrags: byName('ownfrags')?.rect ?? null,
+		tracking: byName('tracking')?.rect ?? null,
+		net: byName('net')?.rect ?? null,
+		nonPositive: state.elements
+			.filter((element) => covered.has(element.name)
+				&& element.rect && (element.rect.w <= 0 || element.rect.h <= 0))
+			.map((element) => ({ name: element.name, rect: element.rect })),
+	};
+}, BRIDGE);
+
 // A compact projection of the engine-owned layout at a demo point. These
 // elements distinguish the three reviewed frames without depending on a page
 // clock or on tracker, whose false zero-area rect is independently tracked by
@@ -1800,6 +1822,148 @@ try {
 			.map(([name, value]) => `${name}=${value}`).join(', ');
 		pass(nextCase++, `${row.label} — ${effect}`);
 	}
+
+	// ---- #87: native-sized empty layouts stay positive ----------------------
+	// Native ezQuake prepares tracking's real text footprint before deciding
+	// whether there is tracking text to draw, and prepares net's fixed footprint
+	// before deciding whether live network samples exist. This lane regression-
+	// covers tracking off-CAM and pins net's normal positive footprint. It cannot
+	// enter capturing=2 in the staged WebAssembly build, so the netstats capture
+	// branch is covered by source parity only, as recorded in fork PR #1.
+	const trackingLayoutBefore = (await readState('tracking')).element;
+	const netLayoutBefore = (await readState('net')).element;
+	assert(trackingLayoutBefore && netLayoutBefore,
+		`tracking/net are absent from engine state: ${JSON.stringify({ trackingLayoutBefore, netLayoutBefore })}`);
+	const nativeLayoutOriginals = {
+		trackingShow: await readCvar('hud_tracking_show'),
+		trackingScale: await readCvar('hud_tracking_scale'),
+		netShow: await readCvar('hud_net_show'),
+	};
+	try {
+		await page.evaluate(() => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) throw new Error('the live FTE command channel is unavailable');
+			channel.cbufadd('autotrack off\ntrack off\n'
+				+ 'set hud_tracking_show 1\nset hud_tracking_place screen\n'
+				+ 'set hud_tracking_align_x left\nset hud_tracking_align_y top\n'
+				+ 'set hud_tracking_pos_x 24\nset hud_tracking_pos_y 24\n'
+				+ 'set hud_tracking_scale 1\n'
+				+ 'set hud_net_show 1\nset hud_net_place screen\n'
+				+ 'set hud_net_align_x left\nset hud_net_align_y top\n'
+				+ 'set hud_net_pos_x 24\nset hud_net_pos_y 48\nhud_recalculate\n');
+		});
+		await eventually(async () => await readCvar('hud_tracking_scale') === '1' ? true : null,
+			'the controlled tracking scale to apply', UI_WAIT);
+		await eventually(async () => {
+			const nativeEmptyLayouts = await readRectContract();
+			const missing = ['tracking', 'net']
+				.filter((name) => !nativeEmptyLayouts[name]
+					|| nativeEmptyLayouts[name].w <= 0 || nativeEmptyLayouts[name].h <= 0)
+				.map((name) => ({ name, rect: nativeEmptyLayouts[name] }));
+			assert(missing.length === 0,
+				`native-sized empty layouts must stay positive: ${JSON.stringify({ missing, nativeEmptyLayouts })}`);
+			assert(nativeEmptyLayouts.tracking.h === 8,
+				`tracking must use its real 8px scaled height, got ${JSON.stringify(nativeEmptyLayouts.tracking)}`);
+			assert(nativeEmptyLayouts.net.w === 128 && nativeEmptyLayouts.net.h === 132,
+				`net must use its real fixed footprint, got ${JSON.stringify(nativeEmptyLayouts.net)}`);
+			assert(nativeEmptyLayouts.nonPositive.length === 0,
+				`#87 elements reported non-positive rects: ${JSON.stringify(nativeEmptyLayouts)}`);
+			return nativeEmptyLayouts;
+		}, 'the #87 tracking/net layouts to publish their next-frame contract', UI_WAIT);
+		pass(nextCase++, 'off-CAM tracking retains its native positive footprint; net capture path is source-parity only');
+	} finally {
+		await page.evaluate(({ tracking, net, originals }) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) return;
+			channel.cbufadd(`set hud_tracking_show ${originals.trackingShow}\n`
+				+ `set hud_tracking_place ${tracking.place}\nset hud_tracking_align_x ${tracking.align_x}\n`
+				+ `set hud_tracking_align_y ${tracking.align_y}\nset hud_tracking_pos_x ${tracking.pos_x}\n`
+				+ `set hud_tracking_pos_y ${tracking.pos_y}\nset hud_tracking_scale ${originals.trackingScale}\n`
+				+ `set hud_net_show ${originals.netShow}\nset hud_net_place ${net.place}\n`
+				+ `set hud_net_align_x ${net.align_x}\nset hud_net_align_y ${net.align_y}\n`
+				+ `set hud_net_pos_x ${net.pos_x}\nset hud_net_pos_y ${net.pos_y}\n`
+				+ 'autotrack\nhud_recalculate\n');
+		}, { tracking: trackingLayoutBefore, net: netLayoutBefore, originals: nativeLayoutOriginals })
+			.catch(() => {});
+	}
+
+	// ---- #87: a truly empty draw path is null, never a zero-area rect -------
+	// Preserve a genuinely laid-out tracker, force the exact disabled branch
+	// that used to call HUD_PrepareDraw(0, 0), and give its right alignment the
+	// owner's positive offset. The old engine then reports x=screen+294,w=h=0.
+	// The fixed engine must report null, as ownfrags already should when empty,
+	// without suppressing the active tracker when the original layout returns.
+	// A child anchored to the tracker must follow the same contract: once its
+	// parent has no layout, it cannot invent placement from the parent's stale rect.
+	const trackerBeforeEmpty = await eventually(async () => {
+		const state = await readState('tracker');
+		return state.element?.rect?.w > 0 && state.element.rect.h > 0 ? state : null;
+	}, 'an active tracker rect before the empty-path contract', UI_WAIT);
+	const trackerLayout = trackerBeforeEmpty.element;
+	const anchoredChildName = 'gun2';
+	const anchoredChildLayout = (await readDrawn())
+		.find((element) => element.name === anchoredChildName);
+	assert(anchoredChildLayout?.name === anchoredChildName && !anchoredChildLayout.parent,
+		`${anchoredChildName} is not independently drawn before the inactive-parent case: `
+		+ JSON.stringify(await readDrawn()));
+	try {
+		await page.evaluate(({ childName }) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) throw new Error('the live FTE command channel is unavailable');
+			channel.cbufadd(`set hud_${childName}_place @tracker\nhud_recalculate\n`);
+		}, { childName: anchoredChildLayout.name });
+		await eventually(async () => {
+			const state = (await readState(anchoredChildLayout.name)).element;
+			return state?.parent === 'tracker' && state.rect ? state : null;
+		}, `${anchoredChildLayout.name} to lay out from its active tracker parent`, UI_WAIT);
+		await page.evaluate(() => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) throw new Error('the live FTE command channel is unavailable');
+			channel.cbufadd('r_tracker 0\nset hud_tracker_place screen\n'
+				+ 'set hud_tracker_align_x right\nset hud_tracker_align_y top\n'
+				+ 'set hud_tracker_pos_x 294\nset hud_tracker_pos_y 161\nhud_recalculate\n');
+		});
+		await eventually(async () => await readCvar('r_tracker') === '0' ? true : null,
+			'the tracker content path to become inactive', UI_WAIT);
+		await eventually(async () => {
+			const inactive = await readRectContract();
+			const anchoredInactive = (await readState(anchoredChildLayout.name)).element;
+			assert(anchoredInactive?.parent === 'tracker' && anchoredInactive.rect === null,
+				`${anchoredChildLayout.name} anchored to inactive tracker must report rect:null, got `
+				+ JSON.stringify(anchoredInactive));
+			assert(inactive.tracker === null,
+				`inactive tracker must report rect:null, got ${JSON.stringify(inactive.tracker)}`);
+			assert(inactive.ownfrags === null,
+				`empty ownfrags must report rect:null, got ${JSON.stringify(inactive.ownfrags)}`);
+			assert(inactive.nonPositive.length === 0,
+				`#87 elements reported non-positive rects: ${JSON.stringify(inactive)}`);
+			return inactive;
+		}, 'the inactive tracker and named child to publish their next-frame contract', UI_WAIT);
+	} finally {
+		await page.evaluate(({ tracker, child }) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) return;
+			channel.cbufadd(`r_tracker 1\nset hud_tracker_place ${tracker.place}\n`
+				+ `set hud_tracker_align_x ${tracker.align_x}\nset hud_tracker_align_y ${tracker.align_y}\n`
+				+ `set hud_tracker_pos_x ${tracker.pos_x}\nset hud_tracker_pos_y ${tracker.pos_y}\n`
+				+ `set hud_${child.name}_place ${child.place}\nhud_recalculate\n`);
+		}, { tracker: trackerLayout, child: anchoredChildLayout }).catch(() => {});
+	}
+	const trackerAfterEmpty = await eventually(async () => {
+		const state = await readState('tracker');
+		return state.element?.rect ? state.element.rect : null;
+	}, 'the active tracker rect after the empty-path contract', UI_WAIT);
+	assert(['x', 'y', 'w', 'h'].every((field) =>
+		trackerAfterEmpty[field] === trackerLayout.rect[field]),
+		`the empty-path fix changed an active tracker rect: ${JSON.stringify({
+			before: trackerLayout.rect, after: trackerAfterEmpty,
+		})}`);
+	await eventually(async () => {
+		const state = (await readState(anchoredChildLayout.name)).element;
+		return state?.place === anchoredChildLayout.place && state.rect ? state : null;
+	}, `${anchoredChildLayout.name} to return to its original active layout`, UI_WAIT);
+	pass(nextCase++, 'inactive beyond-screen tracker and empty ownfrags are null; all #87 rects are positive; active tracker unchanged');
+	pass(nextCase++, `${anchoredChildLayout.name} anchored to an inactive tracker is also null; restoring the parent restores both layouts`);
 } catch (err) {
 	failure = err;
 	const file = await shot('tier4-fte-failure');
