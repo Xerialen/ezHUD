@@ -141,7 +141,7 @@
       "surface": "demo-moments",
       "source": {
         "before": "Pause existed, but you had to wait for a useful frame to appear before there was anything to line the HUD up against.",
-        "after": "Named preset moments seek the demo to a deterministic point \u2014 a frame with full HUD activity, a scoreboard moment, a quiet moment.",
+        "after": "Named preset moments open a match demo at a deterministic point \u2014 a frame with full HUD activity, a scoreboard moment, a quiet moment.",
         "value": "The frame you need is one click away instead of a wait, and it is the same frame every time."
       },
       "text": "Jump straight to a frame worth aiming at.",

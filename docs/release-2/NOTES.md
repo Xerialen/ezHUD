@@ -24,7 +24,7 @@ Evidence: img/drag-assist-focused-annotated.png
 
 ### Demo moments worth aiming at
 Before: Pause existed, but you had to wait for a useful frame to appear before there was anything to line the HUD up against.
-After: Named preset moments seek the demo to a deterministic point — a frame with full HUD activity, a scoreboard moment, a quiet moment.
+After: Named preset moments open a match demo at a deterministic point — a frame with full HUD activity, a scoreboard moment, a quiet moment.
 Value: The frame you need is one click away instead of a wait, and it is the same frame every time.
 Evidence: img/demo-moments-focused-annotated.png
 
@@ -58,7 +58,7 @@ Evidence: img/demo-moments-focused-annotated.png
     },
     {
       "title": "Demo moments worth aiming at",
-      "description": "Named preset moments seek the demo to a deterministic point. Marker 1 identifies the moment selector.",
+      "description": "Named preset moments open a match demo at a deterministic point. Marker 1 identifies the moment selector.",
       "image": {
         "url": "attachment://demo-moments-focused-annotated.png"
       }
