@@ -400,17 +400,12 @@ export async function validateRecordingFrame(file, expected) {
 	}
 
 	// 2. Extract a frame well past the first (which is often transitional) as raw
-	//    RGB24 and check quadrant luminance.
-	const pixels = await new Promise((resolve, reject) => {
-		const child = spawn('ffmpeg', [
-			'-v', 'error',
-			'-ss', '2',
-			'-i', file,
-			'-vframes', '1',
-			'-f', 'rawvideo',
-			'-pix_fmt', 'rgb24',
-			'-',
-		], { stdio: ['ignore', 'pipe', 'pipe'] });
+	//    RGB24 and check quadrant luminance. If the seek point exceeds the recording
+	//    duration ffmpeg produces zero bytes — fall back to the first frame.
+	const extractFrame = async (seek) => new Promise((resolve, reject) => {
+		const args = ['-v', 'error', '-i', file, '-vframes', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'];
+		if (seek !== null) args.splice(1, 0, '-ss', String(seek));
+		const child = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
 		const chunks = [];
 		let settled = false;
 		let timer;
@@ -432,6 +427,9 @@ export async function validateRecordingFrame(file, expected) {
 		}, PROBE_TIMEOUT_MS);
 		timer.unref?.();
 	});
+
+	let pixels = await extractFrame(2);
+	if (pixels.length === 0) pixels = await extractFrame(null);
 
 	assertFrameFilled(pixels, dimensions.width, dimensions.height);
 }
