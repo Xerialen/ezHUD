@@ -542,6 +542,12 @@ test('case manifest: offline fixture mux emits a private changedrop-manifest/1 i
 	assert.equal(manifest.capture.duration_s, 4.1);
 	assert.equal(manifest.output.duration_s, 4.1);
 	assert.equal(manifest.output.basename, 'changedrop.mp4');
+	assert.equal(manifest.trim_start_s, 0.4,
+		'manifest must record trim_start_s so film coordinates = measured_start_s − trim_start_s');
+	assert.deepEqual(manifest.segments.map((s) => s.measured_start_s), [0.4, 1.12, 3.01],
+		'measured_start_s must stay in capture coordinates — trim is recorded in trim_start_s, not applied in-place');
+	assert.deepEqual(manifest.segments.map((s) => +(s.measured_start_s - manifest.trim_start_s).toFixed(3)), [0.0, 0.72, 2.61],
+		'film coordinate = measured_start_s − trim_start_s must match adelay origins');
 	assert.deepEqual(manifest.segments.map((entry) => entry.narration.sha256),
 		run.narration.segments.map((entry) => entry.audio.sha256));
 	const schema = JSON.parse(await readFile(

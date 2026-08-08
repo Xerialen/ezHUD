@@ -191,7 +191,7 @@ async function writeManifest(runRoot, manifest) {
 function validateTerminalFields(manifest, { release, runId, sourceNoteHash, env }) {
 	exactObject(manifest, [
 		'schema_version', 'release', 'run_id', 'source_note', 'decision', 'blocked_reason',
-		'segments', 'capture', 'output', 'publish',
+		'segments', 'capture', 'output', 'publish', 'trim_start_s',
 	], 'Changedrop manifest');
 	if (manifest.schema_version !== MANIFEST_SCHEMA_VERSION || manifest.release !== release || manifest.run_id !== runId) {
 		throw new Error('Changedrop manifest identity differs from its run.');
@@ -294,6 +294,7 @@ function terminalManifest({ release, runId, sourceNoteHash, decision, reason, en
 		capture: null,
 		output: null,
 		publish: { state: 'withheld', destination: null },
+		trim_start_s: 0,
 	}, { release, runId, sourceNoteHash, env });
 }
 

@@ -429,6 +429,7 @@ export function buildManifest({
 	captureHash,
 	outputHash,
 	outputDurationSeconds,
+	trimStart = 0,
 } = {}) {
 	if (typeof release !== 'string' || !/^[a-z0-9][a-z0-9._-]*$/.test(release)
 		|| typeof runId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(runId)) {
@@ -481,6 +482,7 @@ export function buildManifest({
 			duration_s: outputDurationSeconds,
 		},
 		publish: { state: 'withheld', destination: null },
+		trim_start_s: trimStart,
 	}, 'Changedrop manifest');
 }
 
@@ -672,6 +674,7 @@ export async function main({
 			captureHash: captureArtifact.sha256,
 			outputHash: outputArtifact.sha256,
 			outputDurationSeconds: outputProbe.duration_seconds,
+			trimStart: timings.segments[0].start_seconds,
 		});
 		await writeFile(stagedManifest, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
 		await chmod(stagedManifest, 0o600);

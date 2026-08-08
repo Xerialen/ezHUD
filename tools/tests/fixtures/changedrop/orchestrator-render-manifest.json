@@ -83,5 +83,6 @@
   "publish": {
     "state": "withheld",
     "destination": null
-  }
+  },
+  "trim_start_s": 0
 }

@@ -828,7 +828,7 @@ async function executeStep({
 			// With the floor, quiet = M + A_after where A_after is the elapsed
 			// time of actions that follow the hold.  For segments with the hold
 			// last, A_after ≈ 0 and quiet ≈ M; for anchor (whose hold is followed
-			// by a click) it is ~0.9 s.  The dead-air gate remains a live
+			// by a click) it is ~0.9 s.
 			// Both gates together are the only runtime check that the floor was
 			// held correctly: overrun fires if the hold was skipped (segment too
 			// short for narration), dead-air fires if the floor waited too long
