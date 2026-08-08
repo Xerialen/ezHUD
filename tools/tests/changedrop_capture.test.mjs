@@ -269,35 +269,28 @@ test('review blocker: delivered frame must be filled — no flat-grey quadrants'
 	assert.ifError(loadError);
 	assert.equal(typeof capture.assertFrameFilled, 'function');
 
-	// Synthetic frame with varied content: every quadrant has a distinct colour.
 	const w = 1400;
 	const h = 788;
-	const makeFrame = (colorTop, colorBottom) => {
+	const midY = Math.floor(h / 2);
+	const midX = Math.floor(w / 2);
+
+	// Helper: fill an entire frame with one colour.
+	const solidFrame = ([r, g, b]) => {
 		const buf = Buffer.alloc(w * h * 3);
-		const midY = Math.floor(h / 2);
-		for (let y = 0; y < h; y++) {
-			const rowBase = y * w * 3;
-			const isTop = y < midY;
-			for (let x = 0; x < w; x++) {
-				const idx = rowBase + x * 3;
-				const [r, g, b] = isTop ? colorTop : colorBottom;
-				buf[idx] = r;
-				buf[idx + 1] = g;
-				buf[idx + 2] = b;
-			}
+		for (let i = 0; i < w * h; i++) {
+			buf[i * 3] = r;
+			buf[i * 3 + 1] = g;
+			buf[i * 3 + 2] = b;
 		}
 		return buf;
 	};
 
-	// A frame where every quadrant has distinct, non-grey content must pass.
+	// A four-colour frame with distinct non-grey quadrants must pass.
+	const fourColor = Buffer.alloc(w * h * 3);
 	const darkBlue = [10, 20, 80];
 	const darkGreen = [10, 80, 20];
 	const darkRed = [80, 10, 20];
 	const gold = [200, 160, 40];
-	// Build a four-quadrant frame: top half has two colours, bottom half has two.
-	const fourColor = Buffer.alloc(w * h * 3);
-	const midY = Math.floor(h / 2);
-	const midX = Math.floor(w / 2);
 	for (let y = 0; y < h; y++) {
 		const rowBase = y * w * 3;
 		const leftColor = y < midY ? darkBlue : darkRed;
@@ -310,16 +303,15 @@ test('review blocker: delivered frame must be filled — no flat-grey quadrants'
 			fourColor[idx + 2] = b;
 		}
 	}
-	// Should not throw — no quadrant is grey.
 	capture.assertFrameFilled(fourColor, w, h);
 
-	// A flat-grey frame (all quadrants at 128,128,128) must be rejected.
+	// A flat-grey frame (all quadrants at 128, mean 128, σ = 0) must be rejected.
 	const flatGrey = Buffer.alloc(w * h * 3, 128);
 	assert.throws(() => capture.assertFrameFilled(flatGrey, w, h),
 		/flat grey|unfilled padding/i);
 
-	// A frame where only the bottom-right quadrant is flat grey must be rejected.
-	const partialPad = makeFrame(darkBlue, darkGreen);
+	// A frame with one flat-grey quadrant must be rejected.
+	const partialPad = solidFrame(darkBlue);
 	// Overwrite bottom-right quadrant with flat grey.
 	for (let y = midY; y < h; y++) {
 		const rowBase = y * w * 3;
@@ -332,6 +324,38 @@ test('review blocker: delivered frame must be filled — no flat-grey quadrants'
 	}
 	assert.throws(() => capture.assertFrameFilled(partialPad, w, h),
 		/flat grey|unfilled padding/i);
+
+	// Checkerboard: 40 and 216, mean ≈ 128, σ ≈ 88. Must PASS — high variation
+	// proves real content even though mean lands in the grey band.
+	const checker = Buffer.alloc(w * h * 3);
+	for (let y = 0; y < h; y++) {
+		const rowBase = y * w * 3;
+		for (let x = 0; x < w; x++) {
+			const idx = rowBase + x * 3;
+			const v = ((x + y) & 1) ? 216 : 40;
+			checker[idx] = v;
+			checker[idx + 1] = v;
+			checker[idx + 2] = v;
+		}
+	}
+	capture.assertFrameFilled(checker, w, h);
+
+	// A dark panel whose mean happens to land near 128 (e.g. RGB 100,100,184 →
+	// luminance 128) but has real variation must pass.
+	const variedMidGrey = Buffer.alloc(w * h * 3);
+	for (let y = 0; y < h; y++) {
+		const rowBase = y * w * 3;
+		for (let x = 0; x < w; x++) {
+			const idx = rowBase + x * 3;
+			// Base of 100 gives luminance 100, plus a column gradient of ±30.
+			const offset = Math.round(30 * Math.sin((x / w) * Math.PI * 4));
+			const v = 100 + offset;
+			variedMidGrey[idx] = v;
+			variedMidGrey[idx + 1] = v;
+			variedMidGrey[idx + 2] = v;
+		}
+	}
+	capture.assertFrameFilled(variedMidGrey, w, h);
 
 	// Buffer too small must throw.
 	assert.throws(() => capture.assertFrameFilled(Buffer.alloc(10), 1400, 788));

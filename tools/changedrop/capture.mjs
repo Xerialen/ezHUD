@@ -279,19 +279,26 @@ export function probeRecordingDuration(file) {
 	});
 }
 
-// Flat-grey detection threshold. Playwright padding produces near-uniform 127–129
-// luminance across padded quadrants. A quadrant whose mean luminance falls in the
-// [128 - GREY_TOLERANCE, 128 + GREY_TOLERANCE] band is considered flat grey.
+// Flat-grey detection. Playwright padding produces near-uniform 127–129 luminance
+// across padded quadrants with negligible variation (σ ≪ 5). Real content may hit
+// the same mean but always carries substantial variation (σ ≫ 5). A quadrant is
+// flagged only when it is both mid-grey AND nearly uniform.
 const GREY_CENTER = 128;
 const GREY_TOLERANCE = 3;
+const GREY_STDDEV_MAX = 5;
 
 /**
  * Check that no quadrant of a decoded frame is flat grey.
  *
+ * Flat grey = mean luminance in [GREY_CENTER ± GREY_TOLERANCE] AND standard
+ * deviation under GREY_STDDEV_MAX. A checkerboard with mean 128 and σ ≈ 88
+ * passes because the high variation proves real content. A dark editor panel
+ * whose mean happens to fall in the band also passes for the same reason.
+ *
  * @param {Buffer} pixels  - raw RGB bytes (width × height × 3), row-major
  * @param {number}  width   - frame width in pixels
  * @param {number}  height  - frame height in pixels
- * @throws if any quadrant mean luminance is within the flat-grey band
+ * @throws if any quadrant is both mid-grey and near-uniform
  */
 export function assertFrameFilled(pixels, width, height) {
 	if (!Buffer.isBuffer(pixels)) throw new Error('Frame pixels must be a Buffer.');
@@ -311,17 +318,33 @@ export function assertFrameFilled(pixels, width, height) {
 	];
 
 	for (const q of quadrants) {
+		const n = q.w * q.h;
+		// First pass: collect luminance values.
+		const lum = new Float64Array(n);
+		let i = 0;
 		let sum = 0;
 		for (let y = q.oy; y < q.oy + q.h; y++) {
 			const rowBase = y * width * 3;
 			for (let x = q.ox; x < q.ox + q.w; x++) {
 				const idx = rowBase + x * 3;
-				sum += (pixels[idx] + pixels[idx + 1] + pixels[idx + 2]) / 3;
+				const v = (pixels[idx] + pixels[idx + 1] + pixels[idx + 2]) / 3;
+				lum[i] = v;
+				sum += v;
+				i += 1;
 			}
 		}
-		const mean = sum / (q.w * q.h);
-		if (mean >= GREY_CENTER - GREY_TOLERANCE && mean <= GREY_CENTER + GREY_TOLERANCE) {
-			throw new Error(`Frame quadrant ${q.name} is flat grey (mean luminance ${mean.toFixed(2)}), indicating unfilled padding.`);
+		const mean = sum / n;
+		if (mean < GREY_CENTER - GREY_TOLERANCE || mean > GREY_CENTER + GREY_TOLERANCE) continue;
+
+		// Second pass: standard deviation.
+		let sqSum = 0;
+		for (let j = 0; j < n; j++) {
+			const d = lum[j] - mean;
+			sqSum += d * d;
+		}
+		const stddev = Math.sqrt(sqSum / n);
+		if (stddev < GREY_STDDEV_MAX) {
+			throw new Error(`Frame quadrant ${q.name} is flat grey (mean ${mean.toFixed(2)}, σ ${stddev.toFixed(2)}), indicating unfilled padding.`);
 		}
 	}
 }
@@ -347,27 +370,41 @@ export async function validateRecordingFrame(file, expected) {
 			file,
 		], { stdio: ['ignore', 'pipe', 'pipe'] });
 		let stdout = '';
+		let settled = false;
+		let timer;
+		const finish = (callback, value) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			callback(value);
+		};
 		child.stdout.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
-		child.once('error', () => reject(new Error('Could not probe recording dimensions.')));
+		child.once('error', () => finish(reject, new Error('Could not probe recording dimensions.')));
 		child.once('close', (code) => {
-			if (code !== 0) return reject(new Error('ffprobe exited non-zero on recording.'));
+			if (code !== 0) return finish(reject, new Error('ffprobe exited non-zero on recording.'));
 			const [w, h] = stdout.trim().split(',').map(Number);
 			if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1) {
-				return reject(new Error('Could not parse recording dimensions.'));
+				return finish(reject, new Error('Could not parse recording dimensions.'));
 			}
-			resolve({ width: w, height: h });
+			finish(resolve, { width: w, height: h });
 		});
-		setTimeout(() => { child.kill('SIGKILL'); reject(new Error('Dimension probe timed out.')); }, PROBE_TIMEOUT_MS);
+		timer = setTimeout(() => {
+			child.kill('SIGKILL');
+			finish(reject, new Error('Dimension probe timed out.'));
+		}, PROBE_TIMEOUT_MS);
+		timer.unref?.();
 	});
 
 	if (dimensions.width !== expected.width || dimensions.height !== expected.height) {
 		throw new Error(`Recording dimensions ${dimensions.width}x${dimensions.height} do not match expected ${expected.width}x${expected.height}.`);
 	}
 
-	// 2. Extract one frame as raw RGB24 and check quadrant luminance.
+	// 2. Extract a frame well past the first (which is often transitional) as raw
+	//    RGB24 and check quadrant luminance.
 	const pixels = await new Promise((resolve, reject) => {
 		const child = spawn('ffmpeg', [
 			'-v', 'error',
+			'-ss', '2',
 			'-i', file,
 			'-vframes', '1',
 			'-f', 'rawvideo',
@@ -375,13 +412,25 @@ export async function validateRecordingFrame(file, expected) {
 			'-',
 		], { stdio: ['ignore', 'pipe', 'pipe'] });
 		const chunks = [];
+		let settled = false;
+		let timer;
+		const finish = (callback, value) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			callback(value);
+		};
 		child.stdout.on('data', (chunk) => chunks.push(chunk));
-		child.once('error', () => reject(new Error('Could not extract frame from recording.')));
+		child.once('error', () => finish(reject, new Error('Could not extract frame from recording.')));
 		child.once('close', (code) => {
-			if (code !== 0) return reject(new Error('ffmpeg exited non-zero extracting frame.'));
-			resolve(Buffer.concat(chunks));
+			if (code !== 0) return finish(reject, new Error('ffmpeg exited non-zero extracting frame.'));
+			finish(resolve, Buffer.concat(chunks));
 		});
-		setTimeout(() => { child.kill('SIGKILL'); reject(new Error('Frame extraction timed out.')); }, PROBE_TIMEOUT_MS);
+		timer = setTimeout(() => {
+			child.kill('SIGKILL');
+			finish(reject, new Error('Frame extraction timed out.'));
+		}, PROBE_TIMEOUT_MS);
+		timer.unref?.();
 	});
 
 	assertFrameFilled(pixels, dimensions.width, dimensions.height);
