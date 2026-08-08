@@ -829,9 +829,10 @@ async function executeStep({
 			// time of actions that follow the hold.  For segments with the hold
 			// last, A_after ≈ 0 and quiet ≈ M; for anchor (whose hold is followed
 			// by a click) it is ~0.9 s.  The dead-air gate remains a live
-			// verification: if the executor skips the hold, quiet spikes past the
-			// 2.0 s bound and the gate fires — it is the only runtime check that
-			// the floor was actually held.
+			// Both gates together are the only runtime check that the floor was
+			// held correctly: overrun fires if the hold was skipped (segment too
+			// short for narration), dead-air fires if the floor waited too long
+			// (segment outlasts narration by > 2 s).
 			const maxIterations = Math.ceil(step.floor_ms / MAX_HOLD_MS) + 2;
 			let iterations = 0;
 			while (iterations < maxIterations) {

@@ -976,24 +976,25 @@ test('hold floor DEAD-AIR GATE is the live verification that the executor held t
 	// of actions following the hold.  For most segments A_after ≈ 0 and
 	// quiet ≈ M = 0.25 s; for anchor it is ~0.9 s.
 	//
-	// The dead-air gate is NOT a no-op — it is the only runtime check that
-	// the executor actually held the floor.  If the hold is skipped (e.g.
-	// maxIterations = 0), quiet spikes past the 2.0 s bound and the gate
-	// fires.  That makes it load-bearing, not decorative.
+	// Both gates are load-bearing, not decorative: overrun fires if the
+	// hold was skipped (segment too short for narration), dead-air fires
+	// if the floor waited too long (segment outlasts narration by > 2 s).
+	// Together they are the only runtime verification that the floor was
+	// held correctly.
 
 	// Verify that FIT_SAFETY_MARGIN_SECONDS (M) equals the expected 0.25 s.
 	assert.equal(voice.FIT_SAFETY_MARGIN_SECONDS, 0.25);
 
 	// Check that the capture source documents the floor's effect on the dead-air gate.
 	const captureSource = await readFile(path.join(repo, 'tools', 'changedrop', 'capture.mjs'), 'utf8');
-	assert.match(captureSource, /quiet = M \+ A_after|A_after|live verification.*floor.*held/i,
-		'capture.mjs must document that quiet = M + A_after and the gate verifies the hold');
+	assert.match(captureSource, /overrun.*skipped.*hold|dead-air.*waited too long|overrun.*hold.*skipped/i,
+		'capture.mjs must document that overrun catches a skipped hold and dead-air catches a floor that waited too long');
 
 	// Check that the voice source documents it too.
 	const voiceSource = await readFile(path.join(repo, 'tools', 'changedrop', 'voice.mjs'), 'utf8');
 	assert.match(voiceSource, /ΔA.*ceases to be a quantity|ΔA.*quantity|ceases to be a quantity|no longer.*ΔA/i,
 		'voice.mjs must document that ΔA ceases to be a quantity');
 
-	// The gate exists and its bound is unchanged — it catches a skipped hold.
+	// The gate exists and its bound is unchanged.
 	assert.equal(voice.MAX_NARRATION_UNDERSHOOT_SECONDS, 2.0);
 });
