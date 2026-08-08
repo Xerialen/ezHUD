@@ -23,6 +23,7 @@ import {
 import {
 	assertNarrationFitsCapture,
 	inspectDeliveredWav,
+	MAX_NARRATION_UNDERSHOOT_SECONDS,
 	validateNarrationManifest,
 	validateTimingReceipt,
 } from './voice.mjs';
@@ -274,7 +275,13 @@ function decimalSeconds(value) {
 	return Number(value.toFixed(6)).toString();
 }
 
-export function buildFfmpegArguments({ captureFile, narrationFiles, timings, outputFile } = {}) {
+export function buildFfmpegArguments({
+	captureFile,
+	narrationFiles,
+	timings,
+	outputFile,
+	trimStart = timings?.segments?.[0]?.start_seconds,
+} = {}) {
 	nonEmptyString(captureFile, 'Fitted capture file');
 	nonEmptyString(outputFile, 'Changedrop output file');
 	if (!Array.isArray(narrationFiles) || narrationFiles.length === 0
@@ -287,14 +294,32 @@ export function buildFfmpegArguments({ captureFile, narrationFiles, timings, out
 		nonEmptyString(narration.file, 'Delivered narration file');
 		args.push('-i', narration.file);
 	}
-	const contentDuration = decimalSeconds(timings.recording.duration_seconds);
-	const filters = [`[0:v]trim=duration=${contentDuration},setpts=PTS-STARTPTS[muxvideo]`];
+	// The capture recording starts before the first segment. Trim everything
+	// before the intro so the output begins at the first spoken word.
+	// S is the measured offset from capture start to the intro segment start;
+	// the four coupled mux parameters (trim, adelay, apad, -t) all shift by S.
+	// trimStart defaults to S (derived, not caller-supplied) so production
+	// callers get a correct zero-delay intro. The assertion below is a
+	// regression guard: it only fails when a future code change or a test
+	// injects a trimStart that does not equal segments[0].start_seconds.
+	const introDelayMs = Math.round((timings.segments[0].start_seconds - trimStart) * 1000);
+	if (introDelayMs > Math.round(MAX_NARRATION_UNDERSHOOT_SECONDS * 1000)) {
+		throw new Error(
+			`Intro narration adelay ${introDelayMs} ms exceeds the ` +
+			`${Math.round(MAX_NARRATION_UNDERSHOOT_SECONDS * 1000)} ms dead-air bound. ` +
+			`The capture has a ${timings.segments[0].start_seconds.toFixed(3)}s lead-in before the intro segment; ` +
+			`the mux must trim it so the first spoken word starts at t=0.`,
+		);
+	}
+	const trimmedDuration = decimalSeconds(timings.recording.duration_seconds - trimStart);
+	const filters = [`[0:v]trim=start=${decimalSeconds(trimStart)}:duration=${trimmedDuration},setpts=PTS-STARTPTS[muxvideo]`];
 	for (const [index, segment] of timings.segments.entries()) {
 		finiteNumber(segment.start_seconds, `Mux timing start for "${segment.id}"`, { minimum: 0 });
-		filters.push(`[${index + 1}:a]asetpts=PTS-STARTPTS,adelay=${Math.round(segment.start_seconds * 1000)}:all=1[segment${index}]`);
+		const adjustedDelay = Math.round((segment.start_seconds - trimStart) * 1000);
+		filters.push(`[${index + 1}:a]asetpts=PTS-STARTPTS,adelay=${adjustedDelay}:all=1[segment${index}]`);
 	}
 	const labels = timings.segments.map((_segment, index) => `[segment${index}]`).join('');
-	filters.push(`${labels}amix=inputs=${timings.segments.length}:duration=longest:dropout_transition=0:normalize=0,apad=whole_dur=${decimalSeconds(timings.recording.duration_seconds)}[muxaudio]`);
+	filters.push(`${labels}amix=inputs=${timings.segments.length}:duration=longest:dropout_transition=0:normalize=0,apad=whole_dur=${trimmedDuration}[muxaudio]`);
 	args.push(
 		'-filter_complex', filters.join(';'),
 		'-map', '[muxvideo]',
@@ -306,7 +331,7 @@ export function buildFfmpegArguments({ captureFile, narrationFiles, timings, out
 		'-c:a', 'aac',
 		'-b:a', '192k',
 		'-movflags', '+faststart',
-		'-t', decimalSeconds(timings.recording.duration_seconds),
+		'-t', trimmedDuration,
 		outputFile,
 	);
 	return args;
