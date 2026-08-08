@@ -64,6 +64,30 @@ stands in for the engine. No browser, no game, sub-minute total.
 - New logic in `core/` lands with tests in the same commit. This is the tier
   the LLM extends aggressively — there is no downside to more cases here.
 
+### Release-note gate (`tools/ci/release_note_gate.mjs`)
+
+The release-note gate validates PRs carrying `user-visible` or `release` labels.
+It requires a `## Changedrop` section in the PR body, in one of two forms:
+
+**Form A — a film was rendered:**
+```
+## Changedrop
+run: <run id>
+output: <basename>.mp4
+sha256: <64 hex>
+publish.state: withheld
+delivered: Dumpen/Ezhud/<slug>/<run id>/
+```
+
+**Form B — the analyzer chose not to render:**
+```
+## Changedrop
+decision: skip
+Reason: <why no film was rendered>
+```
+
+Tests live in `tools/tests/release_note_gate.test.mjs` and are tier 1.
+
 ## Tier 2 — Bridge contract (integration)
 
 **What:** token auth, endpoint routing, save semantics, and above all the

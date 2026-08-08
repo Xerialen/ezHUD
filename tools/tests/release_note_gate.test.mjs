@@ -39,8 +39,12 @@ function fixture({ note = notes(), images = ['img/proof.png'] } = {}) {
 	};
 }
 
-function applicableBody(extra = '') {
-	return `Closes #57\n\nCanonical document: docs/change/NOTES.md${extra}`;
+const DEFAULT_CHANGEDROP_A = `## Changedrop\nrun: 20260808-001\noutput: walkthrough.mp4\nsha256: ${'a'.repeat(64)}\npublish.state: withheld\ndelivered: Dumpen/Ezhud/release-2/20260808-001/`;
+
+function applicableBody(extra = '', changedrop = DEFAULT_CHANGEDROP_A) {
+	let body = `Closes #57\n\nCanonical document: docs/change/NOTES.md${extra}`;
+	if (changedrop !== null) body += `\n\n${changedrop}`;
+	return body;
 }
 
 test('case 1: a linked release PR with valid notes, evidence and payload passes', (t) => {
@@ -114,7 +118,7 @@ test('case 2: an unnamed or absent canonical notes document fails by name', (t) 
 	const repo = fixture({ note: null, images: [] });
 	t.after(repo.cleanup);
 	for (const [name, prBody] of [
-		['unnamed', 'Closes #57'],
+		['unnamed', `Closes #57\n\n${DEFAULT_CHANGEDROP_A}`],
 		['absent', applicableBody()],
 	]) {
 		const result = decideReleaseNoteGate({ prBody, labels: ['release'], repoRoot: repo.repoRoot });
@@ -202,6 +206,164 @@ test('case 6: an applicable PR without a ticket reference fails', (t) => {
 	}
 });
 
+test('#85 case 1: applicable PR without ## Changedrop section is rejected', (t) => {
+	const repo = fixture();
+	t.after(repo.cleanup);
+	const result = decideReleaseNoteGate({
+		prBody: applicableBody('', null),
+		labels: ['release'],
+		repoRoot: repo.repoRoot,
+	});
+	assert.equal(result.ok, false, result.reason);
+	assert.match(result.reason, /[Cc]hangedrop/i);
+});
+
+test('#85 case 4: form A passes with all five fields and valid sha256', (t) => {
+	const repo = fixture();
+	t.after(repo.cleanup);
+	for (const labels of [['release'], ['user-visible']]) {
+		const result = decideReleaseNoteGate({
+			prBody: applicableBody('', `## Changedrop\nrun: 20260808-001\noutput: walkthrough.mp4\nsha256: ${'a'.repeat(64)}\npublish.state: withheld\ndelivered: Dumpen/Ezhud/release-2/20260808-001/`),
+			labels,
+			repoRoot: repo.repoRoot,
+		});
+		assert.equal(result.ok, true, `${labels[0]}: ${result.reason}`);
+	}
+});
+
+test('#85 case 3: form A fails when sha256 is not 64 hex characters', (t) => {
+	const repo = fixture();
+	t.after(repo.cleanup);
+	const base = '## Changedrop\nrun: 20260808-001\noutput: walkthrough.mp4\nsha256: ';
+	const trailers = '\npublish.state: withheld\ndelivered: Dumpen/Ezhud/release-2/20260808-001/';
+	for (const [name, sha] of [
+		['too short', 'a'.repeat(63)],
+		['too long', 'a'.repeat(65)],
+		['non-hex', `${'g'.repeat(64)}`],
+		['mixed non-hex', `${'a'.repeat(63)}g`],
+	]) {
+		const result = decideReleaseNoteGate({
+			prBody: applicableBody('', `${base}${sha}${trailers}`),
+			labels: ['release'],
+			repoRoot: repo.repoRoot,
+		});
+		assert.equal(result.ok, false, `${name}: ${result.reason}`);
+		assert.match(result.reason, /sha256/i, name);
+	}
+});
+
+test('#85 case 2: form A fails when any required field is missing', (t) => {
+	const repo = fixture();
+	t.after(repo.cleanup);
+	const fields = new Map([
+		['run', 'run: 20260808-001'],
+		['output', 'output: walkthrough.mp4'],
+		['sha256', `sha256: ${'a'.repeat(64)}`],
+		['publish.state', 'publish.state: withheld'],
+		['delivered', 'delivered: Dumpen/Ezhud/release-2/20260808-001/'],
+	]);
+	for (const [name] of fields) {
+		const lines = [...fields.entries()].filter(([k]) => k !== name).map(([, v]) => v);
+		const result = decideReleaseNoteGate({
+			prBody: applicableBody('', `## Changedrop\n${lines.join('\n')}`),
+			labels: ['release'],
+			repoRoot: repo.repoRoot,
+		});
+		assert.equal(result.ok, false, `${name}: ${result.reason}`);
+		assert.match(result.reason, new RegExp(name.replace('.', '\\.'), 'i'), name);
+	}
+});
+
+test('#85 case 5: form B passes with decision skip and non-empty Reason', (t) => {
+	const repo = fixture();
+	t.after(repo.cleanup);
+	const skipReason = 'No user-visible changes in this release.';
+	for (const labels of [['release'], ['user-visible']]) {
+		const result = decideReleaseNoteGate({
+			prBody: applicableBody('', `## Changedrop\ndecision: skip\nReason: ${skipReason}`),
+			labels,
+			repoRoot: repo.repoRoot,
+		});
+		assert.equal(result.ok, true, `${labels[0]}: ${result.reason}`);
+		assert.match(result.notice, new RegExp(skipReason.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+	}
+});
+
+test('#85 case 6: form B fails when Reason is empty, whitespace, or comment-only', (t) => {
+	const repo = fixture();
+	t.after(repo.cleanup);
+	for (const [name, reason] of [
+		['empty', 'Reason:'],
+		['whitespace', 'Reason:   '],
+		['html comment only', 'Reason: <!-- nothing -->'],
+	]) {
+		const result = decideReleaseNoteGate({
+			prBody: applicableBody('', `## Changedrop\ndecision: skip\n${reason}`),
+			labels: ['release'],
+			repoRoot: repo.repoRoot,
+		});
+		assert.equal(result.ok, false, `${name}: ${result.reason}`);
+		assert.match(result.reason, /[Rr]eason/i, name);
+	}
+});
+
+test('#85 case 7: both form A and form B together in the same PR body fail', (t) => {
+	const repo = fixture();
+	t.after(repo.cleanup);
+	const formA = `## Changedrop\nrun: 20260808-001\noutput: walkthrough.mp4\nsha256: ${'a'.repeat(64)}\npublish.state: withheld\ndelivered: Dumpen/Ezhud/release-2/20260808-001/`;
+	const formB = '## Changedrop\ndecision: skip\nReason: No changes.';
+	const result = decideReleaseNoteGate({
+		prBody: applicableBody('', `${formA}\n\n${formB}`),
+		labels: ['release'],
+		repoRoot: repo.repoRoot,
+	});
+	assert.equal(result.ok, false, result.reason);
+	assert.match(result.reason, /both|[Tt]wo [Cc]hangedrop|multiple/i);
+});
+
+test('#85 case 7b: mixed form A/B fields in a single section fail', (t) => {
+	const repo = fixture();
+	t.after(repo.cleanup);
+	const result = decideReleaseNoteGate({
+		prBody: applicableBody('', `## Changedrop\nrun: 20260808-001\ndecision: skip\noutput: walkthrough.mp4\nReason: mixed.`),
+		labels: ['release'],
+		repoRoot: repo.repoRoot,
+	});
+	assert.equal(result.ok, false, result.reason);
+	assert.match(result.reason, /mixe[sd]|form A.*form B|form B.*form A/i);
+});
+
+test('#85 case 11: changedrop section fails when publish.state is not withheld', (t) => {
+	const repo = fixture();
+	t.after(repo.cleanup);
+	const result = decideReleaseNoteGate({
+		prBody: applicableBody('', `## Changedrop\nrun: 20260808-001\noutput: walkthrough.mp4\nsha256: ${'a'.repeat(64)}\npublish.state: published\ndelivered: Dumpen/Ezhud/release-2/20260808-001/`),
+		labels: ['release'],
+		repoRoot: repo.repoRoot,
+	});
+	assert.equal(result.ok, false, result.reason);
+	assert.match(result.reason, /publish\.state|withheld/i);
+});
+
+test('#85 case 10: changedrop section fails on private paths, hostname, or audio.path', (t) => {
+	const repo = fixture();
+	t.after(repo.cleanup);
+	const privateVariants = [
+		['home path', `## Changedrop\nrun: 20260808-001\noutput: walkthrough.mp4\nsha256: ${'a'.repeat(64)}\npublish.state: withheld\ndelivered: /home/user/videos/`],
+		['hostname', `## Changedrop\nrun: 20260808-001\noutput: walkthrough.mp4\nsha256: ${'a'.repeat(64)}\npublish.state: withheld\ndelivered: Dumpen/Ezhud/release-2/20260808-001/ ${os.hostname()}`],
+		['audio.path', `## Changedrop\nrun: 20260808-001\noutput: walkthrough.mp4\nsha256: ${'a'.repeat(64)}\npublish.state: withheld\naudio.path: /tmp/audio.wav\ndelivered: Dumpen/Ezhud/release-2/20260808-001/`],
+	];
+	for (const [name, section] of privateVariants) {
+		const result = decideReleaseNoteGate({
+			prBody: applicableBody('', section),
+			labels: ['release'],
+			repoRoot: repo.repoRoot,
+		});
+		assert.equal(result.ok, false, `${name}: ${result.reason}`);
+		assert.match(result.reason, /private|hostname|audio\.path/i, name);
+	}
+});
+
 test('ordinary PRs pass untouched, including an internal-only label without an apply label', () => {
 	for (const labels of [[], ['docs'], ['internal-only']]) {
 		assert.deepEqual(decideReleaseNoteGate({ labels }), {
@@ -251,7 +413,7 @@ test('canonical notes require a title and player summary before structured featu
 
 test('case 7: docs/release-1 is the canonical first exemplar and old sources are retired', () => {
 	const result = decideReleaseNoteGate({
-		prBody: 'Closes #57\n\nCanonical document: docs/release-1/NOTES.md',
+		prBody: `Closes #57\n\nCanonical document: docs/release-1/NOTES.md\n\n${DEFAULT_CHANGEDROP_A}`,
 		labels: ['release'],
 		repoRoot: REPO_ROOT,
 	});

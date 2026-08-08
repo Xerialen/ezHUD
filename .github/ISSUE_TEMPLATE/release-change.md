@@ -29,6 +29,27 @@ Canonical document: `docs/<slug>/NOTES.md`
 - [ ] This change has no user-visible effect and requires no player notes, images, or Discord payload.
 Reason: <!-- Required when the exemption is checked. -->
 
+## Changedrop
+
+<!-- Required in the implementing PR body. Choose one form and delete the other. -->
+
+### Form A — a film was rendered
+```
+## Changedrop
+run: <run id>
+output: <basename>.mp4
+sha256: <64 hex>
+publish.state: withheld
+delivered: Dumpen/Ezhud/<slug>/<run id>/
+```
+
+### Form B — the analyzer chose not to render
+```
+## Changedrop
+decision: skip
+Reason: <why no film was rendered>
+```
+
 ## Cases
 
 <!--

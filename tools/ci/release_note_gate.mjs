@@ -130,6 +130,80 @@ function resolveInside(base, relative) {
 	return resolved.startsWith(`${path.resolve(base)}${path.sep}`) ? resolved : null;
 }
 
+export function parseChangedropSection(body = '') {
+	const source = String(body);
+	// Count ## Changedrop sections — must be exactly one for applicable PRs.
+	const sections = [...source.matchAll(/^##[ \t]+Changedrop[ \t]*$/gm)];
+	if (sections.length === 0) {
+		return { ok: false, reason: 'Applicable PR body has no "## Changedrop" section. Declare the changedrop outcome with run/output/sha256/publish.state/delivered or decision: skip / Reason.' };
+	}
+	if (sections.length > 1) {
+		return { ok: false, reason: 'PR body has multiple "## Changedrop" sections; provide exactly one.' };
+	}
+	const start = sections[0].index + sections[0][0].length;
+	const bodyAfter = source.slice(start);
+	const nextHeading = bodyAfter.search(/^##[ \t]+/m);
+	const sectionBody = nextHeading >= 0 ? bodyAfter.slice(0, nextHeading).trim() : bodyAfter.trim();
+
+	const lines = sectionBody.split(/\r?\n/).filter((l) => l.trim());
+	const fields = new Map();
+	for (const line of lines) {
+		const m = line.match(/^([a-z][a-z0-9._-]*):\s*(.*?)\s*$/i);
+		if (!m) continue;
+		const key = m[1].toLowerCase();
+		const value = m[2];
+		if (fields.has(key)) {
+			return { ok: false, reason: `Duplicate field "${key}" in ## Changedrop section.` };
+		}
+		fields.set(key, value);
+	}
+
+	const hasRun = fields.has('run');
+	const hasDecision = fields.has('decision');
+
+	// Both forms present → fail (case 7).
+	if (hasRun && hasDecision) {
+		return { ok: false, reason: '## Changedrop section mixes form A (run/output/sha256/publish.state/delivered) and form B (decision: skip / Reason) fields; use one form.' };
+	}
+
+	// Form A: video exists.
+	if (hasRun) {
+		const requiredA = ['run', 'output', 'sha256', 'publish.state', 'delivered'];
+		for (const f of requiredA) {
+			if (!fields.has(f)) {
+				return { ok: false, reason: `## Changedrop form A is missing required field "${f}".` };
+			}
+		}
+		const sha256 = fields.get('sha256');
+		if (!/^[0-9a-fA-F]{64}$/.test(sha256)) {
+			return { ok: false, reason: '## Changedrop sha256 must be exactly 64 hex characters.' };
+		}
+		const publishState = fields.get('publish.state');
+		if (publishState !== 'withheld') {
+			return { ok: false, reason: '## Changedrop publish.state must be "withheld".' };
+		}
+		return { ok: true, reason: null, form: 'A', fields };
+	}
+
+	// Form B: analyzer skipped.
+	if (hasDecision) {
+		const decisionVal = fields.get('decision');
+		if (decisionVal !== 'skip') {
+			return { ok: false, reason: '## Changedrop decision must be "skip" (or use form A with run/output/sha256/publish.state/delivered).' };
+		}
+		const rawReason = fields.get('reason') ?? '';
+		// Strip HTML comments, same semantics as parseInternalOnlyExemption.
+		const stripped = rawReason.replace(/<!--.*?-->/g, '').trim();
+		if (!stripped) {
+			return { ok: false, reason: '## Changedrop form B requires a non-empty Reason (after stripping HTML comments).' };
+		}
+		return { ok: true, reason: null, form: 'B', fields, skipReason: stripped };
+	}
+
+	// Neither form recognized.
+	return { ok: false, reason: '## Changedrop section does not match form A (run/output/sha256/publish.state/delivered) or form B (decision: skip / Reason).' };
+}
+
 export function decideReleaseNoteGate({ prBody = '', labels = [], repoRoot = '.' } = {}) {
 	const names = labelNames(labels);
 	if (!names.some((name) => APPLY_LABELS.has(name))) {
@@ -146,6 +220,26 @@ export function decideReleaseNoteGate({ prBody = '', labels = [], repoRoot = '.'
 		}
 		return decision(true, 'Recorded internal-only exemption; release notes and images are not required.',
 			`Internal-only reason: ${exemption.reason}`);
+	}
+
+	// Validate the ## Changedrop section in the PR body.
+	const changedrop = parseChangedropSection(body);
+	if (!changedrop.ok) {
+		return decision(false, changedrop.reason);
+	}
+
+	// Privacy scan on the changedrop section (case 10).
+	const cdSectionMatch = body.match(/^##[ \t]+Changedrop[ \t]*$[\s\S]*?(?=^##[ \t]+|$(?![\s\S]))/m);
+	if (cdSectionMatch) {
+		const privatePatternsCd = [/\/home\//i, /\/Users\//i, /\$USER\b/i, /file:\/\//i, /\baudio\.path\b/i];
+		const localHostname = hostname();
+		if (localHostname) {
+			const escaped = localHostname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+			privatePatternsCd.push(new RegExp(`(^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`, 'i'));
+		}
+		if (privatePatternsCd.some((pattern) => pattern.test(cdSectionMatch[0]))) {
+			return decision(false, '## Changedrop section contains a private path, hostname, or audio.path key.');
+		}
 	}
 
 	const match = body.match(NOTE_PATH_RE);
@@ -254,7 +348,8 @@ export function decideReleaseNoteGate({ prBody = '', labels = [], repoRoot = '.'
 			return decision(false, `${notePath} embed image ${name} has no matching attachment mapping.`);
 		}
 	}
-	return decision(true, `Release note ${notePath} is complete and ready for review.`);
+	const notice = changedrop.form === 'B' ? `Changedrop skip reason: ${changedrop.skipReason}` : null;
+	return decision(true, `Release note ${notePath} is complete and ready for review.`, notice);
 }
 
 function parseLabels(raw = '[]') {
