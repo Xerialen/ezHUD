@@ -867,26 +867,22 @@ test('hold floor FIT: fitCaptureScript produces a floor_ms hold and projects N +
 	assert.deepEqual(fittedFixed, originalFixed);
 });
 
-test('hold floor MAX_FLOOR_MS: bookends reject a floor above the upper bound; surfaces are caught by the budget first', async () => {
+test('hold floor MAX_FLOOR_MS: the sole hard bound rejects any segment whose floor exceeds 30 s', async () => {
 	assert.ifError(loadError);
 	const { script, timings } = await inputs();
 
-	// MAX_FLOOR_MS is the upper bound for floor_ms, matching the 10 s surface
-	// budget.  It closes the hole where bookends had no ceiling — the surface
-	// budget only checked `kind === 'surface'`.  For surfaces the budget fires
-	// first (floor ≤ N + M, so N + M ≤ 10 ⇒ floor ≤ 10 000 automatically);
-	// this guard catches bookends and any future segment type.
-	// This test MUST fail if MAX_FLOOR_MS is removed or raised without review.
+	// MAX_FLOOR_MS (30 000 ms) is the sole hard bound in the pipeline.
+	// The ~15 s surface guideline (MAX_SURFACE_GUIDELINE_SECONDS) is advisory
+	// and does not reject.  This guard catches bookends, surfaces, and any
+	// future segment type — a hold reaching 30 s is a broken narration file.
+	// This test MUST fail if MAX_FLOOR_MS is removed or lowered without review.
 	assert.ok(voice.MAX_FLOOR_MS > 0, 'MAX_FLOOR_MS must be exported');
-	assert.equal(voice.MAX_FLOOR_MS, 10_000, 'MAX_FLOOR_MS matches the 10 s surface budget');
+	assert.equal(voice.MAX_FLOOR_MS, 30_000, 'MAX_FLOOR_MS is the 30 s hard bound');
 
 	// A narration duration that produces floor_ms > MAX_FLOOR_MS must be rejected.
-	const absurdN = 12.0; // floor_ms = 12 250 > 10 000
+	const absurdN = 32.0; // floor_ms = Math.round((32.0 + 0.25) * 1000) = 32 250 > 30 000
 
-	// 1. Surface segment: MAX_FLOOR_MS fires first because it is checked before
-	//    the surface budget, and both trigger at N + M > 10.  The budget is still
-	//    present as a documenting guard — it would catch surfaces if MAX_FLOOR_MS
-	//    were ever raised above 10 000 ms.
+	// 1. Surface segment: rejected by MAX_FLOOR_MS.
 	{
 		const measurements = [
 			{ id: 'intro', duration_seconds: 3.84 },
@@ -895,13 +891,12 @@ test('hold floor MAX_FLOOR_MS: bookends reject a floor above the upper bound; su
 		];
 		assert.throws(
 			() => voice.fitCaptureScript({ script, timings, measurements }),
-			/snap-magnet.*floor.*12250.*exceeds.*10000|snap-magnet.*10000.*12250/i,
+			/snap-magnet.*floor.*32250.*exceeds.*30000|snap-magnet.*30000.*32250/i,
 			'surface segment must be rejected by MAX_FLOOR_MS',
 		);
 	}
 
 	// 2. Bookend segment (intro): caught by MAX_FLOOR_MS.
-	// This is the critical case — the old surface budget only covered surfaces.
 	{
 		const measurements = [
 			{ id: 'intro', duration_seconds: absurdN },
@@ -910,7 +905,7 @@ test('hold floor MAX_FLOOR_MS: bookends reject a floor above the upper bound; su
 		];
 		assert.throws(
 			() => voice.fitCaptureScript({ script, timings, measurements }),
-			/intro.*floor.*12250.*exceeds.*10000|intro.*10000.*12250/i,
+			/intro.*floor.*32250.*exceeds.*30000|intro.*30000.*32250/i,
 			'intro bookend must be rejected by MAX_FLOOR_MS',
 		);
 	}
@@ -924,7 +919,7 @@ test('hold floor MAX_FLOOR_MS: bookends reject a floor above the upper bound; su
 		];
 		assert.throws(
 			() => voice.fitCaptureScript({ script, timings, measurements }),
-			/outro.*floor.*12250.*exceeds.*10000|outro.*10000.*12250/i,
+			/outro.*floor.*32250.*exceeds.*30000|outro.*30000.*32250/i,
 			'outro bookend must be rejected by MAX_FLOOR_MS',
 		);
 	}

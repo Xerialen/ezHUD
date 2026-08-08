@@ -22,6 +22,7 @@ import {
 	MAX_HOLD_MS,
 	validateCaptureScript,
 } from './capture.mjs';
+import { MAX_SURFACE_GUIDELINE_SECONDS } from './script.mjs';
 
 const SCRIPT_SCHEMA_VERSION = 'changedrop-script/1';
 const TIMINGS_SCHEMA_VERSION = 'changedrop-timings/1';
@@ -50,15 +51,12 @@ export const FIT_SAFETY_MARGIN_SECONDS = 0.25;
 // 25 ms allowance covers that boundary noise while remaining far below both
 // the 100 ms minimum hold and narration fit margins.
 export const FIXED_ACTION_NEGATIVE_EPSILON_SECONDS = 0.025;
-// Ten seconds (10 000 ms) is the upper bound for a segment floor, matching the
-// existing 10-second surface budget. A bookend with a narration longer than
-// ~9.75 s has never been possible in practice — this bound makes that limit
-// explicit.  It applies to floor_ms directly (not to segment kind) so a third
-// segment type cannot accidentally inherit the gap.  For surfaces the existing
-// N + M ≤ 10 budget will fire first; this guard closes the bookend hole and
-// ensures one authoring error cannot hang a run through the floor any more than
-// MAX_HOLD_MS prevents it through a single hold.
-export const MAX_FLOOR_MS = 10_000;
+// The sole hard bound in the pipeline.  A hold that reaches 30 s is a broken
+// narration file, not an editorial choice — this guards against one authoring
+// error hanging a run through the floor, just as MAX_HOLD_MS guards against it
+// through a single hold.  The ~15 s surface guideline (MAX_SURFACE_GUIDELINE_SECONDS)
+// is advisory and does not reject.
+export const MAX_FLOOR_MS = 30_000;
 
 const ERROR_EXIT_CODES = Object.freeze({
 	E_SCHEMA_INVALID: 2,
@@ -196,8 +194,8 @@ export function validateTimingReceipt(script, timings) {
 		}
 		previousStart = timing.start_seconds;
 		previousEnd = timing.start_seconds + timing.duration_seconds;
-		if (segment.kind === 'surface' && timing.duration_seconds > 10) {
-			throw new Error(`Measured surface "${segment.surface}" exceeds the 10-second narration budget.`);
+		if (segment.kind === 'surface' && timing.duration_seconds > MAX_SURFACE_GUIDELINE_SECONDS) {
+			console.warn(`Measured surface "${segment.surface}" at ${timing.duration_seconds.toFixed(1)} s, exceeding the ${MAX_SURFACE_GUIDELINE_SECONDS} s guideline. The narration will proceed but should be reviewed.`);
 		}
 		if (JSON.stringify(timing.actions) !== JSON.stringify(segment.walkthrough.map(machineAction))) {
 			throw new Error(`Changedrop timing action sequence for "${segment.id}" is stale; capture the script again.`);
@@ -340,7 +338,7 @@ export function fitCaptureScript({ script, timings, measurements } = {}) {
 			throw new Error(`Natural narration for segment "${segment.id}" leaves less than 100 ms for the floor.`);
 		}
 		if (floorMs > MAX_FLOOR_MS) {
-			throw new Error(`Segment "${segment.id}" floor ${floorMs} ms exceeds the ${MAX_FLOOR_MS} ms upper bound. A narration longer than ~9.75 s cannot produce a valid floor — check the narration file.`);
+			throw new Error(`Segment "${segment.id}" floor ${floorMs} ms exceeds the ${MAX_FLOOR_MS} ms hard upper bound. A narration longer than ~29.75 s cannot produce a valid floor — check the narration file.`);
 		}
 
 		// Computed for the receipt; not used to build the hold.
@@ -370,8 +368,8 @@ export function fitCaptureScript({ script, timings, measurements } = {}) {
 		});
 
 		const projectedDurationSeconds = Number((measurement.duration_seconds + FIT_SAFETY_MARGIN_SECONDS).toFixed(6));
-		if (segment.kind === 'surface' && projectedDurationSeconds > 10) {
-			throw new Error(`Fitted segment "${segment.id}" exceeds the 10-second surface budget.`);
+		if (segment.kind === 'surface' && projectedDurationSeconds > MAX_SURFACE_GUIDELINE_SECONDS) {
+			console.warn(`Fitted segment "${segment.id}" projected at ${projectedDurationSeconds.toFixed(1)} s, exceeding the ${MAX_SURFACE_GUIDELINE_SECONDS} s guideline. The fit will proceed but should be reviewed.`);
 		}
 		fittedScript.segments.push({ ...segment, walkthrough });
 		fittedSegments.push({

@@ -12,14 +12,18 @@ const OUTPUT_SCHEMA_VERSION = 'changedrop-script/1';
 const ROOT_VARIABLE = 'EZHUD_CHANGEDROP_ROOT';
 const INTRO = "Hey guys, it's Xerial. Here's what's new in ezHUD.";
 const OUTRO = "Be safe, and don't walk on spawns.";
-const MAX_SURFACE_SECONDS = 10.0;
+// The owner's guideline (~15 s per feature) is advisory: the pipeline reports
+// estimates above this threshold but does not reject on them. The sole hard
+// bound is MAX_FLOOR_MS (voice.mjs), which guards against broken narration
+// files that would stall a run.
+export const MAX_SURFACE_GUIDELINE_SECONDS = 15.0;
 const MAX_HOLD_MS = 5_000;
 const ACTIONS = new Set(['wait-for', 'resize', 'click', 'hold', 'highlight']);
 const SELECTOR_PATTERN = /^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\[data-changedrop="[a-z0-9]+(?:-[a-z0-9]+)*"\])$/;
 
 // 2.2 words/s is 132 wpm: a deliberately conservative planning rate near the
-// low end of clear conversational narration. It is only an early 10-second
-// budget check; Stage 4 measures natural audio and fits explicit hold padding.
+// low end of clear conversational narration. It feeds an advisory guideline
+// check; Stage 4 measures natural audio and fits explicit hold padding.
 export const WORDS_PER_SECOND = 2.2;
 
 function exactObject(value, expectedKeys, at) {
@@ -261,8 +265,8 @@ function assertScriptContract(script) {
 		throw new Error('Changedrop script outro must be a standalone segment exactly once and last.');
 	}
 	for (const entry of script.segments.filter((candidate) => candidate.kind === 'surface')) {
-		if (entry.estimated_duration_seconds > MAX_SURFACE_SECONDS) {
-			throw new Error(`Changedrop script surface "${entry.surface}" exceeds the 10.0 second budget.`);
+		if (entry.estimated_duration_seconds > MAX_SURFACE_GUIDELINE_SECONDS) {
+			console.warn(`Changedrop script surface "${entry.surface}" estimated at ${entry.estimated_duration_seconds.toFixed(1)} s, exceeding the ${MAX_SURFACE_GUIDELINE_SECONDS} s guideline. The script will proceed but should be reviewed.`);
 		}
 	}
 	return script;
@@ -302,8 +306,8 @@ export function authorChangedropScript(summary, authoring, { authoringPath: requ
 			text: treatment.text,
 			walkthrough: treatment.walkthrough,
 		});
-		if (authoredSegment.estimated_duration_seconds > MAX_SURFACE_SECONDS) {
-			throw new Error(`Changedrop script surface "${feature.surface}" exceeds the 10.0 second budget.`);
+		if (authoredSegment.estimated_duration_seconds > MAX_SURFACE_GUIDELINE_SECONDS) {
+			console.warn(`Changedrop script surface "${feature.surface}" estimated at ${authoredSegment.estimated_duration_seconds.toFixed(1)} s, exceeding the ${MAX_SURFACE_GUIDELINE_SECONDS} s guideline. The script will proceed but should be reviewed.`);
 		}
 		return authoredSegment;
 	});

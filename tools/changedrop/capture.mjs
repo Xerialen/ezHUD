@@ -18,6 +18,8 @@ import process from 'node:process';
 import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 
+import { MAX_SURFACE_GUIDELINE_SECONDS } from './script.mjs';
+
 const INPUT_SCHEMA_VERSION = 'changedrop-script/1';
 const OUTPUT_SCHEMA_VERSION = 'changedrop-timings/1';
 const ROOT_VARIABLE = 'EZHUD_CHANGEDROP_ROOT';
@@ -223,7 +225,9 @@ export function validateCaptureScript(script) {
 		if (texts.has(segment.text)) throw new Error('Changedrop script contains duplicated segment text.');
 		texts.add(segment.text);
 		finiteNumber(segment.estimated_duration_seconds, `Changedrop segment "${segment.id}" estimate`, { positive: true });
-		if (segment.estimated_duration_seconds > 10) throw new Error(`Changedrop segment "${segment.id}" exceeds 10 seconds.`);
+		if (segment.estimated_duration_seconds > MAX_SURFACE_GUIDELINE_SECONDS) {
+			console.warn(`Changedrop segment "${segment.id}" estimated at ${segment.estimated_duration_seconds.toFixed(1)} s, exceeding the ${MAX_SURFACE_GUIDELINE_SECONDS} s guideline. The script will proceed but should be reviewed.`);
+		}
 		validateWalkthrough(segment.walkthrough, `Changedrop segment "${segment.id}" walkthrough`);
 		assertNarrationPadding(segment.walkthrough, `Changedrop segment "${segment.id}" walkthrough`);
 	}

@@ -152,7 +152,7 @@ test('case 3: each changed surface has one budgeted segment and a keyed walkthro
 	}
 	for (const segment of surfaces) {
 		assert.equal(segment.id, segment.surface);
-		assert.ok(segment.estimated_duration_seconds <= 10.0, `${segment.surface} exceeds 10.0 seconds`);
+		assert.ok(segment.estimated_duration_seconds <= 15.0, `${segment.surface} exceeds 15.0 seconds`);
 	}
 });
 
