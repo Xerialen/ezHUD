@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "release": "release-2",
+  "source": {
+    "repository": "Xerialen/ezHUD",
+    "ref": "origin/release/2",
+    "commit": "a239ecc9cace4ace3da62c5b7e2b529bda00de78"
+  },
+  "baseline": {
+    "repository": "Xerialen/ezHUD",
+    "ref": "origin/main",
+    "commit": "1950c15068bf05c0db31dd0e0d709066d013c0a3"
+  },
+  "engine": {
+    "repository": "Xerialen/fteqw",
+    "ref": "ezhud-base",
+    "commit": "41e13638d62779b79e27defe74fe961910a260d3",
+    "artifact": "ftewebglcl.wasm",
+    "sha256": "2055a054e3a918d268f37cfe809fbde5aeb50cebce30db6d13112bc6182948e2",
+    "patch": {
+      "path": "spikes/fte-web/fteqw.diff",
+      "git_blob": "93e1a599419376523d1f90f49553a62976b6ba83",
+      "sha256": "15ff6ac483c154474f0a767576a12bc0774cb80ab6b683248491302b7270e49c"
+    }
+  },
+  "toolchain": {
+    "node": "v22.23.2",
+    "chrome": "Google Chrome 151.0.7922.71",
+    "playwright": "1.62.1"
+  },
+  "commands": {
+    "assemble": "BASE_PATH=/ezHUD/ DIST_DIR=../dist-release2-evidence ENGINE_DIR=../qa-fte-87-after/engine/release GAME_DATA_DIR=../game-data bash tools/fte-web/assemble-public.sh",
+    "capture": "DIST_DIR=../dist-release2-evidence BASE_PATH=/ezHUD/ node tools/release/capture.mjs --release-dir docs/release-2",
+    "annotate": "node tools/release/annotate.mjs --release-dir docs/release-2"
+  },
+  "artifacts": [
+    {
+      "path": "captures.json",
+      "role": "capture-manifest",
+      "bytes": 2337,
+      "sha256": "ec811e2b8a9bafc3aff8f8b18381f4978783e71e87034d02fd80604a8e9bee6e"
+    },
+    {
+      "path": "annotations.json",
+      "role": "annotation-manifest",
+      "bytes": 1253,
+      "sha256": "7f0bdb80595ceb62eb9881e30ac51835882c843f6ecc349bfe38fe66c2b4d96f"
+    },
+    {
+      "path": "captures/editor-size-focused.png",
+      "role": "focused-source",
+      "bytes": 8832,
+      "sha256": "72e120969213a03295fcd02f1c37a5e811495ea063b8705ee45a4c6d50972300"
+    },
+    {
+      "path": "captures/anchor-focused.png",
+      "role": "focused-source",
+      "bytes": 46845,
+      "sha256": "1f04cea2b0fdb7ce1482553a79677d041dea270fcb72f5720e126033b47fd0b0"
+    },
+    {
+      "path": "captures/drag-assist-focused.png",
+      "role": "focused-source",
+      "bytes": 72456,
+      "sha256": "aee67e5e2271830d7d39438999441b90e2c659eccda3d636e758462e84f503c2"
+    },
+    {
+      "path": "captures/demo-moments-focused.png",
+      "role": "focused-source",
+      "bytes": 19299,
+      "sha256": "ca6293c6fef082607f62d53c0fb5cef2991ce88f8a918337fe95f87e9e1ca4d6"
+    },
+    {
+      "path": "img/editor-size-focused-annotated.png",
+      "role": "annotated-output",
+      "bytes": 10317,
+      "sha256": "0332940eb79e840170ba843a692215273684209b912628ad048e9315da59ed62"
+    },
+    {
+      "path": "img/anchor-focused-annotated.png",
+      "role": "annotated-output",
+      "bytes": 48559,
+      "sha256": "d34ebcfa599c0f7d3ff94311c4eeed19218c5ebf6fe2a9c8cd3c46c622843780"
+    },
+    {
+      "path": "img/drag-assist-focused-annotated.png",
+      "role": "annotated-output",
+      "bytes": 74236,
+      "sha256": "cba5f66c7c69e8d81c3fa0c5b3a159175beb6c34d4cedbd13c18b853e90e6b3a"
+    },
+    {
+      "path": "img/demo-moments-focused-annotated.png",
+      "role": "annotated-output",
+      "bytes": 21023,
+      "sha256": "7b684ab761f8e359ac5ba35f711a51b47586a363308b4b5d917786638f483977"
+    }
+  ],
+  "tooling": {
+    "files": [
+      {
+        "path": "tools/release/capture.mjs",
+        "bytes": 15048,
+        "sha256": "e7da4693d6a3be00c0cb66093842dbedeed4bd487d0a809324b59374f95b3112"
+      },
+      {
+        "path": "tools/release/annotate.mjs",
+        "bytes": 5547,
+        "sha256": "4ddb7aa74aa945f88b8793b77fb1daf6d1387bdefb2d00131291a4fcfd78ac9d"
+      },
+      {
+        "path": "tools/release/paths.mjs",
+        "bytes": 1429,
+        "sha256": "6f1b68f421fdffc7be2bea2a6524098a1ff6b05b90b8e8d68d498155d9654187"
+      }
+    ]
+  }
+}

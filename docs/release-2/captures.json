@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "captures": [
+    {
+      "id": "editor-size",
+      "page": "./",
+      "output": "captures/editor-size-focused.png",
+      "viewport": { "width": 1400, "height": 788 },
+      "state": {
+        "demo": "paused",
+        "demoPath": "demos/hudtest_src.mvd",
+        "demoTimeSeconds": 30,
+        "trackPlayer": "Book Milton",
+        "hideDynamicHud": true,
+        "uiScale": "1.25"
+      },
+      "clip": { "x": 860, "y": 0, "w": 240, "h": 80 },
+      "deviceScaleFactor": 2,
+      "focusSelector": "#ui-scale",
+      "expectedTarget": { "x": 286, "y": 28, "w": 175, "h": 58 }
+    },
+    {
+      "id": "anchor",
+      "page": "./",
+      "output": "captures/anchor-focused.png",
+      "viewport": { "width": 1400, "height": 788 },
+      "state": {
+        "demo": "paused",
+        "demoPath": "demos/hudtest_src.mvd",
+        "demoTimeSeconds": 30,
+        "trackPlayer": "Book Milton",
+        "hideDynamicHud": true,
+        "selectElement": "health",
+        "scrollFocus": true
+      },
+      "clip": { "x": 1088, "y": 350, "w": 312, "h": 300 },
+      "deviceScaleFactor": 2,
+      "focusSelector": "#f-health-place",
+      "expectedTarget": { "x": 254, "y": 86, "w": 330, "h": 47 }
+    },
+    {
+      "id": "drag-assist",
+      "page": "./",
+      "output": "captures/drag-assist-focused.png",
+      "viewport": { "width": 1400, "height": 788 },
+      "state": {
+        "demo": "paused",
+        "demoPath": "demos/hudtest_src.mvd",
+        "demoTimeSeconds": 30,
+        "trackPlayer": "Book Milton",
+        "hideDynamicHud": true
+      },
+      "clip": { "x": 1088, "y": 40, "w": 312, "h": 300 },
+      "deviceScaleFactor": 2,
+      "focusSelector": ".drag-assist__row",
+      "expectedTarget": { "x": 50, "y": 120, "w": 550, "h": 50 }
+    },
+    {
+      "id": "demo-moments",
+      "page": "./",
+      "output": "captures/demo-moments-focused.png",
+      "viewport": { "width": 1400, "height": 788 },
+      "state": {
+        "demo": "paused",
+        "demoPath": "demos/hudtest_src.mvd",
+        "demoTimeSeconds": 30,
+        "trackPlayer": "Book Milton",
+        "hideDynamicHud": true
+      },
+      "clip": { "x": 500, "y": 604, "w": 500, "h": 184 },
+      "deviceScaleFactor": 2,
+      "focusSelector": ".fte-moments",
+      "expectedTarget": { "x": 113, "y": 23, "w": 473, "h": 45 }
+    }
+  ]
+}

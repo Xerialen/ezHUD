@@ -1,15 +1,17 @@
 #!/usr/bin/env node
-// Ring changed controls in focused Release 1 captures. The source is embedded
-// as data and never written; Playwright screenshots an exact-size SVG overlay
-// into the separate output declared by annotations.json.
+// Ring changed controls in focused release captures. The source is embedded as
+// data and never written; Playwright screenshots an exact-size SVG overlay into
+// the separate output declared by annotations.json.
 import assert from 'node:assert/strict';
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { resolveReleaseDir } from './paths.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const releaseDir = path.join(repo, 'docs/release-1');
+const releaseDir = resolveReleaseDir(repo);
+const releaseSlug = path.basename(releaseDir);
 const manifest = JSON.parse(await readFile(path.join(releaseDir, 'annotations.json'), 'utf8'));
 const RING_PADDING = 6;
 const LIGHT = '#fffaf2';
@@ -25,7 +27,7 @@ function pngDimensions(bytes, label) {
 function releasePath(rel, label) {
 	assert.equal(typeof rel, 'string', `${label} must be a string`);
 	const resolved = path.resolve(releaseDir, rel);
-	assert(resolved.startsWith(`${releaseDir}${path.sep}`), `${label} escapes docs/release-1`);
+	assert(resolved.startsWith(`${releaseDir}${path.sep}`), `${label} escapes docs/${releaseSlug}`);
 	return resolved;
 }
 
