@@ -499,6 +499,23 @@ function renderTree() {
 		}
 
 		row.dataset.name = item.name;
+
+		// Every tree row carries a data-changedrop attribute for the filming
+		// pipeline. The value is a kebab-case name prefixed with
+		// "hud-element-", validated against the DSL's
+		// [a-z0-9]+(?:-[a-z0-9]+)* pattern. A name that normalises to an
+		// invalid value (e.g. double hyphen) is caught here at generation
+		// time rather than silently failing at filming.
+		const CHANGEDROP_VALUE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+		const normalised = item.name.toLowerCase().replace(/[^a-z0-9]/g, '-');
+		if (!CHANGEDROP_VALUE.test(normalised)) {
+			throw new Error(
+				`Element name "${item.name}" normalises to "${normalised}" ` +
+				`which does not match [a-z0-9]+(?:-[a-z0-9]+)*`,
+			);
+		}
+		row.dataset.changedrop = `hud-element-${normalised}`;
+
 		const meta = document.createElement('span');
 		meta.className = 'tree__meta';
 		// Say what the engine knows: a drawn element has a real position, an
