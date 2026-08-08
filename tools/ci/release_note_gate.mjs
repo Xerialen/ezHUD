@@ -158,16 +158,22 @@ export function parseChangedropSection(body = '') {
 		fields.set(key, value);
 	}
 
-	const hasRun = fields.has('run');
+	// Validate publish.state when present, regardless of form (case 11).
+	if (fields.has('publish.state') && fields.get('publish.state') !== 'withheld') {
+		return { ok: false, reason: '## Changedrop publish.state must be "withheld".' };
+	}
+
+	const FORM_A_FIELDS = new Set(['run', 'output', 'sha256', 'publish.state', 'delivered']);
+	const hasFormA = [...FORM_A_FIELDS].some((f) => fields.has(f));
 	const hasDecision = fields.has('decision');
 
-	// Both forms present → fail (case 7).
-	if (hasRun && hasDecision) {
+	// Both forms present → fail (case 7). Detect form A on any of its five fields.
+	if (hasFormA && hasDecision) {
 		return { ok: false, reason: '## Changedrop section mixes form A (run/output/sha256/publish.state/delivered) and form B (decision: skip / Reason) fields; use one form.' };
 	}
 
 	// Form A: video exists.
-	if (hasRun) {
+	if (hasFormA) {
 		const requiredA = ['run', 'output', 'sha256', 'publish.state', 'delivered'];
 		for (const f of requiredA) {
 			if (!fields.has(f)) {
@@ -177,10 +183,6 @@ export function parseChangedropSection(body = '') {
 		const sha256 = fields.get('sha256');
 		if (!/^[0-9a-fA-F]{64}$/.test(sha256)) {
 			return { ok: false, reason: '## Changedrop sha256 must be exactly 64 hex characters.' };
-		}
-		const publishState = fields.get('publish.state');
-		if (publishState !== 'withheld') {
-			return { ok: false, reason: '## Changedrop publish.state must be "withheld".' };
 		}
 		return { ok: true, reason: null, form: 'A', fields };
 	}

@@ -324,25 +324,39 @@ test('#85 case 7: both form A and form B together in the same PR body fail', (t)
 test('#85 case 7b: mixed form A/B fields in a single section fail', (t) => {
 	const repo = fixture();
 	t.after(repo.cleanup);
-	const result = decideReleaseNoteGate({
-		prBody: applicableBody('', `## Changedrop\nrun: 20260808-001\ndecision: skip\noutput: walkthrough.mp4\nReason: mixed.`),
-		labels: ['release'],
-		repoRoot: repo.repoRoot,
-	});
-	assert.equal(result.ok, false, result.reason);
-	assert.match(result.reason, /mixe[sd]|form A.*form B|form B.*form A/i);
+	// Two variants: run with decision, and form A fields without run alongside decision.
+	const variants = [
+		['run + decision', 'run: 20260808-001\ndecision: skip\noutput: walkthrough.mp4\nReason: mixed.'],
+		['no-run form A + decision', `decision: skip\nReason: analyzer skipped\noutput: release-2.mp4\nsha256: ${'a'.repeat(64)}\npublish.state: withheld\ndelivered: Dumpen/Ezhud/x/`],
+	];
+	for (const [name, section] of variants) {
+		const result = decideReleaseNoteGate({
+			prBody: applicableBody('', `## Changedrop\n${section}`),
+			labels: ['release'],
+			repoRoot: repo.repoRoot,
+		});
+		assert.equal(result.ok, false, `${name}: ${result.reason}`);
+		assert.match(result.reason, /mixe[sd]|form A.*form B|form B.*form A/i, name);
+	}
 });
 
 test('#85 case 11: changedrop section fails when publish.state is not withheld', (t) => {
 	const repo = fixture();
 	t.after(repo.cleanup);
-	const result = decideReleaseNoteGate({
-		prBody: applicableBody('', `## Changedrop\nrun: 20260808-001\noutput: walkthrough.mp4\nsha256: ${'a'.repeat(64)}\npublish.state: published\ndelivered: Dumpen/Ezhud/release-2/20260808-001/`),
-		labels: ['release'],
-		repoRoot: repo.repoRoot,
-	});
-	assert.equal(result.ok, false, result.reason);
-	assert.match(result.reason, /publish\.state|withheld/i);
+	// publish.state must be withheld regardless of form.
+	const variants = [
+		['form A', `## Changedrop\nrun: 20260808-001\noutput: walkthrough.mp4\nsha256: ${'a'.repeat(64)}\npublish.state: published\ndelivered: Dumpen/Ezhud/release-2/20260808-001/`],
+		['form B', '## Changedrop\ndecision: skip\nReason: analyzer skipped\npublish.state: posted'],
+	];
+	for (const [name, section] of variants) {
+		const result = decideReleaseNoteGate({
+			prBody: applicableBody('', section),
+			labels: ['release'],
+			repoRoot: repo.repoRoot,
+		});
+		assert.equal(result.ok, false, `${name}: ${result.reason}`);
+		assert.match(result.reason, /publish\.state|withheld/i, name);
+	}
 });
 
 test('#85 case 10: changedrop section fails on private paths, hostname, or audio.path', (t) => {
