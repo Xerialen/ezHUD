@@ -23,6 +23,7 @@ import {
 import {
 	assertNarrationFitsCapture,
 	inspectDeliveredWav,
+	MAX_NARRATION_UNDERSHOOT_SECONDS,
 	validateNarrationManifest,
 	validateTimingReceipt,
 } from './voice.mjs';
@@ -222,7 +223,7 @@ async function verifyDeliveredNarration({ directory, script, timings, narration,
 		}
 		files.push({ id: entry.id, file, sha256: artifact.sha256, duration_seconds: wav.duration_seconds });
 	}
-	assertNarrationFitsCapture({ script, timings, narration, trimOffset: timings.segments[0].start_seconds });
+	assertNarrationFitsCapture({ script, timings, narration });
 	return files;
 }
 
@@ -274,7 +275,13 @@ function decimalSeconds(value) {
 	return Number(value.toFixed(6)).toString();
 }
 
-export function buildFfmpegArguments({ captureFile, narrationFiles, timings, outputFile } = {}) {
+export function buildFfmpegArguments({
+	captureFile,
+	narrationFiles,
+	timings,
+	outputFile,
+	trimStart = timings?.segments?.[0]?.start_seconds,
+} = {}) {
 	nonEmptyString(captureFile, 'Fitted capture file');
 	nonEmptyString(outputFile, 'Changedrop output file');
 	if (!Array.isArray(narrationFiles) || narrationFiles.length === 0
@@ -291,7 +298,19 @@ export function buildFfmpegArguments({ captureFile, narrationFiles, timings, out
 	// before the intro so the output begins at the first spoken word.
 	// S is the measured offset from capture start to the intro segment start;
 	// the four coupled mux parameters (trim, adelay, apad, -t) all shift by S.
-	const trimStart = timings.segments[0].start_seconds;
+	// trimStart defaults to S (derived, not caller-supplied) so production
+	// callers get a correct zero-delay intro. The assertion below is a
+	// regression guard: it only fails when a future code change or a test
+	// injects a trimStart that does not equal segments[0].start_seconds.
+	const introDelayMs = Math.round((timings.segments[0].start_seconds - trimStart) * 1000);
+	if (introDelayMs > Math.round(MAX_NARRATION_UNDERSHOOT_SECONDS * 1000)) {
+		throw new Error(
+			`Intro narration adelay ${introDelayMs} ms exceeds the ` +
+			`${Math.round(MAX_NARRATION_UNDERSHOOT_SECONDS * 1000)} ms dead-air bound. ` +
+			`The capture has a ${timings.segments[0].start_seconds.toFixed(3)}s lead-in before the intro segment; ` +
+			`the mux must trim it so the first spoken word starts at t=0.`,
+		);
+	}
 	const trimmedDuration = decimalSeconds(timings.recording.duration_seconds - trimStart);
 	const filters = [`[0:v]trim=start=${decimalSeconds(trimStart)}:duration=${trimmedDuration},setpts=PTS-STARTPTS[muxvideo]`];
 	for (const [index, segment] of timings.segments.entries()) {

@@ -402,21 +402,11 @@ export function validateNarrationManifest(narration, script) {
 	return privacyChecked(narration, 'Changedrop narration');
 }
 
-export function assertNarrationFitsCapture({ script, timings, narration, trimOffset = 0 } = {}) {
+export function assertNarrationFitsCapture({ script, timings, narration } = {}) {
 	validatedVoiceInputs(script, timings);
 	if (!narration || narration.schema_version !== OUTPUT_SCHEMA_VERSION || !Array.isArray(narration.segments)
 		|| narration.segments.length !== script.segments.length) {
 		throw new Error('Changedrop narration must contain exactly one entry per fitted capture segment.');
-	}
-	finiteNumber(trimOffset, 'Trim offset', { minimum: 0 });
-	// The intro segment starts at an offset from the capture start. When the
-	// mux trims the lead-in, the effective offset in the output is zero. If no
-	// trim is applied (or the offset is wrong), a large lead-in creates dead
-	// air before the first spoken word.
-	const effectiveIntroStart = Number((timings.segments[0].start_seconds - trimOffset).toFixed(6));
-	if (effectiveIntroStart > MAX_NARRATION_UNDERSHOOT_SECONDS) {
-		const introId = narration.segments[0].id;
-		throw new Error(`Narration fit failed: the intro segment "${introId}" has an effective lead-in of ${effectiveIntroStart.toFixed(3)}s before the first narration begins, exceeding the ${MAX_NARRATION_UNDERSHOOT_SECONDS.toFixed(3)}s dead-air bound. The mux must trim the capture lead-in by at least ${(effectiveIntroStart - MAX_NARRATION_UNDERSHOOT_SECONDS).toFixed(3)}s.`);
 	}
 	const segments = narration.segments.map((entry, index) => {
 		const expected = script.segments[index];

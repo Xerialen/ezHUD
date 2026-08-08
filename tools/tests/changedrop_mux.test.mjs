@@ -322,275 +322,42 @@ test('regression: four coupled trim points all shift by S with a long-head fixtu
 	assert.equal(args.includes('36.272525'), false);
 });
 
-test('regression: voice gate detects an excessive capture lead-in without a trim offset', async () => {
+test('regression: trimStart assertion guards against the parameter drifting from segments[0]', async () => {
 	assert.ifError(loadError);
-	// If the intro segment starts 4.419304 s into the recording and no trim
-	// offset is provided, the dead air before the first spoken word exceeds
-	// MAX_NARRATION_UNDERSHOOT_SECONDS (2.0 s). The gate must reject it.
-	const script = {
-		schema_version: 'changedrop-script/1',
-		setup: [
-			{
-				instruction: 'Wait for the synthetic editor to become visible.',
-				action: 'wait-for',
-				selector: '#editor-ready',
-				state: 'visible',
-			},
+	// trimStart defaults to segments[0].start_seconds in production, so the
+	// intro adelay is always 0 ms. The assertion cannot fire from fixture data
+	// alone — RED only comes from injecting trimStart = 0, which simulates a
+	// future code change that removes the trim. This is a regression guard, not
+	// a data-driven check. It does NOT close FAIL 2.
+	const baseFixture = {
+		captureFile: 'capture-fitted/walkthrough.webm',
+		narrationFiles: [
+			{ id: 'intro', file: 'narration/intro.wav' },
+			{ id: 'drag-assist', file: 'narration/drag-assist.wav' },
+			{ id: 'outro', file: 'narration/outro.wav' },
 		],
-		segments: [
-			{
-				id: 'intro',
-				kind: 'bookend',
-				surface: null,
-				text: "Hey guys, it's Xerial. Here's what's new in ezHUD.",
-				estimated_duration_seconds: 3.0,
-				walkthrough: [{ instruction: 'hold for narration', action: 'hold', duration_ms: 3000, fit: 'narration' }],
+		timings: {
+			recording: {
+				basename: 'walkthrough.webm',
+				bytes: 2048,
+				duration_seconds: 36.272525,
+				container_duration_seconds: 37.16,
 			},
-			{
-				id: 'snap-magnet',
-				kind: 'surface',
-				surface: 'snap-magnet',
-				text: 'Your HUD elements can now snap cleanly into line.',
-				estimated_duration_seconds: 5.0,
-				walkthrough: [{ instruction: 'hold on surface', action: 'hold', duration_ms: 5000, fit: 'narration' }],
-			},
-			{
-				id: 'outro',
-				kind: 'bookend',
-				surface: null,
-				text: "Be safe, and don't walk on spawns.",
-				estimated_duration_seconds: 2.5,
-				walkthrough: [{ instruction: 'hold for outro', action: 'hold', duration_ms: 2500, fit: 'narration' }],
-			},
-		],
+			segments: [
+				{ id: 'intro', start_seconds: 4.419304 },
+				{ id: 'drag-assist', start_seconds: 23.785 },
+				{ id: 'outro', start_seconds: 32.14 },
+			],
+		},
+		outputFile: 'mux/changedrop.mp4',
 	};
-	assert.throws(() => voice.assertNarrationFitsCapture({
-		script,
-		timings: {
-			schema_version: 'changedrop-timings/1',
-			recording: {
-				basename: 'walkthrough.webm',
-				bytes: 2048,
-				duration_seconds: 36.272525,
-				container_duration_seconds: 37.16,
-			},
-			setup_actions: [{ action: 'wait-for', selector: '#editor-ready', state: 'visible' }],
-			segments: [
-				{
-					id: 'intro',
-					kind: 'bookend',
-					surface: null,
-					start_seconds: 4.419304,
-					duration_seconds: 3.0,
-					actions: [{ action: 'hold', duration_ms: 3000, fit: 'narration' }],
-					highlights: [],
-				},
-				{
-					id: 'snap-magnet',
-					kind: 'surface',
-					surface: 'snap-magnet',
-					start_seconds: 7.419304,
-					duration_seconds: 5.0,
-					actions: [{ action: 'hold', duration_ms: 5000, fit: 'narration' }],
-					highlights: [],
-				},
-				{
-					id: 'outro',
-					kind: 'bookend',
-					surface: null,
-					start_seconds: 12.419304,
-					duration_seconds: 2.5,
-					actions: [{ action: 'hold', duration_ms: 2500, fit: 'narration' }],
-					highlights: [],
-				},
-			],
-		},
-		narration: {
-			schema_version: 'changedrop-narration/1',
-			project: 'ezhud',
-			voice_profile: 'xeri-en-v1',
-			segments: [
-				{
-					id: 'intro',
-					kind: 'bookend',
-					surface: null,
-					request_id: 'ezhud-00000000000000000000000000000000',
-					request_hash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
-					status: 'rendered',
-					rerendered: true,
-					profile_revision: 1,
-					pronunciation_profile: 'default',
-					pronunciation_revision: 1,
-					normalized_text_sha256: '0000000000000000000000000000000000000000000000000000000000000000',
-					audio: { basename: 'intro.wav', sha256: '0000000000000000000000000000000000000000000000000000000000000000' },
-					duration_seconds: 2.5,
-					engine: {
-						name: 'chatterbox-multilingual',
-						t3_model: 'synthetic-t3',
-						cli_sha256: '0000000000000000000000000000000000000000000000000000000000000000',
-					},
-					rendered_at: '2026-08-07T12:00:00Z',
-				},
-				{
-					id: 'snap-magnet',
-					kind: 'surface',
-					surface: 'snap-magnet',
-					request_id: 'ezhud-00000000000000000000000000000001',
-					request_hash: 'sha256:0000000000000000000000000000000000000000000000000000000000000001',
-					status: 'rendered',
-					rerendered: true,
-					profile_revision: 1,
-					pronunciation_profile: 'default',
-					pronunciation_revision: 1,
-					normalized_text_sha256: '0000000000000000000000000000000000000000000000000000000000000001',
-					audio: { basename: 'snap-magnet.wav', sha256: '0000000000000000000000000000000000000000000000000000000000000001' },
-					duration_seconds: 4.8,
-					engine: {
-						name: 'chatterbox-multilingual',
-						t3_model: 'synthetic-t3',
-						cli_sha256: '0000000000000000000000000000000000000000000000000000000000000001',
-					},
-					rendered_at: '2026-08-07T12:00:00Z',
-				},
-				{
-					id: 'outro',
-					kind: 'bookend',
-					surface: null,
-					request_id: 'ezhud-00000000000000000000000000000002',
-					request_hash: 'sha256:0000000000000000000000000000000000000000000000000000000000000002',
-					status: 'rendered',
-					rerendered: true,
-					profile_revision: 1,
-					pronunciation_profile: 'default',
-					pronunciation_revision: 1,
-					normalized_text_sha256: '0000000000000000000000000000000000000000000000000000000000000002',
-					audio: { basename: 'outro.wav', sha256: '0000000000000000000000000000000000000000000000000000000000000002' },
-					duration_seconds: 2.3,
-					engine: {
-						name: 'chatterbox-multilingual',
-						t3_model: 'synthetic-t3',
-						cli_sha256: '0000000000000000000000000000000000000000000000000000000000000002',
-					},
-					rendered_at: '2026-08-07T12:00:00Z',
-				},
-			],
-		},
-	}), /effective lead-in|dead-air bound|trim the capture lead-in/i);
-	// The same fixture with the correct trim offset passes: the mux trims
-	// 4.419304 s from the start, so the effective lead-in is zero.
-	assert.doesNotThrow(() => voice.assertNarrationFitsCapture({
-		script,
-		timings: {
-			schema_version: 'changedrop-timings/1',
-			recording: {
-				basename: 'walkthrough.webm',
-				bytes: 2048,
-				duration_seconds: 36.272525,
-				container_duration_seconds: 37.16,
-			},
-			setup_actions: [{ action: 'wait-for', selector: '#editor-ready', state: 'visible' }],
-			segments: [
-				{
-					id: 'intro',
-					kind: 'bookend',
-					surface: null,
-					start_seconds: 4.419304,
-					duration_seconds: 3.0,
-					actions: [{ action: 'hold', duration_ms: 3000, fit: 'narration' }],
-					highlights: [],
-				},
-				{
-					id: 'snap-magnet',
-					kind: 'surface',
-					surface: 'snap-magnet',
-					start_seconds: 7.419304,
-					duration_seconds: 5.0,
-					actions: [{ action: 'hold', duration_ms: 5000, fit: 'narration' }],
-					highlights: [],
-				},
-				{
-					id: 'outro',
-					kind: 'bookend',
-					surface: null,
-					start_seconds: 12.419304,
-					duration_seconds: 2.5,
-					actions: [{ action: 'hold', duration_ms: 2500, fit: 'narration' }],
-					highlights: [],
-				},
-			],
-		},
-		narration: {
-			schema_version: 'changedrop-narration/1',
-			project: 'ezhud',
-			voice_profile: 'xeri-en-v1',
-			segments: [
-				{
-					id: 'intro',
-					kind: 'bookend',
-					surface: null,
-					request_id: 'ezhud-00000000000000000000000000000000',
-					request_hash: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
-					status: 'rendered',
-					rerendered: true,
-					profile_revision: 1,
-					pronunciation_profile: 'default',
-					pronunciation_revision: 1,
-					normalized_text_sha256: '0000000000000000000000000000000000000000000000000000000000000000',
-					audio: { basename: 'intro.wav', sha256: '0000000000000000000000000000000000000000000000000000000000000000' },
-					duration_seconds: 2.5,
-					engine: {
-						name: 'chatterbox-multilingual',
-						t3_model: 'synthetic-t3',
-						cli_sha256: '0000000000000000000000000000000000000000000000000000000000000000',
-					},
-					rendered_at: '2026-08-07T12:00:00Z',
-				},
-				{
-					id: 'snap-magnet',
-					kind: 'surface',
-					surface: 'snap-magnet',
-					request_id: 'ezhud-00000000000000000000000000000001',
-					request_hash: 'sha256:0000000000000000000000000000000000000000000000000000000000000001',
-					status: 'rendered',
-					rerendered: true,
-					profile_revision: 1,
-					pronunciation_profile: 'default',
-					pronunciation_revision: 1,
-					normalized_text_sha256: '0000000000000000000000000000000000000000000000000000000000000001',
-					audio: { basename: 'snap-magnet.wav', sha256: '0000000000000000000000000000000000000000000000000000000000000001' },
-					duration_seconds: 4.8,
-					engine: {
-						name: 'chatterbox-multilingual',
-						t3_model: 'synthetic-t3',
-						cli_sha256: '0000000000000000000000000000000000000000000000000000000000000001',
-					},
-					rendered_at: '2026-08-07T12:00:00Z',
-				},
-				{
-					id: 'outro',
-					kind: 'bookend',
-					surface: null,
-					request_id: 'ezhud-00000000000000000000000000000002',
-					request_hash: 'sha256:0000000000000000000000000000000000000000000000000000000000000002',
-					status: 'rendered',
-					rerendered: true,
-					profile_revision: 1,
-					pronunciation_profile: 'default',
-					pronunciation_revision: 1,
-					normalized_text_sha256: '0000000000000000000000000000000000000000000000000000000000000002',
-					audio: { basename: 'outro.wav', sha256: '0000000000000000000000000000000000000000000000000000000000000002' },
-					duration_seconds: 2.3,
-					engine: {
-						name: 'chatterbox-multilingual',
-						t3_model: 'synthetic-t3',
-						cli_sha256: '0000000000000000000000000000000000000000000000000000000000000002',
-					},
-					rendered_at: '2026-08-07T12:00:00Z',
-				},
-			],
-		},
-		trimOffset: 4.419304,
-	}));
+	// GREEN: default trimStart equals segments[0].start_seconds → adelay[0] = 0 ms, passes.
+	assert.doesNotThrow(() => mux.buildFfmpegArguments(baseFixture));
+	// RED: injecting trimStart = 0 makes the intro adelay 4419 ms (> 2000 ms bound).
+	assert.throws(
+		() => mux.buildFfmpegArguments({ ...baseFixture, trimStart: 0 }),
+		/adelay.*4419.*ms.*exceeds.*2000.*ms dead-air bound/i,
+	);
 });
 
 test('review blocker: ffmpeg trims the capture lead-in and uses the content duration minus S', async () => {
