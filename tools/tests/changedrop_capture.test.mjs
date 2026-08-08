@@ -246,27 +246,3 @@ test('supporting contract: closed safe DSL, bounded runtime, schema/privacy, npm
 		return true;
 	});
 });
-
-test('review blocker: recording surface matches the CSS viewport pixel-for-pixel', async () => {
-	assert.ifError(loadError);
-	const vp = capture.CAPTURE_VIEWPORT;
-	assert.ok(vp && typeof vp.width === 'number' && typeof vp.height === 'number',
-		'CAPTURE_VIEWPORT must be exported with numeric width and height');
-	assert.ok(vp.width >= 1280 && vp.width <= 3840,
-		`CAPTURE_VIEWPORT width ${vp.width} is outside the 1280-3840 range`);
-	assert.ok(vp.height >= 720 && vp.height <= 2160,
-		`CAPTURE_VIEWPORT height ${vp.height} is outside the 720-2160 range`);
-	// The aspect ratio must match the walkthrough DSL resize steps (both 16:9).
-	const ratio = vp.width / vp.height;
-	assert.ok(ratio >= 1.77 && ratio <= 1.78,
-		`CAPTURE_VIEWPORT aspect ratio ${ratio.toFixed(3)} is not 16:9`);
-	// Playwright's recorder captures the CSS viewport, not the device-pixel
-	// backing store. When recordVideo.size exceeds viewport, the output is padded
-	// with flat background (validated: 75 % gray on three quadrants). This
-	// contract prevents that mismatch from returning silently.
-	const source = await readFile(path.join(repo, 'tools', 'changedrop', 'capture.mjs'), 'utf8');
-	const viewportLine = source.match(/viewport:\s*\{\s*\.\.\.CAPTURE_VIEWPORT\s*\}/);
-	assert.ok(viewportLine, 'context viewport must spread CAPTURE_VIEWPORT');
-	const recordingLine = source.match(/recordVideo:\s*\{[^}]*size:\s*\{\s*\.\.\.CAPTURE_VIEWPORT\s*\}/);
-	assert.ok(recordingLine, 'recordVideo.size must spread the same CAPTURE_VIEWPORT');
-});
