@@ -276,7 +276,51 @@ test('review blocker: a finalized trailing pad is reconciled against explicit co
 	}), true);
 });
 
-test('review blocker: ffmpeg trims static container tail to measured content duration before muxing', async () => {
+test('regression: four coupled trim points all shift by S with a long-head fixture', async () => {
+	assert.ifError(loadError);
+	// Real-world head: 4.419 s of setup before the intro segment starts.
+	// All four mux parameters must shift by exactly S = 4.419.
+	const args = mux.buildFfmpegArguments({
+		captureFile: 'capture-fitted/walkthrough.webm',
+		narrationFiles: [
+			{ id: 'intro', file: 'narration/intro.wav' },
+			{ id: 'drag-assist', file: 'narration/drag-assist.wav' },
+			{ id: 'outro', file: 'narration/outro.wav' },
+		],
+		timings: {
+			recording: {
+				basename: 'walkthrough.webm',
+				bytes: 2048,
+				duration_seconds: 31.85,
+				container_duration_seconds: 34.11,
+			},
+			segments: [
+				{ id: 'intro', start_seconds: 4.419 },
+				{ id: 'drag-assist', start_seconds: 23.785 },
+				{ id: 'outro', start_seconds: 32.14 },
+			],
+		},
+		outputFile: 'mux/changedrop.mp4',
+	});
+	const filter = args.join(' ');
+	// 1. Video trim starts at S, keeps (duration - S) = 27.431.
+	assert.match(filter, /trim=start=4\.419:duration=27\.431/);
+	// 2. Audio delays are shifted by -S. intro lands at 0, drag-assist at 19.366, outro at 27.721.
+	assert.match(filter, /adelay=0:all=1/);
+	assert.match(filter, /adelay=19366:all=1/);
+	assert.match(filter, /adelay=27721:all=1/);
+	// 3. apad whole_dur uses trimmed duration, not container or raw content.
+	assert.match(filter, /apad=whole_dur=27\.431/);
+	// 4. -t uses trimmed duration.
+	assert.equal(args[args.indexOf('-t') + 1], '27.431');
+	// Container duration must never leak into the trim.
+	assert.equal(filter.includes('34.11'), false);
+	// Raw content duration (31.85) must never appear as a trim/duration or -t target.
+	assert.equal(filter.includes('trim=duration=31.85'), false);
+	assert.equal(args.includes('31.85'), false);
+});
+
+test('review blocker: ffmpeg trims the capture lead-in and uses the content duration minus S', async () => {
 	assert.ifError(loadError);
 	const args = mux.buildFfmpegArguments({
 		captureFile: 'capture-fitted/walkthrough.webm',
@@ -292,9 +336,10 @@ test('review blocker: ffmpeg trims static container tail to measured content dur
 		},
 		outputFile: 'mux/changedrop.mp4',
 	});
-	assert.match(args.join(' '), /trim=duration=22\.543/);
-	assert.equal(args[args.indexOf('-t') + 1], '22.543');
+	assert.match(args.join(' '), /trim=start=0\.4:duration=22\.143/);
+	assert.equal(args[args.indexOf('-t') + 1], '22.143');
 	assert.equal(args.join(' ').includes('trim=duration=23.48'), false);
+	assert.equal(args.join(' ').includes('trim=duration=22.543'), false);
 });
 
 test('case M1: output duration must equal the fitted capture within the stated tolerance', async () => {
@@ -396,11 +441,12 @@ test('case manifest: offline fixture mux emits a private changedrop-manifest/1 i
 	});
 	assert.equal(muxCalls, 1);
 	assert.deepEqual(plan.timings.segments.map((entry) => entry.start_seconds), [0.4, 1.12, 3.01]);
-	assert.match(plan.args.join(' '), /trim=duration=4\.1/);
+	assert.match(plan.args.join(' '), /trim=start=0\.4:duration=3\.7/);
 	assert.equal(plan.args.join(' ').includes('trim=duration=5.02'), false);
-	assert.match(plan.args.join(' '), /adelay=400:all=1/);
-	assert.match(plan.args.join(' '), /adelay=1120:all=1/);
-	assert.match(plan.args.join(' '), /adelay=3010:all=1/);
+	assert.equal(plan.args.join(' ').includes('trim=duration=4.1'), false);
+	assert.match(plan.args.join(' '), /adelay=0:all=1/);
+	assert.match(plan.args.join(' '), /adelay=720:all=1/);
+	assert.match(plan.args.join(' '), /adelay=2610:all=1/);
 	assert.deepEqual(await readdir(path.join(run.runRoot, 'mux')), ['changedrop.mp4']);
 	const manifestPath = path.join(run.runRoot, 'manifest.json');
 	assert.deepEqual(JSON.parse(await readFile(manifestPath, 'utf8')), manifest);
