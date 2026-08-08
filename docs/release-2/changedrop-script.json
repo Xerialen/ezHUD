@@ -121,7 +121,7 @@
         "after": "Drags snap to a configurable grid and magnet to other elements' edges and centres, with guides showing what they caught. A visible toggle turns it off, and a held modifier bypasses it for one drag.",
         "value": "Alignment stops being a test of patience. The export still contains final positions and nothing else."
       },
-      "text": "Switch on the grid and the magnet, and drags land where you meant instead of where you let go.",
+      "text": "Switch on the grid, and drags land where you meant instead of where you let go.",
       "walkthrough": [
         {
           "instruction": "Wait for the drag assistance block.",
@@ -140,14 +140,9 @@
           }
         },
         {
-          "instruction": "Switch snapping to a grid on, inside the ring.",
+          "instruction": "Switch grid snapping on, inside the ring.",
           "action": "click",
           "selector": "#snap-grid"
-        },
-        {
-          "instruction": "Switch magnet alignment on, so both assists are live.",
-          "action": "click",
-          "selector": "#snap-magnet"
         },
         {
           "instruction": "Hold while the narration explains what the two assists now do.",
