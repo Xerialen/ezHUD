@@ -1,0 +1,174 @@
+{
+  "schema_version": "changedrop-script-authoring/1",
+  "setup": [
+    {
+      "instruction": "Wait for the editing-size readout so the editor has booted.",
+      "action": "wait-for",
+      "selector": "#readout",
+      "state": "visible"
+    },
+    {
+      "instruction": "Wait for the demo controls to become interactive.",
+      "action": "wait-for",
+      "selector": "#fte-pause",
+      "state": "enabled"
+    }
+  ],
+  "bookends": {
+    "intro_walkthrough": [
+      {
+        "instruction": "Establish the editor with the game view and the HUD tree visible.",
+        "action": "hold",
+        "duration_ms": 4200,
+        "fit": "narration"
+      }
+    ],
+    "outro_walkthrough": [
+      {
+        "instruction": "Hold on the finished layout.",
+        "action": "hold",
+        "duration_ms": 4200,
+        "fit": "narration"
+      }
+    ]
+  },
+  "treatments": [
+    {
+      "surface": "editor-size",
+      "source": {
+        "before": "The editor was cramped at 1440p, and moving the browser to a second monitor could collapse the layout outright.",
+        "after": "A UI-scale control sets the editor chrome to a size you can work in, and it survives a reload. Moving the window between monitors keeps the layout intact.",
+        "value": "You can work at the size your screen deserves, and the editor stays where you put it."
+      },
+      "text": "Set the editor to a size you can actually work at, and it stays there.",
+      "walkthrough": [
+        {
+          "instruction": "Wait for the editor scale control.",
+          "action": "wait-for",
+          "selector": "#ui-scale",
+          "state": "visible"
+        },
+        {
+          "instruction": "Ring the editor scale control.",
+          "action": "highlight",
+          "selector": "#ui-scale",
+          "badge": 1,
+          "crop": {
+            "width": 640,
+            "height": 300
+          }
+        },
+        {
+          "instruction": "Hold while the narration explains the scale control.",
+          "action": "hold",
+          "duration_ms": 3200,
+          "fit": "narration"
+        }
+      ]
+    },
+    {
+      "surface": "anchor",
+      "source": {
+        "before": "Placement meant typing raw coordinates, and nothing on screen told you what an element was positioned against.",
+        "after": "The inspector leads with the anchor \u2014 a parent element or screen edge, an alignment and an order \u2014 and the stage draws the relationship. `pos_x` and `pos_y` become the offsets from that anchor. Raw coordinate entry is still there when you want it.",
+        "value": "A drag reads as \"re-anchor plus offset\" instead of a number you have to reverse-engineer later."
+      },
+      "text": "Anchor an element to a parent, then nudge it. The stage shows the relationship.",
+      "walkthrough": [
+        {
+          "instruction": "Select the health element so the inspector shows its anchor.",
+          "action": "click",
+          "selector": "[data-changedrop=\"hud-element-health\"]"
+        },
+        {
+          "instruction": "Wait for the anchor field to render for the selected element.",
+          "action": "wait-for",
+          "selector": "#f-health-place",
+          "state": "visible"
+        },
+        {
+          "instruction": "Ring the anchor selector.",
+          "action": "highlight",
+          "selector": "#f-health-place",
+          "badge": 1,
+          "crop": {
+            "width": 640,
+            "height": 360
+          }
+        },
+        {
+          "instruction": "Hold while the narration explains anchor first, offset second.",
+          "action": "hold",
+          "duration_ms": 3600,
+          "fit": "narration"
+        }
+      ]
+    },
+    {
+      "surface": "drag-assist",
+      "source": {
+        "before": "Lining two elements up was eyeballing, one pixel at a time.",
+        "after": "Drags snap to a configurable grid and magnet to other elements' edges and centres, with guides showing what they caught. A visible toggle turns it off, and a held modifier bypasses it for one drag.",
+        "value": "Alignment stops being a test of patience. The export still contains final positions and nothing else."
+      },
+      "text": "Snap to a grid, magnet to other elements, hold Alt to bypass.",
+      "walkthrough": [
+        {
+          "instruction": "Wait for the drag assistance block.",
+          "action": "wait-for",
+          "selector": "#drag-assist",
+          "state": "visible"
+        },
+        {
+          "instruction": "Ring the drag assistance controls.",
+          "action": "highlight",
+          "selector": "#drag-assist",
+          "badge": 1,
+          "crop": {
+            "width": 640,
+            "height": 320
+          }
+        },
+        {
+          "instruction": "Hold while the narration explains grid, magnet and the Alt bypass.",
+          "action": "hold",
+          "duration_ms": 3400,
+          "fit": "narration"
+        }
+      ]
+    },
+    {
+      "surface": "demo-moments",
+      "source": {
+        "before": "Pause existed, but you had to wait for a useful frame to appear before there was anything to line the HUD up against.",
+        "after": "Named preset moments open a match demo at a deterministic point \u2014 a frame with full HUD activity, a scoreboard moment, a quiet moment.",
+        "value": "The frame you need is one click away instead of a wait, and it is the same frame every time."
+      },
+      "text": "Jump straight to a frame worth aiming at.",
+      "walkthrough": [
+        {
+          "instruction": "Wait for the demo moments group.",
+          "action": "wait-for",
+          "selector": "#fte-moments",
+          "state": "visible"
+        },
+        {
+          "instruction": "Ring the named demo moments.",
+          "action": "highlight",
+          "selector": "#fte-moments",
+          "badge": 1,
+          "crop": {
+            "width": 720,
+            "height": 360
+          }
+        },
+        {
+          "instruction": "Hold while the narration explains the preset moments.",
+          "action": "hold",
+          "duration_ms": 3200,
+          "fit": "narration"
+        }
+      ]
+    }
+  ]
+}
