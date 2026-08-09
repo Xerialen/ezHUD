@@ -82,6 +82,7 @@
 	--danger-wash: rgb(226 69 58 / 0.13);
 	--info: var(--qk-ice-400);
 	--info-wash: rgb(127 191 255 / 0.12);
+	--grid-line: rgb(127 191 255 / 0.18);   /* drag-assist grid over the render */
 
 	/* -- semantic: HUD element taxonomy ------------------------------------
 	   Tree rows are tinted by element family so 83 entries stay scannable.
@@ -578,7 +579,7 @@ button:focus-visible,
 	position: absolute;
 	z-index: 0;
 	pointer-events: none;
-	background: rgb(127 191 255 / 0.18);
+	background: var(--grid-line);
 }
 
 .snap-grid--x { top: 0; bottom: 0; width: 1px; }

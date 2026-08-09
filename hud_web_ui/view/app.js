@@ -890,10 +890,22 @@ function renderGrid() {
 	// it through the transform the drag itself uses rather than comparing the two
 	// directly: at any UI scale but 1 they are different quantities.
 	const floor = displayDeltaToConsole(GRID_MIN_CSS, GRID_MIN_CSS, s, p, shown);
+	// The grid describes where the SELECTED element can land, because that is
+	// what a drag snaps: the offset, from wherever this element's anchor and
+	// alignment put its base. With nothing selected there is no element to
+	// describe, so the lattice falls back to the screen origin.
+	const selected = model.selectedElement;
+	const origin = selected?.rect
+		? {
+			x: selected.rect.x - (Number(selected.pos_x) || 0),
+			y: selected.rect.y - (Number(selected.pos_y) || 0),
+		}
+		: { x: 0, y: 0 };
 	const lines = gridLines(
 		dragAssist.step,
 		{ w: s.vid_width, h: s.vid_height },
 		{ x: Math.abs(floor.dx), y: Math.abs(floor.dy) },
+		origin,
 	);
 	const fragment = document.createDocumentFragment();
 	for (const axis of ['x', 'y']) {
@@ -2210,9 +2222,17 @@ el.snapMagnet.addEventListener('change', () => { dragAssist.magnet = el.snapMagn
 const updateSnapStep = () => {
 	const value = Number(el.snapStep.value);
 	if (Number.isFinite(value) && value >= 1) {
-		dragAssist.step = Math.min(64, Math.round(value));
+		const next = Math.min(64, Math.round(value));
+		// Only on a real change, and only inside the valid branch. Redrawing
+		// unconditionally rebuilt the whole grid on every keystroke -- clearing the
+		// field and typing "16" flashed a full step-1 grid on the "1" -- and left a
+		// stale grid on screen while the field was empty, disagreeing with the step
+		// the drag would still use.
+		if (next !== dragAssist.step) {
+			dragAssist.step = next;
+			renderGrid();
+		}
 	}
-	renderGrid();
 };
 el.snapStep.addEventListener('input', updateSnapStep);
 el.snapStep.addEventListener('change', () => {

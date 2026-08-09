@@ -1057,27 +1057,77 @@ try {
 	// every snap position carries a line — under the legibility floor the cadence
 	// is a multiple of the step — so asserting the reverse would fail by design
 	// and tempt the next person to weaken it. Aim at a real line instead.
-	const lineOffsets = async () => {
+	const lineOffsets = async (axis) => {
 		const out = [];
-		for (const line of await page.locator('#overlay .snap-grid--x').all()) {
+		for (const line of await page.locator(`#overlay .snap-grid--${axis}`).all()) {
 			const box = await line.boundingBox();
-			if (box) out.push(box.x);
+			if (box) out.push(axis === 'x' ? box.x : box.y);
 		}
+		assert(out.length > 1, `fewer than two ${axis} grid lines to measure`);
 		return out.sort((a, b) => a - b);
 	};
-	const beforeAim = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
-	const target = (await lineOffsets())
-		.reduce((best, x) => (Math.abs(x - (beforeAim.x + 40)) < Math.abs(best - (beforeAim.x + 40)) ? x : best));
-	await dragHealth(target - beforeAim.x, 0);
-	const landed = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
-	assert(Math.abs(landed.x - target) <= 1,
-		`aimed at the grid line drawn at x=${target.toFixed(2)} and the element landed at ${landed.x.toFixed(2)}`);
+	const aimAtALine = async (drag, label) => {
+		const before = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+		const wanted = before.x + 40;
+		const target = (await lineOffsets('x'))
+			.reduce((best, x) => (Math.abs(x - wanted) < Math.abs(best - wanted) ? x : best), Infinity);
+		await drag(target - before.x, 0);
+		const landed = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+		assert(Math.abs(landed.x - target) <= 1,
+			`${label}: aimed at the grid line drawn at x=${target.toFixed(2)} and it landed at ${landed.x.toFixed(2)}`);
+	};
+	const spacing8 = (await lineOffsets('x'))[1] - (await lineOffsets('x'))[0];
+	// The horizontal and vertical console ratios are separate (scaleFactors), and
+	// only the y path exercises ky. Pin both against the frame's own size so a
+	// ky->kx slip cannot hide behind a console that matches its canvas aspect.
+	const frameBox = await page.locator('#frame').boundingBox();
+	const consoleSize = await page.evaluate(() => [
+		window.__fake.state.screen.vid_width, window.__fake.state.screen.vid_height]);
+	const ySpacing = (await lineOffsets('y'))[1] - (await lineOffsets('y'))[0];
+	const xSpacing = spacing8;
+	const cadence = Math.round(xSpacing / (frameBox.width / consoleSize[0]));
+	assert(Math.abs(ySpacing - cadence * (frameBox.height / consoleSize[1])) < 0.5,
+		`y lines are ${ySpacing.toFixed(2)}px apart, but a cadence of ${cadence} console px is ${(cadence * (frameBox.height / consoleSize[1])).toFixed(2)}px on this frame`);
+	await aimAtALine(dragHealth, 'screen-placed, left-aligned');
+
+	// health is screen-placed and left-aligned, so its base is 0 mod the step and
+	// a grid drawn at plain multiples of the step passes the check above. The
+	// drag snaps pos_x, and the edge lands on base + k*step, so give an element a
+	// base that is NOT on the step lattice and aim at a line again. This is the
+	// case the first version of this feature got wrong.
+	// An odd width so centring cannot land on the step lattice by accident. The
+	// fake only reflows when a placement cvar comes through the bridge, so widen
+	// first and let the align_x change below recompute the rect.
+	await page.evaluate(() => {
+		window.__fake.state.elements.find((e) => e.name === 'armor').rect.w = 41;
+	});
+	await page.locator('.tree__row[data-name="armor"]').click();
+	await setPlacementField('f-armor-align_x', 'center');
+	await page.waitForFunction(() => {
+		const armor = window.__fake.state.elements.find((e) => e.name === 'armor');
+		// trunc((640 - 41) / 2) === 299, which is 3 mod 8.
+		return armor.rect.x - Number(armor.pos_x) === 299;
+	});
+	const dragArmor = async (dx, dy) => {
+		await page.locator('.tree__row[data-name="armor"]').click();
+		const rect = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+		await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(rect.x + rect.width / 2 + dx, rect.y + rect.height / 2 + dy, { steps: 4 });
+		await page.mouse.up();
+		return named(await engineState(), 'armor');
+	};
+	await page.locator('.tree__row[data-name="armor"]').click();
+	await aimAtALine(dragArmor, 'centred element, base 3 mod 8');
+	await page.locator('.tree__row[data-name="health"]').click();
 
 	await gridStep.fill('5');
 	await gridStep.press('Enter');
-	const lines5 = await gridLineCount();
-	assert(lines5 !== lines8,
-		`changing the step from 8 to 5 left the drawn grid unchanged at ${lines5} lines`);
+	// Per axis, not a summed count: two different grids can share a total. At one
+	// stage width step 8 gives 41 x + 13 y and step 5 gives 33 x + 21 y — both 54.
+	const spacing5 = (await lineOffsets('x'))[1] - (await lineOffsets('x'))[0];
+	assert(Math.abs(spacing5 - spacing8) > 0.5,
+		`changing the step from 8 to 5 left the drawn x spacing at ${spacing5.toFixed(2)}px`);
 	await setEnginePlacement('health', 13, 24);
 	snapped = await dragHealth(19, 0);
 	assert(Number(snapped.pos_x) % 5 === 0,
