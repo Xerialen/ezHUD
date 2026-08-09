@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Compose a complete GitHub Pages artifact without dropping the release root or
-// an earlier branch preview. The deployed site is its own durable state: every
-// publication carries a hash manifest, and the next run downloads and verifies
-// those exact bytes before adding or replacing one subtree.
+// Compose a complete GitHub Pages artifact without dropping the release root,
+// the permanent dev build, or an earlier branch preview. The deployed site is
+// its own durable state: every publication carries a hash manifest, and the next
+// run downloads and verifies those exact bytes before replacing one subtree.
 import { createHash } from 'node:crypto';
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -82,6 +82,15 @@ function arraysEqual(left, right) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function validateDevMetadata(dev) {
+  if (dev === undefined || dev === null) return null;
+  if (!dev || typeof dev !== 'object') throw new Error('invalid dev metadata');
+  for (const key of ['ref', 'commit', 'publishedAt']) {
+    if (typeof dev[key] !== 'string' || dev[key] === '') throw new Error(`dev has no ${key}`);
+  }
+  return { ref: dev.ref, commit: dev.commit, publishedAt: dev.publishedAt };
+}
+
 function validatePreviewMetadata(previews) {
   if (!Array.isArray(previews)) throw new Error('pages manifest previews must be an array');
   const seen = new Set();
@@ -102,6 +111,7 @@ function validatePreviewMetadata(previews) {
 function validateManifest(manifest) {
   if (!manifest || manifest.version !== 1 || typeof manifest.deployment !== 'string' ||
       !Array.isArray(manifest.files)) throw new Error('unsupported or malformed pages manifest');
+  manifest.dev = validateDevMetadata(manifest.dev);
   manifest.previews = validatePreviewMetadata(manifest.previews);
   let previous = '';
   for (const file of manifest.files) {
@@ -169,6 +179,7 @@ export async function guardSite(siteDir) {
   await assertBytesMatchManifest(siteDir, manifest);
 
   const expected = expectedArtifactPaths();
+  if (manifest.dev) expected.push(...expectedArtifactPaths('dev/'));
   if (manifest.previews.length) expected.push('preview/index.html');
   for (const preview of manifest.previews) expected.push(...expectedArtifactPaths(`preview/${preview.name}/`));
   expected.sort();
@@ -179,6 +190,7 @@ export async function guardSite(siteDir) {
   if (actual.some(poisonPath)) throw new Error('site contains registered game data or an owner/xerial personal file');
 
   await guardArtifactAt(siteDir, '/ezHUD/');
+  if (manifest.dev) await guardArtifactAt(path.join(siteDir, 'dev'), '/ezHUD/dev/');
   for (const preview of manifest.previews) {
     await guardArtifactAt(path.join(siteDir, 'preview', preview.name), `/ezHUD/preview/${preview.name}/`);
   }
@@ -210,7 +222,8 @@ async function writePreviewIndex(siteDir, previews) {
   await writeFile(path.join(siteDir, 'preview/index.html'), html);
 }
 
-export async function createManifest(siteDir, { previews, deployment }) {
+export async function createManifest(siteDir, { dev = null, previews, deployment }) {
+  dev = validateDevMetadata(dev);
   previews = validatePreviewMetadata(previews);
   await rm(path.join(siteDir, MANIFEST_NAME), { force: true });
   const files = [];
@@ -220,7 +233,7 @@ export async function createManifest(siteDir, { previews, deployment }) {
     if (!bytes.length) throw new Error(`refusing to manifest empty file: ${relative}`);
     files.push({ path: relative, size: bytes.length, sha256: sha256(bytes) });
   }
-  const manifest = { version: 1, deployment, generatedAt: new Date().toISOString(), previews, files };
+  const manifest = { version: 1, deployment, generatedAt: new Date().toISOString(), dev, previews, files };
   await writeFile(path.join(siteDir, MANIFEST_NAME), `${JSON.stringify(manifest, null, 2)}\n`);
   return manifest;
 }
@@ -244,7 +257,7 @@ export async function composePreview({ currentDir, previewDir, outputDir, name, 
   previews.push({ name, ref, commit, publishedAt });
   previews.sort((a, b) => a.name.localeCompare(b.name));
   await writePreviewIndex(outputDir, previews);
-  await createManifest(outputDir, { previews, deployment });
+  await createManifest(outputDir, { dev: current.dev, previews, deployment });
   const composed = await guardSite(outputDir);
   const rootProof = composed.files.find(file => file.path === 'index.html');
   console.log(`pages-site: preserved release index ${rootProof.sha256}.`);
@@ -254,10 +267,29 @@ export async function composePreview({ currentDir, previewDir, outputDir, name, 
   }
 }
 
+export async function composeDev({ currentDir, devDir, outputDir, ref, commit, publishedAt, deployment }) {
+  const current = await guardSite(currentDir);
+  await guardArtifact(devDir, '/ezHUD/dev/');
+  await freshCopy(currentDir, outputDir);
+  const target = path.join(outputDir, 'dev');
+  await rm(target, { recursive: true, force: true });
+  await cp(devDir, target, { recursive: true });
+  const dev = validateDevMetadata({ ref, commit, publishedAt });
+  await createManifest(outputDir, { dev, previews: current.previews, deployment });
+  const composed = await guardSite(outputDir);
+  const rootProof = composed.files.find(file => file.path === 'index.html');
+  console.log(`pages-site: preserved release index ${rootProof.sha256}.`);
+  for (const preview of current.previews) {
+    const proof = composed.files.find(file => file.path === `preview/${preview.name}/index.html`);
+    console.log(`pages-site: preserved preview ${preview.name} index ${proof.sha256}.`);
+  }
+}
+
 export async function composeRelease({ currentDir, releaseDir, outputDir, deployment }) {
   const current = await guardSite(currentDir);
   await guardArtifact(releaseDir, '/ezHUD/');
   await freshCopy(releaseDir, outputDir);
+  if (current.dev) await cp(path.join(currentDir, 'dev'), path.join(outputDir, 'dev'), { recursive: true });
   if (current.previews.length) {
     await mkdir(path.join(outputDir, 'preview'), { recursive: true });
     for (const preview of current.previews) {
@@ -265,7 +297,7 @@ export async function composeRelease({ currentDir, releaseDir, outputDir, deploy
     }
   }
   await writePreviewIndex(outputDir, current.previews);
-  await createManifest(outputDir, { previews: current.previews, deployment });
+  await createManifest(outputDir, { dev: current.dev, previews: current.previews, deployment });
   const composed = await guardSite(outputDir);
   for (const prior of current.previews) {
     const proof = composed.files.find(file => file.path === `preview/${prior.name}/index.html`);
@@ -322,7 +354,10 @@ export async function createVerificationBundle(siteDir, outputDir) {
   await rm(outputDir, { recursive: true, force: true });
   await mkdir(outputDir, { recursive: true });
   await cp(path.join(siteDir, MANIFEST_NAME), path.join(outputDir, MANIFEST_NAME));
-  for (const relative of ['index.html', ...manifest.previews.map(preview => `preview/${preview.name}/index.html`)]) {
+  const proofPaths = ['index.html'];
+  if (manifest.dev) proofPaths.push('dev/index.html');
+  proofPaths.push(...manifest.previews.map(preview => `preview/${preview.name}/index.html`));
+  for (const relative of proofPaths) {
     const target = path.join(outputDir, relative);
     await mkdir(path.dirname(target), { recursive: true });
     await cp(path.join(siteDir, relative), target);
@@ -346,10 +381,13 @@ export async function verifyRemote({ baseUrl, expectedDir, expectedManifest, pro
     await new Promise(resolve => setTimeout(resolve, delayMs));
   }
   if (JSON.stringify(remote.files) !== JSON.stringify(expected.files) ||
+      JSON.stringify(remote.dev) !== JSON.stringify(expected.dev) ||
       JSON.stringify(remote.previews) !== JSON.stringify(expected.previews)) {
     throw new Error('deployed Pages manifest differs from the uploaded artifact');
   }
-  const proofPaths = ['index.html', ...expected.previews.map(preview => `preview/${preview.name}/index.html`)];
+  const proofPaths = ['index.html'];
+  if (expected.dev) proofPaths.push('dev/index.html');
+  proofPaths.push(...expected.previews.map(preview => `preview/${preview.name}/index.html`));
   for (const relative of proofPaths) {
     const entry = expected.files.find(file => file.path === relative);
     const localBytes = await readFile(path.join(localProofDir, relative));
@@ -363,7 +401,7 @@ export async function verifyRemote({ baseUrl, expectedDir, expectedManifest, pro
     }
     console.log(`pages-site: live ${relative} ${entry.sha256}`);
   }
-  console.log(`pages-site: deployment ${expected.deployment} is live; release root and ${expected.previews.length} preview index(es) match.`);
+  console.log(`pages-site: deployment ${expected.deployment} is live; release root, ${expected.dev ? 'dev, ' : ''}and ${expected.previews.length} preview index(es) match.`);
 }
 
 function parseArgs(argv) {
@@ -397,6 +435,10 @@ async function main() {
     await composePreview({ currentDir: required(options, 'current'), previewDir: required(options, 'artifact'),
       outputDir: required(options, 'output'), name: required(options, 'name'), ref: required(options, 'ref'),
       commit: required(options, 'commit'), publishedAt: required(options, 'published-at'), deployment: required(options, 'deployment') });
+  } else if (command === 'compose-dev') {
+    await composeDev({ currentDir: required(options, 'current'), devDir: required(options, 'artifact'),
+      outputDir: required(options, 'output'), ref: required(options, 'ref'), commit: required(options, 'commit'),
+      publishedAt: required(options, 'published-at'), deployment: required(options, 'deployment') });
   } else if (command === 'compose-release') {
     await composeRelease({ currentDir: required(options, 'current'), releaseDir: required(options, 'artifact'),
       outputDir: required(options, 'output'), deployment: required(options, 'deployment') });
@@ -410,7 +452,7 @@ async function main() {
       proofDir: options['proof-dir'], cacheKey: options['cache-key'] ?? '',
       attempts: Number(options.attempts ?? 40), delayMs: Number(options['delay-ms'] ?? 15000) });
   } else {
-    throw new Error('usage: pages-site.mjs validate-name|guard-artifact|guard-site|fetch|compose-preview|compose-release|verification-bundle|verify-remote ...');
+    throw new Error('usage: pages-site.mjs validate-name|guard-artifact|guard-site|fetch|compose-preview|compose-dev|compose-release|verification-bundle|verify-remote ...');
   }
 }
 

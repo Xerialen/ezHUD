@@ -1,15 +1,14 @@
 # Build the FTE-web editor and publish one complete, sanitized Pages site.
 #
-# A Pages deployment replaces the whole site. Manual branch previews therefore
-# start from the currently deployed, hash-manifested site and overlay exactly
-# one /preview/<name>/ subtree. Pushes to main replace the release root while
-# carrying every preview forward. tools/fte-web/pages-site.mjs guards the final
-# combined artifact with the same explicit public-file allowlist as a release.
+# A Pages deployment replaces the whole site. Every run therefore starts from
+# the currently deployed, hash-manifested site and replaces exactly one subtree:
+# main at /, dev at /dev/, or a manual branch preview at /preview/<name>/.
+# tools/fte-web/pages-site.mjs preserves and guards the other public subtrees.
 name: Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
     inputs:
       branch:
@@ -63,6 +62,9 @@ jobs:
             echo "PUBLICATION_MODE=preview" >> "$GITHUB_ENV"
             echo "PREVIEW_NAME=$PREVIEW_NAME" >> "$GITHUB_ENV"
             echo "BASE_PATH=/ezHUD/preview/$PREVIEW_NAME/" >> "$GITHUB_ENV"
+          elif [ "$GITHUB_REF_NAME" = dev ]; then
+            echo "PUBLICATION_MODE=dev" >> "$GITHUB_ENV"
+            echo "BASE_PATH=/ezHUD/dev/" >> "$GITHUB_ENV"
           else
             echo "PUBLICATION_MODE=release" >> "$GITHUB_ENV"
             echo "BASE_PATH=/ezHUD/" >> "$GITHUB_ENV"
@@ -169,7 +171,7 @@ jobs:
         working-directory: source
         run: npm run test:tier3:fte
 
-      - name: Assemble the selected release or preview
+      - name: Assemble the selected release, dev build, or preview
         working-directory: source
         run: |
           DIST_DIR="$GITHUB_WORKSPACE/publication" \
@@ -210,6 +212,11 @@ jobs:
             node control/tools/fte-web/pages-site.mjs compose-preview \
               --current current-site --artifact publication --output pages-site \
               --name "$PREVIEW_NAME" --ref "$SOURCE_REF" --commit "$SOURCE_SHA" \
+              --published-at "$PUBLISHED_AT" --deployment "$DEPLOYMENT_ID"
+          elif [ "$PUBLICATION_MODE" = dev ]; then
+            node control/tools/fte-web/pages-site.mjs compose-dev \
+              --current current-site --artifact publication --output pages-site \
+              --ref "$SOURCE_REF" --commit "$SOURCE_SHA" \
               --published-at "$PUBLISHED_AT" --deployment "$DEPLOYMENT_ID"
           else
             node control/tools/fte-web/pages-site.mjs compose-release \
@@ -257,7 +264,7 @@ jobs:
           name: pages-verification-${{ github.run_id }}-${{ github.run_attempt }}
           path: pages-verification
 
-      - name: Prove the release root and every preview survived
+      - name: Prove the release root, dev build, and every preview survived
         run: |
           node control/tools/fte-web/pages-site.mjs verify-remote \
             --base-url "$PAGES_URL" \
