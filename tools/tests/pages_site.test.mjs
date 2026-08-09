@@ -39,6 +39,17 @@ async function snapshot(root) {
   return result;
 }
 
+test('the Pages workflow routes dev pushes to the permanent dev subtree', async () => {
+  const workflow = await readFile(new URL('../../.github/workflows/pages.yml', import.meta.url), 'utf8');
+  const pushBranches = workflow.match(/^  push:\n    branches: \[([^\]]+)]$/m);
+  assert.ok(pushBranches, 'Pages workflow must declare its push branches');
+  assert.deepEqual(pushBranches[1].split(',').map(branch => branch.trim()), ['main', 'dev']);
+  assert.match(workflow, /elif \[ "\$GITHUB_REF_NAME" = dev \]; then/);
+  assert.match(workflow, /echo "PUBLICATION_MODE=dev" >> "\$GITHUB_ENV"/);
+  assert.match(workflow, /echo "BASE_PATH=\/ezHUD\/dev\/" >> "\$GITHUB_ENV"/);
+  assert.match(workflow, /node control\/tools\/fte-web\/pages-site\.mjs compose-dev/);
+});
+
 test('publishing dev and preview B preserves the release root, dev and previews byte for byte', async () => {
   const run = await mkdtemp(path.join(os.tmpdir(), 'ezhud-pages-preserve-'));
   try {
