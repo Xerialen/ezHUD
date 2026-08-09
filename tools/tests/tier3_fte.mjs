@@ -301,7 +301,7 @@ try {
 			case 'after': base = start + size; break;
 			default: base = start; break;
 			}
-			// libhud_place.c:147 is `int x; x += props->pos_x` against a float cvar,
+			// libhud_place.c:149 is `int x; x += props->pos_x` against a float cvar,
 			// and hud_web_state.c:218 emits the rect as %d. Truncating here is what
 			// makes a fractional pos_x behave in the fake the way it does in the
 			// engine; without it nothing downstream can tell the two apart.
@@ -1166,10 +1166,38 @@ try {
 		const bridge = (await import('/core/bridge.js')).currentBridge();
 		await bridge.setCvar('hud_armor_pos_x', 12.6);
 	});
+	// Fence on the EDITOR's own state, not the fake's. Waiting on window.__fake
+	// only proves the engine side moved; the editor is a poll behind, and a drag
+	// started there reads the previous pos_x -- which quietly made this whole
+	// case measure nothing.
 	await page.waitForFunction(() => {
 		const armor = window.__fake.state.elements.find((e) => e.name === 'armor');
-		return Math.abs(Number(armor.pos_x) - 12.6) < 1e-9;
+		if (Math.abs(Number(armor.pos_x) - 12.6) > 1e-9) return false;
+		const meta = document.querySelector('.tree__row[data-name="armor"] .tree__meta');
+		return meta?.textContent === `${armor.rect.x},${armor.rect.y}`;
 	});
+	// MID-DRAG, with that fractional pos_x still in place. Every instrument in
+	// this feature until now read the box after pointerup, which is the one
+	// moment the preview and the engine agree: refresh() has re-rendered from
+	// engine state by then. A preview built from `rect + (nx - originX)` mixes
+	// the truncated rect with the raw float cvar and hovers frac(pos) short of
+	// the line for the whole gesture, then jumps onto it on release.
+	await page.locator('.tree__row[data-name="armor"]').click();
+	const preBox = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+	await page.mouse.move(preBox.x + preBox.width / 2, preBox.y + preBox.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(preBox.x + preBox.width / 2 + 37, preBox.y + preBox.height / 2,
+		{ steps: 6 });
+	const heldBox = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+	await page.mouse.up();
+	// Not "is it on a line": the cadence is coarsened above the step, so a snap
+	// position legitimately falls between two drawn lines. The claim is that the
+	// preview is where the ENGINE will put it, and the tell is that the box does
+	// not move when the pointer is released and the real state comes back.
+	const restBox = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+	assert(Math.abs(restBox.x - heldBox.x) <= 0.1,
+		`the box jumped ${Math.abs(restBox.x - heldBox.x).toFixed(3)}px on release: the preview was not where the engine put it`);
+
 	await page.locator('.tree__row[data-name="armor"]').click();
 	// Every line must sit on a whole console pixel. A base taken as `rect - pos`
 	// carries the fraction the engine discarded, so the lines land between the

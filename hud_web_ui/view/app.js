@@ -992,7 +992,13 @@ function beginDrag(ev, item) {
 			nx = snapToGrid(baseX + nx, dragAssist.step) - baseX;
 			ny = snapToGrid(baseY + ny, dragAssist.step) - baseY;
 		}
-		let nextRect = { ...rect, x: rect.x + (nx - originX), y: rect.y + (ny - originY) };
+		// Where the engine will put it: base plus a whole offset. Computing this as
+		// `rect + (nx - originX)` instead carried frac(pos_x) into the preview --
+		// rect is the engine's already-truncated int while originX is the raw float
+		// cvar -- so the box hovered up to a pixel short of the line it had snapped
+		// to for the whole gesture and jumped onto it on release. The magnet reads
+		// this rect too, so its guide missed by the same fraction.
+		let nextRect = { ...rect, x: baseX + nx, y: baseY + ny };
 		let guides = [];
 		if (!bypass && dragAssist.magnet) {
 			const threshold = displayDeltaToConsole(
@@ -1003,7 +1009,7 @@ function beginDrag(ev, item) {
 				{ x: Math.abs(threshold.dx), y: Math.abs(threshold.dy) });
 			nx = quantize(nx + magnetized.delta.x);
 			ny = quantize(ny + magnetized.delta.y);
-			nextRect = { ...rect, x: rect.x + (nx - originX), y: rect.y + (ny - originY) };
+			nextRect = { ...rect, x: baseX + nx, y: baseY + ny };
 			guides = magnetized.guides;
 		}
 		renderSnapGuides(guides);
@@ -2226,11 +2232,14 @@ const updateSnapStep = () => {
 	const value = Number(el.snapStep.value);
 	if (Number.isFinite(value) && value >= 1) {
 		const next = Math.min(64, Math.round(value));
-		// Only on a real change, and only inside the valid branch. Redrawing
-		// unconditionally rebuilt the whole grid on every keystroke -- clearing the
-		// field and typing "16" flashed a full step-1 grid on the "1" -- and left a
-		// stale grid on screen while the field was empty, disagreeing with the step
-		// the drag would still use.
+		// Only on a real change. This does NOT stop the per-keystroke rebuild: type
+		// "16" into an empty field and the "1" is a real change, so a step-1 grid
+		// is drawn and replaced on the "6". That is kept on purpose -- the step the
+		// drag uses is updated on the same keystroke, so the intermediate grid is
+		// what a drag would actually do at that instant, and suppressing it would
+		// put the picture and the behaviour out of step.
+		// With the field empty, Number('') is 0 and fails the >= 1 guard, so the
+		// step is left alone and the drawn grid still matches it.
 		if (next !== dragAssist.step) {
 			dragAssist.step = next;
 			renderGrid();

@@ -64,7 +64,7 @@ test('quantize matches the engine integer truncation on both sides of zero', () 
 	assert.equal(quantize(-2.9), -2);
 });
 
-// The engine truncates `align + pos` into an int rect (libhud_place.c:147,
+// The engine truncates `align + pos` into an int rect (libhud_place.c:149,
 // hud_web_state.c:218) while pos itself is a float cvar. Anything that needs
 // the positions an element can actually reach has to undo that the same way the
 // engine did it, not by subtracting the float.
@@ -79,6 +79,27 @@ test('alignmentBase is exact for the whole offsets a drag writes', () => {
 	assert.equal(alignmentBase(312, 8), 304);
 	assert.equal(alignmentBase(16, 16), 0);
 	assert.equal(alignmentBase(440, 8), 432);
+});
+
+// The shape the fixture actually produces -- a positive rect with a negative
+// fractional pos -- and the one where floor and trunc give different answers.
+// Asserting only Number.isInteger here would pass for either.
+test('alignmentBase takes the floor for a negative fractional offset', () => {
+	// centerprint: trunc(66 + -19.2001) === 46. A trunc-based base of 65 would
+	// have produced 45, so the fixture pins which of the two readings is right.
+	assert.equal(alignmentBase(46, -19.2001), 66);
+	// bar_health: trunc(270 + -195.74) === 74.
+	assert.equal(alignmentBase(74, -195.74), 270);
+});
+
+test('alignmentBase round-trips through the engine truncation it inverts', () => {
+	const engine = (base, pos) => Math.trunc(base + pos);
+	for (const pos of [0.26675, -0.4, -19.2001, 12.6, -195.74, 7.5]) {
+		for (const rect of [3, 46, 74, 195, 311]) {
+			assert.equal(engine(alignmentBase(rect, pos), pos), rect,
+				`base for rect=${rect} pos=${pos} does not reproduce that rect`);
+		}
+	}
 });
 
 test('alignmentBase follows truncation toward zero off the left edge', () => {
