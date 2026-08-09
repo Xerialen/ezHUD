@@ -30,7 +30,11 @@ const el = {
 	snapGrid: $('snap-grid'), snapStep: $('snap-step'), snapMagnet: $('snap-magnet'),
 };
 
-const dragAssist = { grid: false, step: 8, magnet: false, thresholdCss: 8 };
+// step 32 by default (owner, 2026-08-09): a HUD is laid out in a handful of
+// coarse positions, so the useful default is one you can see and aim at rather
+// than the finest one the engine allows. The markup's value attribute is the
+// same number -- they are read independently, so they have to agree.
+const dragAssist = { grid: false, step: 32, magnet: false, thresholdCss: 8 };
 
 // Editor chrome scale is browser-local preference, not HUD state. Keeping the
 // accepted values closed avoids a corrupted localStorage entry producing an

@@ -1044,6 +1044,11 @@ try {
 		return named(await engineState(), 'health');
 	};
 
+	// The field's value attribute and dragAssist.step are read independently, so
+	// they can drift apart silently: the box would say one number while a drag
+	// used another. Pin them to each other at boot, before anything is typed.
+	assert(await gridStep.inputValue() === '32',
+		`the Step field boots at ${await gridStep.inputValue()}, not the documented default`);
 	const gridLineCount = () => page.locator('#overlay .snap-grid').count();
 	assert(await gridLineCount() === 0,
 		'grid lines were drawn before the Grid toggle was ever switched on');
@@ -1086,6 +1091,16 @@ try {
 		assert(Math.abs(landed.x - target) <= 1,
 			`${label}: aimed at the grid line drawn at x=${target.toFixed(2)} and it landed at ${landed.x.toFixed(2)}`);
 	};
+	// Boot default untouched: the drawn spacing must be the field's own number
+	// through the transform, not some other step the code kept to itself.
+	const bootFrame = await page.locator('#frame').boundingBox();
+	const bootConsole = await page.evaluate(() => window.__fake.state.screen.vid_width);
+	const bootLines = await lineOffsets('x');
+	const bootConsoleSpacing = (bootLines[1] - bootLines[0]) / (bootFrame.width / bootConsole);
+	assert(Math.abs(bootConsoleSpacing - 32) < 0.05,
+		`Step reads 32 but the grid is drawn every ${bootConsoleSpacing.toFixed(2)} console px`);
+	await gridStep.fill('8');
+	await gridStep.press('Enter');
 	const spacing8 = (await lineOffsets('x'))[1] - (await lineOffsets('x'))[0];
 	// The horizontal and vertical console ratios are separate (scaleFactors), and
 	// only the y path exercises ky. Pin both against the frame's own size so a
