@@ -12,7 +12,9 @@ import {
 	alignmentBase, consoleToFrame, displayDeltaToConsole, elementAt, normaliseElementName,
 	quantize, scaleFactors,
 } from '../core/geometry.js';
-import { gridLines, magnetizeRect, snapToGrid } from '../core/snapping.js';
+import {
+	gridLines, magnetizeRect, screenMagnetTarget, snapToGrid,
+} from '../core/snapping.js';
 import * as syslog from '../core/log.js';
 import { initDebugPanel } from './debug.js';
 
@@ -961,6 +963,10 @@ function beginDrag(ev, item) {
 	const magnetTargets = model.placedElements
 		.filter((target) => !excluded.has(target.name))
 		.map((target) => ({ name: target.name, rect: { ...target.rect } }));
+	// One rectangle exposes all four screen edges and both centre lines through
+	// the same start/centre/end matching and guide path as normal elements.
+	const screenTarget = screenMagnetTarget(model.screen);
+	if (screenTarget) magnetTargets.push(screenTarget);
 	// Claim the overlay before changing the selection. Selecting re-renders, and a
 	// re-render calls replaceChildren() -- which would leave every placeBox()
 	// below writing to a node that is no longer in the document, so the drag would

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { gridLines, magnetizeRect, snapToGrid } from '../snapping.js';
+import { gridLines, magnetizeRect, screenMagnetTarget, snapToGrid } from '../snapping.js';
 
 test('grid snapping rounds symmetrically to the configured positive step', () => {
 	assert.equal(snapToGrid(13, 8), 16);
@@ -167,4 +167,37 @@ test('the legibility floor is inclusive so a step exactly at it keeps its cadenc
 	const { x } = gridLines(4, { w: 320, h: 200 }, { x: 4, y: 4 });
 	assert.equal(x.length, 80);
 	assert.equal(x[1] - x[0], 4, 'a step exactly at the floor was coarsened anyway');
+});
+
+// The screen is a surface like any other: a HUD hangs off its bottom and right
+// edges, and until the screen was a magnet target there was no way to meet them.
+// magnetizeRect already offers start/centre/end per axis, so one target gives
+// both edges and the centre line, with the guides it already renders.
+test('the screen rect is a magnet target like any element', () => {
+	const screen = screenMagnetTarget({ vid_width: 320, vid_height: 200 });
+	assert.deepEqual(screen, { name: 'screen', rect: { x: 0, y: 0, w: 320, h: 200 } });
+	// an element 4px short of the bottom edge, within threshold
+	const result = magnetizeRect({ x: 100, y: 172, w: 40, h: 24 }, [screen], { x: 0, y: 8 });
+	assert.equal(result.rect.y, 176, 'the element did not meet the bottom edge');
+	assert.equal(result.rect.y + 24, 200);
+	assert.deepEqual(result.guides.map((g) => ({ axis: g.axis, value: g.value, target: g.target })),
+		[{ axis: 'y', value: 200, target: 'screen' }]);
+});
+
+test('a missing screen silently omits the synthetic magnet target', () => {
+	assert.equal(screenMagnetTarget(null), null);
+	assert.equal(screenMagnetTarget({ vid_width: 320, vid_height: 0 }), null);
+});
+
+test('the screen offers its centre line, not only its edges', () => {
+	const screen = screenMagnetTarget({ vid_width: 320, vid_height: 200 });
+	// x=153,w=10 puts the element's own centre 2 from the screen centre and its
+	// right edge 3 away, so the centre-to-centre match is the nearest one. Pick
+	// the geometry deliberately: the magnet takes the closest point of the three,
+	// and an element whose EDGE is nearer meets the centre line with its edge --
+	// which is correct, and not what this test is about.
+	const off = magnetizeRect({ x: 153, y: 10, w: 10, h: 10 }, [screen], { x: 8, y: 0 });
+	assert.equal(off.rect.x + 5, 160, 'the element centre did not meet the screen centre');
+	assert.deepEqual(off.guides.map((g) => ({ axis: g.axis, value: g.value, target: g.target })),
+		[{ axis: 'x', value: 160, target: 'screen' }]);
 });

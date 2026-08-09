@@ -1244,6 +1244,29 @@ try {
 	await gridToggle.click();
 	assert(await gridLineCount() === 0,
 		'grid lines survived the Grid toggle being switched off');
+
+	// Screen edges as magnet targets. A HUD hangs off the bottom and right edges,
+	// and the grid cannot reach them: the console extent is not a whole number of
+	// steps, so the last line always stops short. Snapping to the edge is what
+	// makes the corner reachable -- without it the one place a HUD actually sits
+	// is the one place drag assistance does not help.
+	await magnetToggle.click();
+	const screenSize = await page.evaluate(() => [
+		window.__fake.state.screen.vid_width, window.__fake.state.screen.vid_height]);
+	await setEnginePlacement('health', 40, screenSize[1] - 24 - 5);
+	// The guide only exists while the button is down -- it is cleared on release,
+	// so counting after the drag would find nothing and prove nothing.
+	let heldEdgeGuides = -1;
+	const nearBottom = await dragHealth(0, 6, {
+		beforeUp: async () => {
+			heldEdgeGuides = await page.locator('#overlay .snap-guide[data-target="screen"]').count();
+		},
+	});
+	assert(nearBottom.rect.y + nearBottom.rect.h === screenSize[1],
+		`dragged to the bottom edge and landed at ${nearBottom.rect.y + nearBottom.rect.h}, screen is ${screenSize[1]}`);
+	assert(heldEdgeGuides === 1,
+		`the screen edge was caught but ${heldEdgeGuides} guides named it -- a snap nobody can see is indistinguishable from a slip`);
+	await magnetToggle.click();
 	await setEnginePlacement('health', 13, 24);
 	const free = await dragHealth(5, 0);
 	assert(Number(free.pos_x) % 5 !== 0,

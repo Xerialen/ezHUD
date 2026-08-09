@@ -69,6 +69,19 @@ export function gridLines(step, extent, minSpacing = { x: 0, y: 0 }) {
 	};
 }
 
+// The screen participates in magnet snapping as one synthetic rectangle. Using
+// the same shape as element targets deliberately exposes start, centre and end
+// on both axes; an absent/incomplete screen is normal during boot and contributes
+// no target rather than making the first drag throw.
+export function screenMagnetTarget(screen) {
+	const w = Number(screen?.vid_width);
+	const h = Number(screen?.vid_height);
+	if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+		return null;
+	}
+	return { name: 'screen', rect: { x: 0, y: 0, w, h } };
+}
+
 const axisPoints = (rect, axis) => {
 	const start = axis === 'x' ? rect.x : rect.y;
 	const size = axis === 'x' ? rect.w : rect.h;
