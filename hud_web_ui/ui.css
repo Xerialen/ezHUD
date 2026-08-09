@@ -596,6 +596,32 @@ button:focus-visible,
 .snap-guide--x { top: 0; bottom: 0; width: 1px; }
 .snap-guide--y { left: 0; right: 0; height: 1px; }
 
+/* A compact reminder in the live surface, visible only while Grid or Magnet
+   can affect the active drag. Keeping it in the corner rather than beside the
+   pointer leaves the HUD pixels and snap target unobstructed. */
+.drag-assist__live {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	z-index: 5;
+	margin: 0;
+	padding: 5px 8px;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-sm);
+	background: rgb(10 11 12 / 0.88);
+	box-shadow: var(--shadow-md);
+	color: var(--text-strong);
+	font: var(--type-label);
+	line-height: 1.2;
+	pointer-events: none;
+	user-select: none;
+}
+
+.drag-assist__live[data-bypass="true"] {
+	border-color: var(--live);
+	color: var(--live);
+}
+
 .box {
 	position: absolute;
 	pointer-events: auto;

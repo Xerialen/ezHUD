@@ -24,7 +24,7 @@ const el = {
 	sbCursor: $('sb-cursor'), sbDrawn: $('sb-drawn'), sbEngine: $('engine'),
 	sbFont: $('sb-font'), sbFrame: $('sb-frame'),
 	filter: $('filter'), showHidden: $('show-hidden'), showSpectator: $('show-spectator'), tree: $('tree'), treeCount: $('tree-count'),
-	stage: $('stage'), frame: $('frame'), overlay: $('overlay'), empty: $('empty'),
+	stage: $('stage'), frame: $('frame'), overlay: $('overlay'), dragAssistLive: $('drag-assist-live'), empty: $('empty'),
 	emptyTitle: $('empty-title'), emptyBody: $('empty-body'),
 	inspector: $('inspector'), fontPanel: $('fonts'), groupPanel: $('groups'),
 	saveOpen: $('save-open'), saveDialog: $('save-dialog'),
@@ -865,6 +865,24 @@ function clearSnapGuides() {
 	el.overlay.querySelectorAll('.snap-guide').forEach((guide) => guide.remove());
 }
 
+function updateDragAssistHint(bypass) {
+	if (!dragAssist.grid && !dragAssist.magnet) {
+		el.dragAssistLive.hidden = true;
+		return;
+	}
+	el.dragAssistLive.hidden = false;
+	el.dragAssistLive.dataset.bypass = String(bypass);
+	el.dragAssistLive.textContent = bypass
+		? 'Free move · Shift held'
+		: 'Hold Shift for free move';
+}
+
+function clearDragAssistHint() {
+	el.dragAssistLive.hidden = true;
+	el.dragAssistLive.removeAttribute('data-bypass');
+	el.dragAssistLive.textContent = '';
+}
+
 // The closest the grid may be drawn, in displayed CSS pixels. Chosen by looking
 // at candidate spacings composited over a real recorded frame (412x231 console
 // on an 830px stage, warm brown Quake geometry, not the near-black test fake):
@@ -973,6 +991,7 @@ function beginDrag(ev, item) {
 	// look frozen until release. Style the live node instead; the full render with
 	// handles arrives when the gesture ends.
 	const gesture = beginGesture();
+	updateDragAssistHint(ev.shiftKey);
 	model.set({ selected: item.name });
 	for (const other of el.overlay.querySelectorAll('.box[data-selected="true"]')) {
 		other.dataset.selected = 'false';
@@ -982,6 +1001,7 @@ function beginDrag(ev, item) {
 	let last = null;
 
 	const move = (e) => {
+		updateDragAssistHint(e.shiftKey);
 		const { dx, dy } = displayDeltaToConsole(
 			e.clientX - startX, e.clientY - startY,
 			model.screen, model.physical, el.frame.clientWidth,
@@ -989,7 +1009,7 @@ function beginDrag(ev, item) {
 		// Quantize to what the engine will actually store, so the preview never
 		// promises sub-pixel precision the engine discards. Magnet then makes the
 		// resulting engine rect meet another rect exactly.
-		const bypass = e.altKey;
+		const bypass = e.shiftKey;
 		let nx = quantize(originX + dx);
 		let ny = quantize(originY + dy);
 		if (!bypass && dragAssist.grid) {
@@ -1040,6 +1060,7 @@ function beginDrag(ev, item) {
 		window.removeEventListener('pointermove', move);
 		window.removeEventListener('pointerup', up);
 		clearSnapGuides();
+		clearDragAssistHint();
 		gesture.end();
 	};
 	window.addEventListener('pointermove', move);

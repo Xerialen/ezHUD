@@ -74,6 +74,7 @@
       <img id="frame" alt="Live ezQuake render" draggable="false"
            src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">
       <div class="overlay" id="overlay"></div>
+      <p class="drag-assist__live" id="drag-assist-live" role="status" aria-atomic="true" hidden></p>
       <div class="stage__empty" id="empty" hidden>
         <p class="stage__empty-title" id="empty-title">ezQuake isn't drawing a HUD yet</p>
         <p id="empty-body">The editor can only place elements the engine is actually rendering. Start a demo or join a server, and they'll appear here.</p>
@@ -85,13 +86,13 @@
     <div class="panel__title">Properties</div>
     <div id="drag-assist" class="drag-assist">
       <section class="group">
-        <h3 class="group__title">Drag assistance</h3>
+        <h3 class="group__title">Grid &amp; snap</h3>
         <div class="drag-assist__row">
-          <label class="toggle toggle--sm"><input type="checkbox" id="snap-grid"><span>Grid</span></label>
+          <label class="toggle toggle--sm" title="Snap dragged elements to a fixed grid."><input type="checkbox" id="snap-grid"><span>Grid</span></label>
           <label class="drag-assist__step" for="snap-step"><span>Step</span><input id="snap-step" type="number" min="1" max="64" value="32"></label>
-          <label class="toggle toggle--sm"><input type="checkbox" id="snap-magnet"><span>Magnet</span></label>
+          <label class="toggle toggle--sm" title="Snap dragged elements to nearby HUD and screen edges."><input type="checkbox" id="snap-magnet"><span>Magnet</span></label>
         </div>
-        <p class="font-state">Hold Alt while dragging to bypass both.</p>
+        <p class="font-state">Hold Shift while dragging to bypass both.</p>
       </section>
     </div>
     <div id="hudmodes"></div>

@@ -1632,13 +1632,13 @@ try {
 		}, `${candidate.name} screen placement ${x},${y}`, UI_WAIT);
 		await waitEditorCaughtUp(candidate.name);
 	};
-	const dragSubject = async (dx, dy, { alt = false, beforeUp = null } = {}) => {
+	const dragSubject = async (dx, dy, { modifier = null, beforeUp = null } = {}) => {
 		await selectForPlacement(candidate.name);
 		const beforeDrag = (await readState(candidate.name)).element;
 		const subjectBox = page.locator('#overlay .box[data-selected="true"]');
 		const rect = await subjectBox.boundingBox();
 		assert(rect, `${candidate.name} has no box for drag assistance`);
-		if (alt) await page.keyboard.down('Alt');
+		if (modifier) await page.keyboard.down(modifier);
 		try {
 			await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
 			await page.mouse.down();
@@ -1647,7 +1647,7 @@ try {
 			if (beforeUp) await beforeUp();
 			await page.mouse.up();
 		} finally {
-			if (alt) await page.keyboard.up('Alt');
+			if (modifier) await page.keyboard.up(modifier);
 		}
 		return eventually(async () => {
 			const state = (await readState(candidate.name)).element;
@@ -1710,20 +1710,29 @@ try {
 		});
 
 		await snapGrid.click();
-		await snapMagnet.click();
 		await snapStep.fill('8');
+		const instruction = await snapGrid.evaluate((node) =>
+			node.closest('section')?.querySelector('.font-state')?.textContent?.trim() ?? '');
+		const modifierMatch = /^Hold ([A-Za-z]+) while dragging to bypass both\.$/.exec(instruction);
+		assert(modifierMatch,
+			`drag-assistance label does not name a modifier: ${JSON.stringify(instruction)}`);
+		const documentedModifier = modifierMatch[1];
+
 		await placeSubject(14, 80);
-		const bypassResult = await dragSubject(7, 0, {
-			alt: true,
-			beforeUp: async () => assert(await page.locator('#overlay .snap-guide').count() === 0,
-				'Alt bypass still drew a live guide'),
-		});
+		const altResult = await dragSubject(7, 0, { modifier: 'Alt' });
+		assert(Number(altResult.pos_x) % 8 === 0,
+			`Alt still bypassed the live grid at pos_x=${altResult.pos_x}`);
+
+		await placeSubject(14, 80);
+		const bypassResult = await dragSubject(7, 0, { modifier: documentedModifier });
 		assert(Number(bypassResult.pos_x) % 8 !== 0,
-			`Alt bypass still grid-snapped live pos_x=${bypassResult.pos_x}`);
+			`${documentedModifier} still grid-snapped live pos_x=${bypassResult.pos_x}`);
+		assert(await page.evaluate(() => window.getSelection()?.toString() === ''),
+			`${documentedModifier}-drag selected page text`);
 		const dragAssistExport = await readExport();
 		assert(!/snap|magnet/i.test(dragAssistExport),
 			'drag assistance leaked editor-only state into the full export');
-		pass(nextCase++, `${candidate.name} drag: 8/5 grids, free pixels, magnet guide + exact engine edge, Alt bypass, clean export`);
+		pass(nextCase++, `${candidate.name} drag: 8/5 grids, free pixels, magnet guide + exact engine edge, ${documentedModifier} bypass, Alt snap, clean export`);
 	} finally {
 		if (await snapGrid.isChecked()) await snapGrid.click().catch(() => {});
 		if (await snapMagnet.isChecked()) await snapMagnet.click().catch(() => {});

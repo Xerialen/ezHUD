@@ -1025,12 +1025,12 @@ try {
 				=== `${current.rect.x},${current.rect.y}`;
 		}, name);
 	};
-	const dragHealth = async (dx, dy, { alt = false, beforeUp = null } = {}) => {
+	const dragHealth = async (dx, dy, { modifier = null, beforeUp = null } = {}) => {
 		await page.locator('.tree__row[data-name="health"]').click();
 		const selectedHealth = page.locator('#overlay .box[data-selected="true"]');
 		const rect = await selectedHealth.boundingBox();
 		assert(rect, 'health has no draggable box for snap/magnet cases');
-		if (alt) await page.keyboard.down('Alt');
+		if (modifier) await page.keyboard.down(modifier);
 		try {
 			await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
 			await page.mouse.down();
@@ -1039,7 +1039,7 @@ try {
 			if (beforeUp) await beforeUp();
 			await page.mouse.up();
 		} finally {
-			if (alt) await page.keyboard.up('Alt');
+			if (modifier) await page.keyboard.up(modifier);
 		}
 		return named(await engineState(), 'health');
 	};
@@ -1268,7 +1268,13 @@ try {
 		`the screen edge was caught but ${heldEdgeGuides} guides named it -- a snap nobody can see is indistinguishable from a slip`);
 	await magnetToggle.click();
 	await setEnginePlacement('health', 13, 24);
-	const free = await dragHealth(5, 0);
+	const liveHint = page.locator('#drag-assist-live');
+	assert(await liveHint.isHidden(),
+		'drag-assistance stage hint was visible before a drag');
+	const free = await dragHealth(5, 0, {
+		beforeUp: async () => assert(await liveHint.isHidden(),
+			'drag-assistance stage hint appeared while both helpers were off'),
+	});
 	assert(Number(free.pos_x) % 5 !== 0,
 		`grid-off drag still quantized pos_x=${free.pos_x} to step 5`);
 
@@ -1299,29 +1305,70 @@ try {
 	assert(freeNearEdge.rect.y + freeNearEdge.rect.h !== named(await engineState(), 'armor').rect.y,
 		'magnet-off drag still aligned the two edges');
 
+	// Modifier contract: isolate the guaranteed grid mechanism. If magnet is on,
+	// a single "snapped" result can be true for the wrong reason. The raw landing
+	// is measured from this browser's frame width and must not already be on the
+	// 8px lattice, or both modifier cases would pass without exercising the grid.
 	await gridToggle.click();
-	await magnetToggle.click();
 	await gridStep.fill('8');
 	await gridStep.press('Enter');
+	const instruction = await gridToggle.evaluate((node) =>
+		node.closest('section')?.querySelector('.font-state')?.textContent?.trim() ?? '');
+	const modifierMatch = /^Hold ([A-Za-z]+) while dragging to bypass both\.$/.exec(instruction);
+	assert(modifierMatch, `drag-assistance label does not name a modifier: ${JSON.stringify(instruction)}`);
+	const documentedModifier = modifierMatch[1];
+	const bypassCssDelta = 5;
+	const bypassFrameWidth = await page.locator('#frame').evaluate((node) => node.clientWidth);
+	const rawBypassDelta = displayDeltaToConsole(
+		bypassCssDelta, 0, SCREEN, CANVAS, bypassFrameWidth,
+	).dx;
+	const rawBypassX = Math.trunc(17 + rawBypassDelta);
+	assert(rawBypassX % 8 !== 0,
+		`modifier fixture is a grid no-op: raw pos_x=${rawBypassX} is already on the 8px lattice`);
+
 	await setEnginePlacement('health', 17, 30);
-	const bypassed = await dragHealth(5, 0, {
-		alt: true,
-		beforeUp: async () => assert(await page.locator('#overlay .snap-guide').count() === 0,
-			'Alt bypass still drew a magnet guide'),
+	const altResult = await dragHealth(bypassCssDelta, 0, {
+		modifier: 'Alt',
+		beforeUp: async () => {
+			assert(await liveHint.isVisible(),
+				'drag-assistance help was not visible on the stage during a live assisted drag');
+			assert(await liveHint.textContent() === `Hold ${documentedModifier} for free move`,
+				`live drag help disagrees with the documented modifier: ${JSON.stringify(await liveHint.textContent())}`);
+			assert(await liveHint.getAttribute('data-bypass') === 'false',
+				'Alt made the live help claim free movement');
+		},
 	});
-	assert(Number(bypassed.pos_x) % 8 !== 0,
-		`Alt bypass still snapped pos_x=${bypassed.pos_x}`);
+	assert(Number(altResult.pos_x) % 8 === 0 && Number(altResult.pos_x) !== rawBypassX,
+		`Alt still bypassed the live grid: raw=${rawBypassX}, landed=${altResult.pos_x}`);
+	assert(await liveHint.isHidden(),
+		'drag-assistance stage hint remained visible after pointerup');
+
+	await setEnginePlacement('health', 17, 30);
+	const bypassed = await dragHealth(bypassCssDelta, 0, {
+		modifier: documentedModifier,
+		beforeUp: async () => {
+			assert(await liveHint.isVisible(),
+				'drag-assistance help was not visible during the bypass drag');
+			assert(await liveHint.textContent() === `Free move · ${documentedModifier} held`,
+				`live drag help did not confirm free movement: ${JSON.stringify(await liveHint.textContent())}`);
+			assert(await liveHint.getAttribute('data-bypass') === 'true',
+				'live drag help did not expose the active bypass state');
+		},
+	});
+	assert(Number(bypassed.pos_x) === rawBypassX,
+		`${documentedModifier} did not bypass the live grid: expected raw ${rawBypassX}, landed=${bypassed.pos_x}`);
+	assert(await page.evaluate(() => window.getSelection()?.toString() === ''),
+		`${documentedModifier}-drag selected page text`);
 	const dragExport = await page.evaluate(async () =>
 		(await import('/core/bridge.js')).currentBridge().exportFullCfg());
 	assert(!/snap|magnet/i.test(dragExport),
 		'drag-assistance editor state leaked into the exported cfg');
 
 	await gridToggle.click();
-	await magnetToggle.click();
 	await page.evaluate(async () => (await import('/core/bridge.js')).currentBridge().send('hud_reset_layout'));
 	await page.waitForFunction(() => window.__fake.state.elements
 		.find((e) => e.name === 'health').pos_x === '16');
-	console.log('  14 drag assistance: grid steps, free drag, edge magnet + guide, Alt bypass, clean export');
+	console.log(`  14 drag assistance: grid steps, free drag, edge magnet + guide, ${documentedModifier} bypass, Alt snap, clean export`);
 
 	// ---- 15. editor window scaling (#25) ------------------------------------
 	// The control scales editor chrome, never HUD coordinates. Its CSS change
