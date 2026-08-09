@@ -45,6 +45,26 @@ export function quantize(value) {
 	return Math.trunc(value);
 }
 
+// Where the engine's alignment puts an element before its offset is added, in
+// whole console pixels.
+//
+// pos_x/pos_y are float cvars and reach us fractional (hud_web_state.c:183
+// emits the cvar value), while rect is emitted as %d (hud_web_state.c:218)
+// because libhud_place.c:147 does `int x; x += props->pos_x` and the sum is
+// truncated. `rect - pos` is therefore NOT the alignment: it is the alignment
+// plus the fraction the engine discarded. Anything drawn on that basis sits up
+// to a pixel off a position no element can ever occupy, because a drag writes a
+// whole offset and the reachable positions are `base + whole offset`.
+export function alignmentBase(rectValue, pos) {
+	const offset = Number(pos) || 0;
+	if (!Number.isFinite(rectValue)) {
+		return 0;
+	}
+	// Truncation is toward zero: a floor for the on-screen case, a ceil for a
+	// rect the engine has pushed off the left or top edge.
+	return rectValue - (rectValue >= 0 ? Math.floor(offset) : Math.ceil(offset));
+}
+
 // Single source for element-name → data-changedrop normalisation.
 // Imported by view/app.js (editor) and tools/tests/selector_hooks.test.mjs
 // (test-time enforcement). Callers decide error handling — the normaliser

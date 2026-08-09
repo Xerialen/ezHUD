@@ -9,7 +9,7 @@ import {
 	needsRecalculate, parseColor, resizeTo, resizedRect,
 } from '../core/model.js';
 import {
-	consoleToFrame, displayDeltaToConsole, elementAt, normaliseElementName,
+	alignmentBase, consoleToFrame, displayDeltaToConsole, elementAt, normaliseElementName,
 	quantize, scaleFactors,
 } from '../core/geometry.js';
 import { gridLines, magnetizeRect, snapToGrid } from '../core/snapping.js';
@@ -870,6 +870,7 @@ function clearGrid() {
 	el.overlay.querySelectorAll('.snap-grid').forEach((line) => line.remove());
 }
 
+
 // Draw the grid a drag would snap to. Called from renderOverlay (which wipes the
 // overlay) and directly from the Grid and Step controls, because toggling them
 // changes nothing the overlay's staleness check looks at.
@@ -897,8 +898,8 @@ function renderGrid() {
 	const selected = model.selectedElement;
 	const origin = selected?.rect
 		? {
-			x: selected.rect.x - (Number(selected.pos_x) || 0),
-			y: selected.rect.y - (Number(selected.pos_y) || 0),
+			x: alignmentBase(selected.rect.x, selected.pos_x),
+			y: alignmentBase(selected.rect.y, selected.pos_y),
 		}
 		: { x: 0, y: 0 };
 	const lines = gridLines(
@@ -972,6 +973,13 @@ function beginDrag(ev, item) {
 		other.querySelectorAll('.handle').forEach((h) => h.remove());
 	}
 	box.dataset.selected = 'true';
+	// The grid is anchored to the selected element, and the line above is a
+	// selection change that renderOverlay will not act on: beginGesture() has
+	// already set `dragging`, which makes it return early. Without this, grabbing
+	// an element that was not already selected drags it against the PREVIOUS
+	// element's lattice for the whole gesture -- the drawn lines then predict
+	// nothing, which is the defect this feature exists to remove.
+	renderGrid();
 	let last = null;
 
 	const move = (e) => {
@@ -2242,7 +2250,14 @@ el.snapStep.addEventListener('change', () => {
 el.snapStep.disabled = true;
 el.saveOpen.addEventListener('click', () => openSave());
 el.frame.addEventListener('load', renderOverlay);
-window.addEventListener('resize', renderOverlay);
+window.addEventListener('resize', () => {
+	renderOverlay();
+	// renderOverlay returns early mid-gesture, but placeBox and renderSnapGuides
+	// both recompute from the live frame width on every pointermove. Without this
+	// the grid is the one drawn thing on the stage that freezes while the box it
+	// describes keeps moving.
+	renderGrid();
+});
 
 // Click empty stage to deselect; click a rendered element to select it, which
 // keeps the canvas behaving the way the tree does.

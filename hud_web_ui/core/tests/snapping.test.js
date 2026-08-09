@@ -72,16 +72,17 @@ test('lines start at the origin and cover the console extent without leaving it'
 // is one -- true for a screen-placed left-aligned element and false for every
 // centred or right-aligned one, which is where this was originally wrong.
 test('lines sit on the element lattice, not on multiples of the step', () => {
-	const base = 163.446;
+	// A whole base: the engine truncates `align + pos` into an int rect, and a
+	// drag writes a whole offset, so every reachable position is a whole one.
+	// The caller derives this with alignmentBase(); see view/app.js.
+	const base = 163;
 	const { x } = gridLines(8, { w: 320, h: 200 }, { x: 0, y: 0 }, { x: base, y: 0 });
-	assert(Math.abs(x[0] - 3.446) < 1e-9, `first line at ${x[0]}, expected 3.446`);
-	assert(Math.abs(x[1] - 11.446) < 1e-9, `second line at ${x[1]}, expected 11.446`);
+	assert.equal(x[0], 3);
+	assert.equal(x[1], 11);
 	for (const value of x) {
-		// Distance to the lattice, not a float-exact remainder: a base read off the
-		// engine is fractional and -0 is not 0 under strict equality.
-		const offset = Math.abs((value - base) / 8);
-		assert(Math.abs(offset - Math.round(offset)) < 1e-9,
-			`${value} is not on the element's lattice`);
+		// Math.abs: a negative remainder is -0, and -0 is not 0 under strict equality.
+		assert.equal(Math.abs((value - base) % 8), 0, `${value} is not on the element's lattice`);
+		assert(Number.isInteger(value), `${value} is not a position the engine can store`);
 	}
 });
 

@@ -293,13 +293,19 @@ try {
 			return regions.has(name) ? null : fake.state.elements.find((e) => e.name === name)?.name ?? null;
 		};
 		const aligned = (start, size, content, align, offset) => {
+			let base;
 			switch (align) {
-			case 'center': return start + Math.trunc((size - content) / 2) + offset;
-			case 'right': case 'bottom': return start + size - content + offset;
-			case 'before': return start - content + offset;
-			case 'after': return start + size + offset;
-			default: return start + offset;
+			case 'center': base = start + Math.trunc((size - content) / 2); break;
+			case 'right': case 'bottom': base = start + size - content; break;
+			case 'before': base = start - content; break;
+			case 'after': base = start + size; break;
+			default: base = start; break;
 			}
+			// libhud_place.c:147 is `int x; x += props->pos_x` against a float cvar,
+			// and hud_web_state.c:218 emits the rect as %d. Truncating here is what
+			// makes a fractional pos_x behave in the fake the way it does in the
+			// engine; without it nothing downstream can tell the two apart.
+			return Math.trunc(base + offset);
 		};
 		// Minimal fake of the engine-owned placement boundary: enough to fold the
 		// fixture's screen/element anchors and recursively move children. Product
@@ -1119,6 +1125,55 @@ try {
 	};
 	await page.locator('.tree__row[data-name="armor"]').click();
 	await aimAtALine(dragArmor, 'centred element, base 3 mod 8');
+
+	// The common flow: tick Grid, then grab an element that is NOT already
+	// selected. beginGesture() sets `dragging` before the selection changes, so
+	// renderOverlay returns early and the grid would keep the previous element's
+	// lattice for the whole gesture -- drawn lines that predict nothing, on the
+	// path a user takes first.
+	await page.locator('.tree__row[data-name="health"]').click();
+	const armorBox = await page.locator('#overlay .box[data-name="armor"]').boundingBox();
+	await page.mouse.move(armorBox.x + armorBox.width / 2, armorBox.y + armorBox.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(armorBox.x + armorBox.width / 2 + 4, armorBox.y + armorBox.height / 2,
+		{ steps: 2 });
+	const midDrag = await lineOffsets('x');
+	const midBox = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+	await page.mouse.up();
+	assert(await page.locator('#inspector .inspect__name').textContent() === 'armor',
+		'grabbing armor did not select it, so this case proves nothing');
+	const nearestMid = midDrag.reduce(
+		(best, x) => (Math.abs(x - midBox.x) < Math.abs(best - midBox.x) ? x : best), Infinity);
+	assert(Math.abs(nearestMid - midBox.x) <= 1,
+		`mid-drag the grid describes another element: the dragged box sits at ${midBox.x.toFixed(2)} and the nearest drawn line is ${nearestMid.toFixed(2)}`);
+
+	// A fractional pos_x, which is what the engine actually reports: the cvar is a
+	// float and only the rect is whole. A base taken as `rect - pos` instead of
+	// undoing the engine's truncation puts every line on a coordinate no element
+	// can occupy, and every earlier fixture value here was a whole number, so
+	// nothing could see it.
+	await page.evaluate(async () => {
+		const bridge = (await import('/core/bridge.js')).currentBridge();
+		await bridge.setCvar('hud_armor_pos_x', 12.6);
+	});
+	await page.waitForFunction(() => {
+		const armor = window.__fake.state.elements.find((e) => e.name === 'armor');
+		return Math.abs(Number(armor.pos_x) - 12.6) < 1e-9;
+	});
+	await page.locator('.tree__row[data-name="armor"]').click();
+	// Every line must sit on a whole console pixel. A base taken as `rect - pos`
+	// carries the fraction the engine discarded, so the lines land between the
+	// positions an element can occupy -- which no drag can ever reach.
+	const frameForFraction = await page.locator('#frame').boundingBox();
+	const consoleForFraction = await page.evaluate(
+		() => window.__fake.state.screen.vid_width);
+	const perConsolePx = frameForFraction.width / consoleForFraction;
+	for (const lineX of await lineOffsets('x')) {
+		const consoleX = (lineX - frameForFraction.x) / perConsolePx;
+		assert(Math.abs(consoleX - Math.round(consoleX)) < 0.02,
+			`with pos_x=12.6 a grid line sits at console x=${consoleX.toFixed(3)}, which no element can occupy`);
+	}
+
 	await page.locator('.tree__row[data-name="health"]').click();
 
 	await gridStep.fill('5');
