@@ -1018,8 +1018,8 @@ async function executeZoom({ page, step, deadline, captureStart, cameraState }) 
 	if (remainingPictureMs > 0) {
 		await bounded(page.waitForTimeout(remainingPictureMs), deadline, 'camera picture duration');
 	}
-	await bounded(page.waitForTimeout(16), deadline, 'camera final frame');
 	const ended = performance.now();
+	await bounded(page.waitForTimeout(16), deadline, 'camera final frame');
 	cameraState.scale = step.to;
 	cameraState.focus = moves.at(-1).focus;
 	cameraState.target = Math.abs(step.to - 1) <= CAMERA_SCALE_EPSILON ? null : targetFocus;

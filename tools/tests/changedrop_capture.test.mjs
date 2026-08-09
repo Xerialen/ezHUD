@@ -381,6 +381,11 @@ test('supporting contract: closed safe DSL, bounded runtime, schema/privacy, npm
 	const liveRing = source.indexOf('await page.addStyleTag({ content: liveRingCss');
 	assert.ok(sourceCapture >= 0 && liveRing >= 0 && sourceCapture < liveRing,
 		'focused source must be captured before the live ring is drawn');
+	const executeZoom = source.indexOf('async function executeZoom');
+	const motionEnd = source.indexOf('const ended = performance.now();', executeZoom);
+	const settleFrame = source.indexOf("await bounded(page.waitForTimeout(16), deadline, 'camera final frame');", executeZoom);
+	assert.ok(executeZoom >= 0 && motionEnd >= 0 && settleFrame >= 0 && motionEnd < settleFrame,
+		'camera movement timing must stop before the post-motion settle frame');
 	assert.doesNotMatch(source, /window-follow|pause-resume|snap-magnet/);
 	assert.match(source, /three minutes|180 seconds/i);
 	assert.match(source, /five seconds|5000 ms/i);
