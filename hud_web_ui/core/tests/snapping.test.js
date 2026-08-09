@@ -67,46 +67,53 @@ test('lines start at the origin and cover the console extent without leaving it'
 	assert.equal(y.length, 25);
 });
 
-// A drag snaps pos_x, not the console position, so the element's edge lands on
-// base + k*step. Drawing at multiples of the step is correct only when the base
-// is one -- true for a screen-placed left-aligned element and false for every
-// centred or right-aligned one, which is where this was originally wrong.
-test('lines sit on the element lattice, not on multiples of the step', () => {
-	// A whole base: the engine truncates `align + pos` into an int rect, and a
-	// drag writes a whole offset, so every reachable position is a whole one.
-	// The caller derives this with alignmentBase(); see view/app.js.
-	const base = 163;
-	const { x } = gridLines(8, { w: 320, h: 200 }, { x: 0, y: 0 }, { x: base, y: 0 });
-	assert.equal(x[0], 3);
-	assert.equal(x[1], 11);
-	for (const value of x) {
-		// Math.abs: a negative remainder is -0, and -0 is not 0 under strict equality.
-		assert.equal(Math.abs((value - base) % 8), 0, `${value} is not on the element's lattice`);
-		assert(Number.isInteger(value), `${value} is not a position the engine can store`);
+// The whole point of a fixed grid is that things snap INTO it. The drag snaps
+// the element's POSITION and solves back for the offset (view/app.js beginDrag),
+// so an element lands on a drawn line whatever its anchor put its base at --
+// and two elements with different bases land on the SAME lines.
+test('every element lands on a drawn line, whatever its base', () => {
+	const step = 8;
+	const drawn = new Set(gridLines(step, { w: 320, h: 200 }).x);
+	for (const base of [0, 3, 47, 152, 163, 299, -5]) {
+		for (const proposedOffset of [11, 12, 13, 100, 101, 254]) {
+			// exactly what beginDrag computes: snap the position, solve for the offset
+			const offset = snapToGrid(base + proposedOffset, step) - base;
+			const landed = base + offset;
+			assert(Number.isInteger(offset),
+				`base ${base} at offset ${proposedOffset} produced a fractional offset ${offset}`);
+			if (landed >= 0 && landed < 320) {
+				assert(drawn.has(landed),
+					`base ${base} at offset ${proposedOffset} landed on ${landed}, not a drawn line`);
+			}
+		}
 	}
 });
 
-test('a negative base still produces the first line at or above zero', () => {
-	const { x } = gridLines(8, { w: 64, h: 64 }, { x: 0, y: 0 }, { x: -13, y: 0 });
-	assert.equal(x[0], 3);
-	assert(x.every((value) => value >= 0), 'a line was drawn off the left of the stage');
+test('two elements dragged to the same place land on the same line', () => {
+	const step = 8;
+	// The pointer proposes a POSITION; beginDrag turns it into this element's
+	// offset, snaps, and solves back. Two different anchors, one answer.
+	const land = (base, target) => {
+		const proposed = target - base;
+		return base + (snapToGrid(base + proposed, step) - base);
+	};
+	for (const target of [100, 101, 104, 255]) {
+		const answers = [0, 3, 47, 152, 299, -5].map((base) => land(base, target));
+		assert.equal(new Set(answers).size, 1,
+			`dragging to ${target} gave ${answers.join(', ')} depending on the anchor`);
+	}
 });
 
-// The two axes carry independent bases: an element can be centred horizontally
-// and top-anchored vertically, and one lattice must not leak into the other.
-test('each axis uses its own base', () => {
-	const { x, y } = gridLines(10, { w: 100, h: 100 }, { x: 0, y: 0 }, { x: 3, y: 7 });
-	assert.equal(x[0], 3);
-	assert.equal(y[0], 7);
-});
-
-// Floats: the real caller passes a fractional floor (12 * vid_width / shown) and
-// a fractional base, so an accumulating loop would drift off the lattice the
-// first test pins.
-test('a fractional base does not drift across the extent', () => {
-	const { x } = gridLines(3, { w: 300, h: 10 }, { x: 0, y: 0 }, { x: 0.1, y: 0 });
-	assert.equal(x.length, 100);
-	assert(Math.abs(x.at(-1) - 297.1) < 1e-9, `last line drifted to ${x.at(-1)}`);
+// The caller's floor is fractional (12 * vid_width / shown), so the cadence can
+// be fractional too and an accumulating loop would drift off the lattice.
+test('a fractional floor does not drift the lattice across the extent', () => {
+	const { x } = gridLines(3, { w: 300, h: 10 }, { x: 8.89, y: 8.89 });
+	assert.equal(x[1] - x[0], 9);
+	assert(Math.abs(x.at(-1) - 297) < 1e-9, `last line drifted to ${x.at(-1)}`);
+	for (const value of x) {
+		assert(Math.abs(value / 3 - Math.round(value / 3)) < 1e-9,
+			`${value} is not a multiple of the step a drag uses`);
+	}
 });
 
 test('a step that does not divide the extent stops before the far edge', () => {

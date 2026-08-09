@@ -16,14 +16,12 @@ export function snapToGrid(value, step) {
 // Which lines to draw for a grid of `step`, in console coordinates, over a
 // console extent of `w` x `h`.
 //
-// `origin` is what makes the picture true. A drag snaps the element's OFFSET
-// (pos_x/pos_y), not its console position, so its edge lands on
-// `base + k*step` where `base = rect - pos` is whatever its anchor and
-// alignment put it at. Drawing at multiples of the step instead would be right
-// only for elements whose base happens to be a multiple of the step -- a
-// screen-placed, left-aligned element -- and would sit up to half a step away
-// from where every centred or right-aligned element actually lands. Pass the
-// base of the element the grid is describing.
+// One fixed lattice on the screen, at multiples of the step: a grid you can
+// snap things INTO, where two elements dragged onto the same line are aligned
+// with each other. That only holds because the drag snaps the element's
+// POSITION onto this lattice and solves back for the offset (see beginDrag);
+// snapping the offset instead would give every element its own lattice, shifted
+// by wherever its anchor sits, and no two would ever agree.
 //
 // `minSpacing` is the closest the lines may be drawn on each axis, in console
 // units. The caller converts its own legibility floor (CSS pixels) through the
@@ -44,12 +42,12 @@ export function snapToGrid(value, step) {
 // than 8 when 8 already clears the floor), and two steps can draw the same
 // grid. Smoothing that out would mean drawing lines a drag never lands on,
 // which is the defect this replaced.
-export function gridLines(step, extent, minSpacing = { x: 0, y: 0 }, origin = { x: 0, y: 0 }) {
+export function gridLines(step, extent, minSpacing = { x: 0, y: 0 }) {
 	const spacing = Number(step);
 	if (!Number.isFinite(spacing) || spacing <= 0) {
 		return { x: [], y: [] };
 	}
-	const axis = (size, floor, base) => {
+	const axis = (size, floor) => {
 		const limit = Number(size);
 		if (!Number.isFinite(limit) || limit <= 0) {
 			return [];
@@ -57,20 +55,17 @@ export function gridLines(step, extent, minSpacing = { x: 0, y: 0 }, origin = { 
 		// A whole multiple, so every line drawn is still somewhere a drag lands.
 		const smallest = Math.max(0, Number(floor) || 0);
 		const cadence = spacing * Math.max(1, Math.ceil(smallest / spacing));
-		const anchor = Number.isFinite(Number(base)) ? Number(base) : 0;
-		// The lowest line at or above zero that is still on the element's own
-		// lattice. Indexed rather than accumulated: += would drift on a
-		// fractional cadence and quietly break the invariant above.
-		const first = anchor - cadence * Math.floor(anchor / cadence);
+		// Indexed rather than accumulated: += would drift on a fractional cadence
+		// and quietly put lines where a drag does not land.
 		const values = [];
-		for (let i = 0; first + i * cadence < limit; i += 1) {
-			values.push(first + i * cadence);
+		for (let i = 0; i * cadence < limit; i += 1) {
+			values.push(i * cadence);
 		}
 		return values;
 	};
 	return {
-		x: axis(extent?.w, minSpacing?.x, origin?.x),
-		y: axis(extent?.h, minSpacing?.y, origin?.y),
+		x: axis(extent?.w, minSpacing?.x),
+		y: axis(extent?.h, minSpacing?.y),
 	};
 }
 

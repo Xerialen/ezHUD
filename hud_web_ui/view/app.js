@@ -891,22 +891,14 @@ function renderGrid() {
 	// it through the transform the drag itself uses rather than comparing the two
 	// directly: at any UI scale but 1 they are different quantities.
 	const floor = displayDeltaToConsole(GRID_MIN_CSS, GRID_MIN_CSS, s, p, shown);
-	// The grid describes where the SELECTED element can land, because that is
-	// what a drag snaps: the offset, from wherever this element's anchor and
-	// alignment put its base. With nothing selected there is no element to
-	// describe, so the lattice falls back to the screen origin.
-	const selected = model.selectedElement;
-	const origin = selected?.rect
-		? {
-			x: alignmentBase(selected.rect.x, selected.pos_x),
-			y: alignmentBase(selected.rect.y, selected.pos_y),
-		}
-		: { x: 0, y: 0 };
+	// One fixed lattice on the screen, the same for every element. That is what
+	// makes it something you can snap things INTO: two elements dragged onto the
+	// same line end up aligned with each other. A per-element lattice would be
+	// truthful about one element at a time and useless for lining up two.
 	const lines = gridLines(
 		dragAssist.step,
 		{ w: s.vid_width, h: s.vid_height },
 		{ x: Math.abs(floor.dx), y: Math.abs(floor.dy) },
-		origin,
 	);
 	const fragment = document.createDocumentFragment();
 	for (const axis of ['x', 'y']) {
@@ -957,6 +949,10 @@ function beginDrag(ev, item) {
 	const originX = Number(item.pos_x) || 0;
 	const originY = Number(item.pos_y) || 0;
 	const rect = { ...item.rect };
+	// Where the engine's alignment puts this element before its offset, in whole
+	// console pixels. Fixed for the gesture: the anchor cannot move under a drag.
+	const baseX = alignmentBase(rect.x, item.pos_x);
+	const baseY = alignmentBase(rect.y, item.pos_y);
 	const excluded = descendantNames(item.name, new Set([item.name]));
 	const magnetTargets = model.placedElements
 		.filter((target) => !excluded.has(target.name))
@@ -973,13 +969,6 @@ function beginDrag(ev, item) {
 		other.querySelectorAll('.handle').forEach((h) => h.remove());
 	}
 	box.dataset.selected = 'true';
-	// The grid is anchored to the selected element, and the line above is a
-	// selection change that renderOverlay will not act on: beginGesture() has
-	// already set `dragging`, which makes it return early. Without this, grabbing
-	// an element that was not already selected drags it against the PREVIOUS
-	// element's lattice for the whole gesture -- the drawn lines then predict
-	// nothing, which is the defect this feature exists to remove.
-	renderGrid();
 	let last = null;
 
 	const move = (e) => {
@@ -988,14 +977,20 @@ function beginDrag(ev, item) {
 			model.screen, model.physical, el.frame.clientWidth,
 		);
 		// Quantize to what the engine will actually store, so the preview never
-		// promises sub-pixel precision the engine discards. Grid changes offsets;
-		// magnet then makes the resulting engine rect meet another rect exactly.
+		// promises sub-pixel precision the engine discards. Magnet then makes the
+		// resulting engine rect meet another rect exactly.
 		const bypass = e.altKey;
 		let nx = quantize(originX + dx);
 		let ny = quantize(originY + dy);
 		if (!bypass && dragAssist.grid) {
-			nx = snapToGrid(nx, dragAssist.step);
-			ny = snapToGrid(ny, dragAssist.step);
+			// Snap the element's POSITION onto the screen lattice, then solve back
+			// for the offset that puts it there. Snapping the offset instead gives
+			// every element its own lattice, offset by wherever its anchor sits, so
+			// two elements on the same grid setting never line up with each other --
+			// which is the one thing a grid is for. The base is whole, so the offset
+			// this produces is whole too and the engine stores it exactly.
+			nx = snapToGrid(baseX + nx, dragAssist.step) - baseX;
+			ny = snapToGrid(baseY + ny, dragAssist.step) - baseY;
 		}
 		let nextRect = { ...rect, x: rect.x + (nx - originX), y: rect.y + (ny - originY) };
 		let guides = [];

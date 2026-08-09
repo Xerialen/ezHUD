@@ -1057,8 +1057,12 @@ try {
 	assert(lines8 > 0, 'Grid is on and no grid lines are drawn');
 	await setEnginePlacement('health', 13, 24);
 	let snapped = await dragHealth(19, 0);
-	assert(Number(snapped.pos_x) % 8 === 0,
-		`8px grid produced pos_x=${snapped.pos_x}`);
+	// The POSITION lands on the lattice, not the offset. For a screen-placed,
+	// left-aligned element the two are the same number, which is why asserting
+	// the offset here used to look like it covered the contract; it did not, and
+	// the armor case below is the one that tells them apart.
+	assert(snapped.rect.x % 8 === 0,
+		`8px grid produced rect.x=${snapped.rect.x} (pos_x=${snapped.pos_x})`);
 	// The promise a drawn grid makes is "aim at a line and you land on it". Not
 	// every snap position carries a line — under the legibility floor the cadence
 	// is a multiple of the step — so asserting the reverse would fail by design
@@ -1125,6 +1129,12 @@ try {
 	};
 	await page.locator('.tree__row[data-name="armor"]').click();
 	await aimAtALine(dragArmor, 'centred element, base 3 mod 8');
+	// The claim the fixed grid rests on: a centred element whose base is 3 mod 8
+	// still lands ON the lattice, so it can line up with health. If the drag
+	// snapped the offset instead, this rect would be 3 mod 8 forever.
+	const armorLanded = named(await engineState(), 'armor');
+	assert(armorLanded.rect.x % 8 === 0,
+		`a centred element landed at rect.x=${armorLanded.rect.x}, off the shared lattice`);
 
 	// The common flow: tick Grid, then grab an element that is NOT already
 	// selected. beginGesture() sets `dragging` before the selection changes, so
@@ -1185,8 +1195,8 @@ try {
 		`changing the step from 8 to 5 left the drawn x spacing at ${spacing5.toFixed(2)}px`);
 	await setEnginePlacement('health', 13, 24);
 	snapped = await dragHealth(19, 0);
-	assert(Number(snapped.pos_x) % 5 === 0,
-		`5px grid produced pos_x=${snapped.pos_x}`);
+	assert(snapped.rect.x % 5 === 0,
+		`5px grid produced rect.x=${snapped.rect.x} (pos_x=${snapped.pos_x})`);
 
 	await gridToggle.click();
 	assert(await gridLineCount() === 0,
