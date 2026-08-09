@@ -13,6 +13,47 @@ export function snapToGrid(value, step) {
 	return Math.sign(input) * Math.round(Math.abs(input) / spacing) * spacing;
 }
 
+// Which lines to draw for a grid of `step`, in console coordinates, over a
+// console extent of `w` x `h`. Every value returned is a position snapToGrid
+// lands on, so the picture and the drag cannot disagree.
+//
+// `minSpacing` is the closest the lines may be drawn on each axis, in console
+// units. The caller converts its own legibility floor (CSS pixels) through the
+// same transform the drag uses, because vid_conwidth and vid_conheight are
+// independent: at 320x200 on a wide frame the horizontal lines can be twice as
+// far apart as the vertical ones, and only one of the two may be too dense.
+//
+// Under the floor the cadence is COARSENED, never blanked: drawing every second
+// or fourth line keeps every drawn line a real snap position while leaving the
+// picture underneath readable. Blanking would answer a user who just ticked
+// Grid with an empty stage, which is the defect this whole function exists to
+// fix. Measured on a real frame (412x231 console, 830px stage): at 16 CSS px
+// the grid reads as a grid, at 10 it is a veil and at 6 it dims the picture.
+export function gridLines(step, extent, minSpacing = { x: 0, y: 0 }) {
+	const spacing = Number(step);
+	if (!Number.isFinite(spacing) || spacing <= 0) {
+		return { x: [], y: [] };
+	}
+	const axis = (size, floor) => {
+		const limit = Number(size);
+		if (!Number.isFinite(limit) || limit <= 0) {
+			return [];
+		}
+		// A whole multiple, so every line drawn is still somewhere a drag lands.
+		const smallest = Math.max(0, Number(floor) || 0);
+		const cadence = spacing * Math.max(1, Math.ceil(smallest / spacing));
+		const values = [];
+		for (let value = 0; value <= limit; value += cadence) {
+			values.push(value);
+		}
+		return values;
+	};
+	return {
+		x: axis(extent?.w, minSpacing?.x),
+		y: axis(extent?.h, minSpacing?.y),
+	};
+}
+
 const axisPoints = (rect, axis) => {
 	const start = axis === 'x' ? rect.x : rect.y;
 	const size = axis === 'x' ? rect.w : rect.h;

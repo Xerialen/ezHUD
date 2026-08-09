@@ -571,6 +571,19 @@ button:focus-visible,
 	vector-effect: non-scaling-stroke;
 }
 
+/* The grid a drag snaps to. It sits under everything else on the stage: it is
+   the ruler the picture is judged against, not something to read in its own
+   right, so it never competes with an element edge or a magnet guide. */
+.snap-grid {
+	position: absolute;
+	z-index: 0;
+	pointer-events: none;
+	background: rgb(127 191 255 / 0.18);
+}
+
+.snap-grid--x { top: 0; bottom: 0; width: 1px; }
+.snap-grid--y { left: 0; right: 0; height: 1px; }
+
 .snap-guide {
 	position: absolute;
 	z-index: 4;

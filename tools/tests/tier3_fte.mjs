@@ -1038,19 +1038,54 @@ try {
 		return named(await engineState(), 'health');
 	};
 
+	const gridLineCount = () => page.locator('#overlay .snap-grid').count();
+	assert(await gridLineCount() === 0,
+		'grid lines were drawn before the Grid toggle was ever switched on');
+
 	await gridToggle.click();
+	// #102: the toggle is called Grid and used to draw nothing. Assert the lines
+	// exist AND that they predict where a drag lands — a grid drawn anywhere but
+	// on the snap positions is a promise the editor breaks on every drag, and it
+	// would pass a count-only check.
+	const lines8 = await gridLineCount();
+	assert(lines8 > 0, 'Grid is on and no grid lines are drawn');
 	await setEnginePlacement('health', 13, 24);
 	let snapped = await dragHealth(19, 0);
 	assert(Number(snapped.pos_x) % 8 === 0,
 		`8px grid produced pos_x=${snapped.pos_x}`);
+	// The promise a drawn grid makes is "aim at a line and you land on it". Not
+	// every snap position carries a line — under the legibility floor the cadence
+	// is a multiple of the step — so asserting the reverse would fail by design
+	// and tempt the next person to weaken it. Aim at a real line instead.
+	const lineOffsets = async () => {
+		const out = [];
+		for (const line of await page.locator('#overlay .snap-grid--x').all()) {
+			const box = await line.boundingBox();
+			if (box) out.push(box.x);
+		}
+		return out.sort((a, b) => a - b);
+	};
+	const beforeAim = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+	const target = (await lineOffsets())
+		.reduce((best, x) => (Math.abs(x - (beforeAim.x + 40)) < Math.abs(best - (beforeAim.x + 40)) ? x : best));
+	await dragHealth(target - beforeAim.x, 0);
+	const landed = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+	assert(Math.abs(landed.x - target) <= 1,
+		`aimed at the grid line drawn at x=${target.toFixed(2)} and the element landed at ${landed.x.toFixed(2)}`);
+
 	await gridStep.fill('5');
 	await gridStep.press('Enter');
+	const lines5 = await gridLineCount();
+	assert(lines5 !== lines8,
+		`changing the step from 8 to 5 left the drawn grid unchanged at ${lines5} lines`);
 	await setEnginePlacement('health', 13, 24);
 	snapped = await dragHealth(19, 0);
 	assert(Number(snapped.pos_x) % 5 === 0,
 		`5px grid produced pos_x=${snapped.pos_x}`);
 
 	await gridToggle.click();
+	assert(await gridLineCount() === 0,
+		'grid lines survived the Grid toggle being switched off');
 	await setEnginePlacement('health', 13, 24);
 	const free = await dragHealth(5, 0);
 	assert(Number(free.pos_x) % 5 !== 0,

@@ -12,7 +12,7 @@ import {
 	consoleToFrame, displayDeltaToConsole, elementAt, normaliseElementName,
 	quantize, scaleFactors,
 } from '../core/geometry.js';
-import { magnetizeRect, snapToGrid } from '../core/snapping.js';
+import { gridLines, magnetizeRect, snapToGrid } from '../core/snapping.js';
 import * as syslog from '../core/log.js';
 import { initDebugPanel } from './debug.js';
 
@@ -598,6 +598,9 @@ function renderOverlay() {
 	}
 	const displayScale = shown / natural;
 
+	// Before the boxes, so element edges stay readable against it.
+	renderGrid();
+
 	const selected = model.selectedElement;
 	if (selected?.parent && selected.rect) {
 		const parent = model.element(selected.parent);
@@ -854,6 +857,62 @@ function descendantNames(name, out = new Set()) {
 
 function clearSnapGuides() {
 	el.overlay.querySelectorAll('.snap-guide').forEach((guide) => guide.remove());
+}
+
+// The closest the grid may be drawn, in displayed CSS pixels. Chosen by looking
+// at candidate spacings composited over a real recorded frame (412x231 console
+// on an 830px stage, warm brown Quake geometry, not the near-black test fake):
+// at 16 it reads as a grid, at 10 as a veil, at 6 it visibly dims the picture.
+// A step under this is coarsened to a multiple of itself, never blanked.
+const GRID_MIN_CSS = 12;
+
+function clearGrid() {
+	el.overlay.querySelectorAll('.snap-grid').forEach((line) => line.remove());
+}
+
+// Draw the grid a drag would snap to. Called from renderOverlay (which wipes the
+// overlay) and directly from the Grid and Step controls, because toggling them
+// changes nothing the overlay's staleness check looks at.
+function renderGrid() {
+	clearGrid();
+	if (!dragAssist.grid || !model.frameReady) {
+		return;
+	}
+	const s = model.screen;
+	const p = model.physical;
+	const natural = el.frame.naturalWidth;
+	const shown = el.frame.clientWidth;
+	if (!s || !p || !p[0] || !p[1] || !natural || !shown) {
+		return;
+	}
+	const displayScale = shown / natural;
+	// The floor is a display measurement, and the step is in console units. Send
+	// it through the transform the drag itself uses rather than comparing the two
+	// directly: at any UI scale but 1 they are different quantities.
+	const floor = displayDeltaToConsole(GRID_MIN_CSS, GRID_MIN_CSS, s, p, shown);
+	const lines = gridLines(
+		dragAssist.step,
+		{ w: s.vid_width, h: s.vid_height },
+		{ x: Math.abs(floor.dx), y: Math.abs(floor.dy) },
+	);
+	const fragment = document.createDocumentFragment();
+	for (const axis of ['x', 'y']) {
+		for (const value of lines[axis]) {
+			const projected = consoleToFrame(
+				{ x: axis === 'x' ? value : 0, y: axis === 'y' ? value : 0, w: 0, h: 0 },
+				s, p,
+			);
+			const node = document.createElement('div');
+			node.className = `snap-grid snap-grid--${axis}`;
+			if (axis === 'x') {
+				node.style.left = `${projected.x * displayScale}px`;
+			} else {
+				node.style.top = `${projected.y * displayScale}px`;
+			}
+			fragment.append(node);
+		}
+	}
+	el.overlay.prepend(fragment);
 }
 
 function renderSnapGuides(guides) {
@@ -2145,6 +2204,7 @@ el.uiScale.addEventListener('change', () => applyUiScale(el.uiScale.value, { per
 el.snapGrid.addEventListener('change', () => {
 	dragAssist.grid = el.snapGrid.checked;
 	el.snapStep.disabled = !dragAssist.grid;
+	renderGrid();
 });
 el.snapMagnet.addEventListener('change', () => { dragAssist.magnet = el.snapMagnet.checked; });
 const updateSnapStep = () => {
@@ -2152,6 +2212,7 @@ const updateSnapStep = () => {
 	if (Number.isFinite(value) && value >= 1) {
 		dragAssist.step = Math.min(64, Math.round(value));
 	}
+	renderGrid();
 };
 el.snapStep.addEventListener('input', updateSnapStep);
 el.snapStep.addEventListener('change', () => {
