@@ -145,10 +145,7 @@ function requestIdFor(effectiveOrder) {
 
 function machineAction(step) {
 	const { instruction: _instruction, ...action } = step;
-	return {
-		...action,
-		...(action.crop ? { crop: { ...action.crop } } : {}),
-	};
+	return structuredClone(action);
 }
 
 export function validateTimingReceipt(script, timings) {
@@ -179,9 +176,14 @@ export function validateTimingReceipt(script, timings) {
 	}
 	let previousStart = -1;
 	let previousEnd = 0;
-	for (const [index, timing] of timings.segments.entries()) {
+	for (const [index, rawTiming] of timings.segments.entries()) {
+		// changedrop-timings/1 receipts produced before the camera verb have no
+		// camera_moves field. Treat that legacy shape as an empty report only when
+		// the script itself has no zoom; the count check below still rejects a
+		// missing report for every new camera action.
+		const timing = { camera_moves: [], ...rawTiming };
 		exactObject(timing, [
-			'id', 'kind', 'surface', 'start_seconds', 'duration_seconds', 'actions', 'highlights',
+			'id', 'kind', 'surface', 'start_seconds', 'duration_seconds', 'actions', 'highlights', 'camera_moves',
 		], `Changedrop timing segment ${index + 1}`);
 		const segment = script.segments[index];
 		if (timing.id !== segment.id || timing.kind !== segment.kind || timing.surface !== segment.surface) {
@@ -221,6 +223,35 @@ export function validateTimingReceipt(script, timings) {
 			if (!Number.isInteger(highlight.source_bytes) || highlight.source_bytes <= 0
 				|| !Number.isInteger(highlight.bytes) || highlight.bytes <= 0) {
 				throw new Error('Changedrop highlight files must be non-empty.');
+			}
+		}
+		if (!Array.isArray(timing.camera_moves)) {
+			throw new Error(`Changedrop timing "${timing.id}" camera_moves must be an array.`);
+		}
+		const expectedCameraMoves = segment.walkthrough.flatMap((step, actionIndex) =>
+			step.action === 'zoom' ? [{ step, actionIndex }] : []);
+		if (timing.camera_moves.length !== expectedCameraMoves.length) {
+			throw new Error(`Changedrop timing "${timing.id}" must receipt every scripted zoom exactly once.`);
+		}
+		for (const [moveIndex, move] of timing.camera_moves.entries()) {
+			exactObject(move, [
+				'action_index', 'start_seconds', 'declared_duration_seconds', 'measured_duration_seconds',
+				'delta_seconds', 'tolerance_seconds', 'enforced',
+			], `Changedrop timing camera move for "${timing.id}"`);
+			const expected = expectedCameraMoves[moveIndex];
+			const declared = expected.step.step_count * expected.step.duration_ms_per_step / 1000;
+			if (move.action_index !== expected.actionIndex || move.declared_duration_seconds !== declared) {
+				throw new Error(`Changedrop timing camera move for "${timing.id}" is stale.`);
+			}
+			finiteNumber(move.start_seconds, 'Changedrop camera move start', { minimum: timing.start_seconds });
+			finiteNumber(move.measured_duration_seconds, 'Changedrop camera move measured duration', { positive: true });
+			finiteNumber(move.delta_seconds, 'Changedrop camera move timing delta');
+			if (move.start_seconds + move.measured_duration_seconds > previousEnd + 1e-6
+				|| move.delta_seconds !== Number((move.measured_duration_seconds - declared).toFixed(6))) {
+				throw new Error(`Changedrop timing camera move for "${timing.id}" is outside its segment or malformed.`);
+			}
+			if (move.tolerance_seconds !== null || move.enforced !== false) {
+				throw new Error('Changedrop camera timing must remain report-only until a measured tolerance exists.');
 			}
 		}
 	}
@@ -296,7 +327,7 @@ function splitPadding(totalMilliseconds) {
 }
 
 function copiedStep(step) {
-	return { ...step, ...(step.crop ? { crop: { ...step.crop } } : {}) };
+	return structuredClone(step);
 }
 
 export function fitCaptureScript({ script, timings, measurements } = {}) {
@@ -449,15 +480,18 @@ export function assertNarrationFitsCapture({ script, timings, narration } = {}) 
 		if (deltaSeconds > NARRATION_OVERRUN_EPSILON_SECONDS) {
 			throw new Error(`Narration fit failed for segment "${entry.id}": overrun; audio ${entry.duration_seconds.toFixed(3)}s, capture ${captureDurationSeconds.toFixed(3)}s, epsilon ${NARRATION_OVERRUN_EPSILON_SECONDS.toFixed(3)}s.`);
 		}
-		const quietPictureSeconds = Number(Math.max(0, -deltaSeconds).toFixed(6));
+		const plannedCameraSeconds = Number((timings.segments[index].camera_moves ?? [])
+			.reduce((sum, move) => sum + move.declared_duration_seconds, 0).toFixed(6));
+		const quietPictureSeconds = Number(Math.max(0, -deltaSeconds - plannedCameraSeconds).toFixed(6));
 		if (quietPictureSeconds > MAX_NARRATION_UNDERSHOOT_SECONDS) {
-			throw new Error(`Narration fit failed for segment "${entry.id}": dead air; audio ${entry.duration_seconds.toFixed(3)}s, capture ${captureDurationSeconds.toFixed(3)}s, undershoot bound ${MAX_NARRATION_UNDERSHOOT_SECONDS.toFixed(3)}s.`);
+			throw new Error(`Narration fit failed for segment "${entry.id}": dead air; audio ${entry.duration_seconds.toFixed(3)}s, capture ${captureDurationSeconds.toFixed(3)}s, planned camera ${plannedCameraSeconds.toFixed(3)}s, undershoot bound ${MAX_NARRATION_UNDERSHOOT_SECONDS.toFixed(3)}s.`);
 		}
 		return {
 			id: entry.id,
 			audio_duration_seconds: entry.duration_seconds,
 			capture_duration_seconds: captureDurationSeconds,
 			delta_seconds: deltaSeconds,
+			planned_camera_seconds: plannedCameraSeconds,
 			quiet_picture_seconds: quietPictureSeconds,
 		};
 	});

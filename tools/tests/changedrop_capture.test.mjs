@@ -180,9 +180,97 @@ test('case 4: repeat runs compare the complete action sequence while allowing ti
 	assert.throws(() => capture.assertRepeatableStructure(first, outsideTolerance), /duration.*snap-magnet.*tolerance/i);
 });
 
+test('camera verb: geometric uniform steps drive three siblings and receipt two-sided report-only drift', async () => {
+	assert.ifError(loadError);
+	const script = await fixture('capture-script.json');
+	const zoom = {
+		instruction: 'Travel into the anchor controls.',
+		action: 'zoom',
+		target: { x: 1088, y: 350, w: 312, h: 300 },
+		from: 1,
+		to: 2.5,
+		step_count: 16,
+		duration_ms_per_step: 50,
+	};
+	script.segments[1].walkthrough.unshift(zoom);
+	assert.equal(capture.validateCaptureScript(script), script);
+
+	const scales = capture.geometricZoomScales(1, 2.5, 16);
+	assert.equal(scales.length, 16);
+	assert.equal(scales[0], 1);
+	assert.equal(scales.at(-1), 2.5);
+	const ratios = scales.slice(1).map((scale, index) => scale / scales[index]);
+	assert.ok(Math.max(...ratios) - Math.min(...ratios) < 1e-12, 'adjacent scales are not geometric');
+
+	const targetCenter = { x: 1244, y: 500 };
+	const moves = capture.cameraTransformSteps({
+		target: zoom.target,
+		from: zoom.from,
+		to: zoom.to,
+		stepCount: zoom.step_count,
+		regions: [
+			{ selector: '.bar', x: 0, y: 0 },
+			{ selector: '.shell', x: 0, y: 46 },
+			{ selector: '.statusbar', x: 0, y: 764 },
+		],
+	});
+	assert.equal(moves.length, 16);
+	for (const move of moves) {
+		for (const region of move.regions) {
+			assert.equal(region.scaleX, move.scale);
+			assert.equal(region.scaleY, move.scale);
+			assert.ok(Math.abs(region.translateX - (move.scale - 1) * (region.originX - targetCenter.x)) < 1e-9);
+			assert.ok(Math.abs(region.translateY - (move.scale - 1) * (region.originY - targetCenter.y)) < 1e-9);
+			assert.match(region.css, /animation:none!important/);
+			assert.match(region.css, /transform-origin:0 0!important/);
+		}
+	}
+	const animationCss = capture.cameraAnimationCss(moves, {
+		name: 'changedrop-camera-test', durationMs: 800,
+	});
+	assert.match(animationCss, /\.bar\{[^}]*transition:none!important/);
+	assert.match(animationCss, /\.shell\{[^}]*animation:changedrop-camera-test-1 800ms steps\(1,jump-end\)/);
+	assert.match(animationCss, /\.statusbar\{[^}]*transform-origin:0 0!important/);
+	assert.equal((animationCss.match(/@keyframes changedrop-camera-test-/g) ?? []).length, 3);
+	assert.equal((animationCss.match(/}6\.25%\{/g) ?? []).length, 3,
+		'each region must hold one of 16 discrete states at the first 50 ms boundary');
+
+	const observations = await fixture('capture-observations-a.json');
+	observations[1].camera_moves = [{
+		action_index: 0,
+		start_seconds: 1.2,
+		measured_duration_seconds: 0.84,
+	}];
+	const receipt = capture.buildTimingReceipt({ script, recording: recording(), observations });
+	assert.deepEqual(receipt.segments[1].camera_moves, [{
+		action_index: 0,
+		start_seconds: 1.2,
+		declared_duration_seconds: 0.8,
+		measured_duration_seconds: 0.84,
+		delta_seconds: 0.04,
+		tolerance_seconds: null,
+		enforced: false,
+	}]);
+	const schema = JSON.parse(await readFile(
+		path.join(repo, 'tools', 'changedrop', 'schemas', 'changedrop-timings.v1.json'), 'utf8'));
+	assert.deepEqual(schemaErrors(receipt, schema), []);
+
+	const nonUniform = structuredClone(script);
+	nonUniform.segments[1].walkthrough[0].to_x = 2.5;
+	assert.throws(() => capture.validateCaptureScript(nonUniform), /zoom.*unexpected.*to_x|unexpected.*to_x/i);
+	const setupZoom = structuredClone(script);
+	setupZoom.setup = [zoom];
+	assert.throws(() => capture.validateCaptureScript(setupZoom), /zoom.*setup|setup.*zoom/i);
+	const dialogTrap = structuredClone(script);
+	dialogTrap.segments[0].walkthrough.unshift({
+		instruction: 'Open save.', action: 'click', selector: '#save-open',
+	});
+	assert.throws(() => capture.validateCaptureScript(dialogTrap), /save-open.*click|click.*save-open/i);
+});
+
 test('supporting contract: closed safe DSL, bounded runtime, schema/privacy, npm wiring, and no browser in tier 1', async () => {
 	assert.ifError(loadError);
-	assert.deepEqual([...capture.ACTIONS], ['wait-for', 'resize', 'click', 'hold', 'highlight']);
+	assert.deepEqual([...capture.ACTIONS], ['wait-for', 'resize', 'click', 'hold', 'highlight', 'zoom']);
 	assert.equal(capture.basePathFromIndex('<script type="importmap">{"imports":{"/ezHUD/core/bridge.js":"/ezHUD/core/fte-adapter.js"}}</script>'), '/ezHUD/');
 	assert.equal(capture.basePathFromIndex('<script type="importmap">{"imports":{"/core/bridge.js":"/core/fte-adapter.js"}}</script>'), '/');
 	assert.equal(capture.MAX_HOLD_MS, 5_000);
@@ -190,7 +278,7 @@ test('supporting contract: closed safe DSL, bounded runtime, schema/privacy, npm
 	assert.equal(capture.REPEAT_DURATION_TOLERANCE_SECONDS, 2.0);
 	const script = await fixture('capture-script.json');
 	assert.equal(capture.validateCaptureScript(script), script);
-	for (const forbidden of ['unknown', 'evaluate', 'run-script', 'arbitrary-js']) {
+	for (const forbidden of ['unknown', 'evaluate', 'run-script', 'arbitrary-js', 'scale-x-y']) {
 		const bad = structuredClone(script);
 		bad.segments[0].walkthrough[0].action = forbidden;
 		assert.throws(() => capture.validateCaptureScript(bad), new RegExp(`unknown.*${forbidden}|${forbidden}.*not allowed`, 'i'));

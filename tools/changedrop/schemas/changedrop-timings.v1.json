@@ -36,7 +36,8 @@
           "start_seconds",
           "duration_seconds",
           "actions",
-          "highlights"
+          "highlights",
+          "camera_moves"
         ],
         "properties": {
           "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
@@ -83,6 +84,32 @@
                   "pattern": "^stills/[a-z0-9]+(?:-[a-z0-9]+)*-[1-9][0-9]*\\.png$"
                 },
                 "bytes": {"type": "integer", "minimum": 1}
+              }
+            }
+          },
+          "camera_moves": {
+            "description": "Two-sided per-zoom timing drift; report-only until three film-path runs establish a tolerance.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "action_index",
+                "start_seconds",
+                "declared_duration_seconds",
+                "measured_duration_seconds",
+                "delta_seconds",
+                "tolerance_seconds",
+                "enforced"
+              ],
+              "properties": {
+                "action_index": {"type": "integer", "minimum": 0},
+                "start_seconds": {"type": "number", "minimum": 0},
+                "declared_duration_seconds": {"type": "number", "exclusiveMinimum": 0},
+                "measured_duration_seconds": {"type": "number", "exclusiveMinimum": 0},
+                "delta_seconds": {"type": "number"},
+                "tolerance_seconds": {"type": "null"},
+                "enforced": {"const": false}
               }
             }
           }
@@ -163,6 +190,29 @@
                 "height": {"type": "integer", "minimum": 180, "maximum": 800}
               }
             }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "target", "from", "to", "step_count", "duration_ms_per_step"],
+          "properties": {
+            "action": {"const": "zoom"},
+            "target": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["x", "y", "w", "h"],
+              "properties": {
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "w": {"type": "number", "exclusiveMinimum": 0, "maximum": 3840},
+                "h": {"type": "number", "exclusiveMinimum": 0, "maximum": 2160}
+              }
+            },
+            "from": {"type": "number", "minimum": 0.25, "maximum": 8},
+            "to": {"type": "number", "minimum": 0.25, "maximum": 8},
+            "step_count": {"type": "integer", "minimum": 2, "maximum": 60},
+            "duration_ms_per_step": {"type": "integer", "minimum": 1, "maximum": 1000}
           }
         }
       ]

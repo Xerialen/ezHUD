@@ -18,7 +18,7 @@ const OUTRO = "Be safe, and don't walk on spawns.";
 // files that would stall a run.
 export const MAX_SURFACE_GUIDELINE_SECONDS = 15.0;
 const MAX_HOLD_MS = 5_000;
-const ACTIONS = new Set(['wait-for', 'resize', 'click', 'hold', 'highlight']);
+const ACTIONS = new Set(['wait-for', 'resize', 'click', 'hold', 'highlight', 'zoom']);
 const SELECTOR_PATTERN = /^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\[data-changedrop="[a-z0-9]+(?:-[a-z0-9]+)*"\])$/;
 
 // 2.2 words/s is 132 wpm: a deliberately conservative planning rate near the
@@ -138,6 +138,32 @@ function validateWalkthrough(value, at, { setup = false } = {}) {
 			if (ratio < 1.6 || ratio > 2.2) throw new Error(`${label} highlight crop must be between 1.6:1 and 2.2:1.`);
 			break;
 		}
+		case 'zoom':
+			exactObject(step, [
+				'instruction', 'action', 'target', 'from', 'to', 'step_count', 'duration_ms_per_step',
+			], label);
+			if (setup) throw new Error(`${label} zoom is not allowed during setup.`);
+			exactObject(step.target, ['x', 'y', 'w', 'h'], `${label} target`);
+			for (const field of ['x', 'y', 'w', 'h']) {
+				if (typeof step.target[field] !== 'number' || !Number.isFinite(step.target[field])) {
+					throw new Error(`${label} target ${field} must be finite and numeric.`);
+				}
+			}
+			if (step.target.w <= 0 || step.target.w > 3840 || step.target.h <= 0 || step.target.h > 2160) {
+				throw new Error(`${label} target dimensions are outside the allowed bounds.`);
+			}
+			if (![step.from, step.to].every((scale) => typeof scale === 'number' && Number.isFinite(scale)
+				&& scale >= 0.25 && scale <= 8) || step.from === step.to) {
+				throw new Error(`${label} zoom scales must be distinct finite numbers from 0.25 to 8.`);
+			}
+			if (!Number.isInteger(step.step_count) || step.step_count < 2 || step.step_count > 60) {
+				throw new Error(`${label} zoom step_count must be an integer from 2 to 60.`);
+			}
+			if (!Number.isInteger(step.duration_ms_per_step) || step.duration_ms_per_step < 1
+				|| step.duration_ms_per_step > 1000) {
+				throw new Error(`${label} zoom duration_ms_per_step must be an integer from 1 to 1000.`);
+			}
+			break;
 		default:
 			throw new Error(`${label} has unknown action "${String(step.action)}".`);
 		}
@@ -156,6 +182,7 @@ function copyWalkthrough(walkthrough) {
 	return walkthrough.map((step) => ({
 		...step,
 		...(step.crop ? { crop: { ...step.crop } } : {}),
+		...(step.target ? { target: { ...step.target } } : {}),
 	}));
 }
 

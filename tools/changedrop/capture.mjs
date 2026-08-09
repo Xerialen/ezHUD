@@ -48,7 +48,7 @@ const RING_PADDING = 6;
 const MAX_PROBE_OUTPUT_BYTES = 65_536;
 const PROBE_TIMEOUT_MS = 30_000;
 
-export const ACTIONS = Object.freeze(['wait-for', 'resize', 'click', 'hold', 'highlight']);
+export const ACTIONS = Object.freeze(['wait-for', 'resize', 'click', 'hold', 'highlight', 'zoom']);
 export const SELECTOR_PATTERN = /^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\[data-changedrop="[a-z0-9]+(?:-[a-z0-9]+)*"\])$/;
 
 // Five seconds (5000 ms) is long enough to hold a current narration beat or
@@ -60,6 +60,8 @@ export const MAX_HOLD_MS = 5_000;
 export const MAX_CAPTURE_MS = 180_000;
 
 const ACTION_SET = new Set(ACTIONS);
+const CAMERA_REGIONS = Object.freeze(['.bar', '.shell', '.statusbar']);
+const CAMERA_SCALE_EPSILON = 1e-9;
 
 function exactObject(value, expectedKeys, at) {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${at} must be an object.`);
@@ -162,6 +164,28 @@ function validateWalkthrough(value, at, { setup = false } = {}) {
 			if (ratio < 1.6 || ratio > 2.2) throw new Error(`${label} highlight crop must be between 1.6:1 and 2.2:1.`);
 			break;
 		}
+		case 'zoom':
+			exactObject(step, [
+				'instruction', 'action', 'target', 'from', 'to', 'step_count', 'duration_ms_per_step',
+			], label);
+			if (setup) throw new Error(`${label} zoom is not allowed during setup.`);
+			exactObject(step.target, ['x', 'y', 'w', 'h'], `${label} target`);
+			for (const field of ['x', 'y', 'w', 'h']) finiteNumber(step.target[field], `${label} target ${field}`);
+			if (step.target.w <= 0 || step.target.w > 3840 || step.target.h <= 0 || step.target.h > 2160) {
+				throw new Error(`${label} target dimensions are outside the allowed bounds.`);
+			}
+			if (![step.from, step.to].every((scale) => typeof scale === 'number' && Number.isFinite(scale)
+				&& scale >= 0.25 && scale <= 8) || step.from === step.to) {
+				throw new Error(`${label} zoom scales must be distinct finite numbers from 0.25 to 8.`);
+			}
+			if (!Number.isInteger(step.step_count) || step.step_count < 2 || step.step_count > 60) {
+				throw new Error(`${label} zoom step_count must be an integer from 2 to 60.`);
+			}
+			if (!Number.isInteger(step.duration_ms_per_step) || step.duration_ms_per_step < 1
+				|| step.duration_ms_per_step > 1000) {
+				throw new Error(`${label} zoom duration_ms_per_step must be an integer from 1 to 1000.`);
+			}
+			break;
 		default:
 			throw new Error(`${label} has unknown action "${String(step.action)}".`);
 		}
@@ -242,7 +266,89 @@ export function validateCaptureScript(script) {
 	if (script.segments.slice(1, -1).some((segment) => segment.kind !== 'surface')) {
 		throw new Error('Only the first and last changedrop segments may be bookends.');
 	}
+	const everyStep = [script.setup, ...script.segments.map((segment) => segment.walkthrough)].flat();
+	if (everyStep.some((step) => step.action === 'click' && step.selector === '#save-open')) {
+		throw new Error('Changedrop click selector #save-open is forbidden across the complete script.');
+	}
 	return privacyChecked(script, 'Changedrop script');
+}
+
+export function geometricZoomScales(from, to, stepCount) {
+	if (![from, to].every((value) => typeof value === 'number' && Number.isFinite(value) && value > 0)
+		|| !Number.isInteger(stepCount) || stepCount < 2) {
+		throw new Error('Geometric zoom scales require positive endpoints and at least two steps.');
+	}
+	return Array.from({ length: stepCount }, (_unused, index) => {
+		if (index === 0) return from;
+		if (index === stepCount - 1) return to;
+		return from * (to / from) ** (index / (stepCount - 1));
+	});
+}
+
+function cssNumber(value) {
+	const stable = Math.abs(value) < 1e-12 ? 0 : value;
+	return Number(stable.toFixed(12));
+}
+
+export function cameraTransformSteps({ target, from, to, stepCount, regions } = {}) {
+	if (!target || typeof target !== 'object' || !Array.isArray(regions) || regions.length === 0) {
+		throw new Error('Camera transform steps require a target and region origins.');
+	}
+	for (const field of ['x', 'y', 'w', 'h']) finiteNumber(target[field], `Camera target ${field}`);
+	if (target.w <= 0 || target.h <= 0) throw new Error('Camera target dimensions must be positive.');
+	const focus = { x: target.x + target.w / 2, y: target.y + target.h / 2 };
+	return geometricZoomScales(from, to, stepCount).map((scale) => ({
+		scale,
+		focus: { ...focus },
+		regions: regions.map((region) => {
+			if (!CAMERA_REGIONS.includes(region.selector)) {
+				throw new Error(`Camera region ${String(region.selector)} is outside the three-sibling contract.`);
+			}
+			finiteNumber(region.x, `Camera region ${region.selector} x`);
+			finiteNumber(region.y, `Camera region ${region.selector} y`);
+			const translateX = cssNumber((scale - 1) * (region.x - focus.x));
+			const translateY = cssNumber((scale - 1) * (region.y - focus.y));
+			const stableScale = cssNumber(scale);
+			const transform = `translate(${translateX}px,${translateY}px) scale(${stableScale})`;
+			return {
+				selector: region.selector,
+				originX: region.x,
+				originY: region.y,
+				translateX,
+				translateY,
+				scaleX: scale,
+				scaleY: scale,
+				transform,
+				css: `${region.selector}{animation:none!important;transition:none!important;transform-origin:0 0!important;`
+					+ `transform:${transform}!important}`,
+			};
+		}),
+	}));
+}
+
+export function cameraAnimationCss(moves, { name, durationMs } = {}) {
+	if (!Array.isArray(moves) || moves.length < 2 || typeof name !== 'string'
+		|| !/^[a-z][a-z0-9-]{0,63}$/.test(name) || !Number.isInteger(durationMs) || durationMs < 1) {
+		throw new Error('Camera animation requires safe identity, duration, and at least two moves.');
+	}
+	if (!Array.isArray(moves[0].regions) || moves[0].regions.length !== CAMERA_REGIONS.length) {
+		throw new Error('Camera animation must contain the three sibling regions.');
+	}
+	return moves[0].regions.map((_region, regionIndex) => {
+		const selector = moves[0].regions[regionIndex].selector;
+		const animationName = `${name}-${regionIndex}`;
+		const keyframes = moves.map((move, moveIndex) => {
+			if (move.regions[regionIndex]?.selector !== selector) {
+				throw new Error('Camera animation region order changed between steps.');
+			}
+			const percentage = cssNumber(moveIndex / moves.length * 100);
+			return `${percentage}%{transform:${move.regions[regionIndex].transform}}`;
+		});
+		keyframes.push(`100%{transform:${moves.at(-1).regions[regionIndex].transform}}`);
+		return `@keyframes ${animationName}{${keyframes.join('')}}`
+			+ `${selector}{transition:none!important;transform-origin:0 0!important;`
+			+ `animation:${animationName} ${durationMs}ms steps(1,jump-end) forwards!important}`;
+	}).join('');
 }
 
 function safeRelativePng(value, source) {
@@ -490,6 +596,7 @@ function machineAction(step) {
 	return {
 		...action,
 		...(action.crop ? { crop: { ...action.crop } } : {}),
+		...(action.target ? { target: { ...action.target } } : {}),
 	};
 }
 
@@ -503,8 +610,8 @@ export function buildTimingReceipt({ script, recording, observations } = {}) {
 	let previousStart = -1;
 	let previousEnd = 0;
 	const segments = script.segments.map((scriptSegment, index) => {
-		const observed = observations[index];
-		exactObject(observed, ['id', 'start_seconds', 'duration_seconds', 'highlights'],
+		const observed = { camera_moves: [], ...observations[index] };
+		exactObject(observed, ['id', 'start_seconds', 'duration_seconds', 'highlights', 'camera_moves'],
 			`Capture observation ${index + 1}`);
 		if (observed.id !== scriptSegment.id) {
 			throw new Error(`Capture segment order mismatch: expected "${scriptSegment.id}", got "${String(observed.id)}".`);
@@ -541,6 +648,37 @@ export function buildTimingReceipt({ script, recording, observations } = {}) {
 			}
 			return { ...highlight };
 		});
+		if (!Array.isArray(observed.camera_moves)) {
+			throw new Error(`Capture segment "${observed.id}" camera_moves must be an array.`);
+		}
+		const expectedCameraMoves = scriptSegment.walkthrough.flatMap((step, actionIndex) =>
+			step.action === 'zoom' ? [{ step, actionIndex }] : []);
+		if (observed.camera_moves.length !== expectedCameraMoves.length) {
+			throw new Error(`Capture segment "${observed.id}" must receipt every zoom action exactly once.`);
+		}
+		const cameraMoves = observed.camera_moves.map((move, moveIndex) => {
+			exactObject(move, ['action_index', 'start_seconds', 'measured_duration_seconds'],
+				`Capture camera move ${moveIndex + 1} for "${observed.id}"`);
+			const expected = expectedCameraMoves[moveIndex];
+			if (!Number.isInteger(move.action_index) || move.action_index !== expected.actionIndex) {
+				throw new Error(`Capture camera move for "${observed.id}" does not match its zoom action index.`);
+			}
+			finiteNumber(move.start_seconds, 'Capture camera move start', { minimum: observed.start_seconds });
+			finiteNumber(move.measured_duration_seconds, 'Capture camera move measured duration', { positive: true });
+			if (move.start_seconds + move.measured_duration_seconds > previousEnd + 1e-6) {
+				throw new Error(`Capture camera move for "${observed.id}" must lie inside its segment interval.`);
+			}
+			const declaredDurationSeconds = expected.step.step_count * expected.step.duration_ms_per_step / 1000;
+			return {
+				action_index: move.action_index,
+				start_seconds: move.start_seconds,
+				declared_duration_seconds: declaredDurationSeconds,
+				measured_duration_seconds: move.measured_duration_seconds,
+				delta_seconds: Number((move.measured_duration_seconds - declaredDurationSeconds).toFixed(6)),
+				tolerance_seconds: null,
+				enforced: false,
+			};
+		});
 		return {
 			id: scriptSegment.id,
 			kind: scriptSegment.kind,
@@ -549,6 +687,7 @@ export function buildTimingReceipt({ script, recording, observations } = {}) {
 			duration_seconds: observed.duration_seconds,
 			actions: scriptSegment.walkthrough.map(machineAction),
 			highlights,
+			camera_moves: cameraMoves,
 		};
 	});
 	if (recording.duration_seconds < previousEnd) throw new Error('Changedrop recording ends before its final segment.');
@@ -588,6 +727,14 @@ export function assertRepeatableStructure(first, second) {
 		if (JSON.stringify(leftHighlights) !== JSON.stringify(rightHighlights)) {
 			throw new Error(`Repeat capture highlight sequence changed for "${left.id}".`);
 		}
+		const leftCameraMoves = left.camera_moves.map(({ action_index }) => action_index);
+		const rightCameraMoves = right.camera_moves.map(({ action_index }) => action_index);
+		if (JSON.stringify(leftCameraMoves) !== JSON.stringify(rightCameraMoves)) {
+			throw new Error(`Repeat capture camera-move sequence changed for "${left.id}".`);
+		}
+		// Per-verb timing remains report-only until three consecutive film-path
+		// runs establish a measured tolerance. Segment repeatability still guards
+		// the complete capture at its existing two-second tolerance.
 		if (Math.abs(left.duration_seconds - right.duration_seconds) > REPEAT_DURATION_TOLERANCE_SECONDS) {
 			throw new Error(`Repeat capture duration for "${left.id}" exceeds the two-second tolerance.`);
 		}
@@ -787,6 +934,59 @@ async function bounded(operation, deadline, label) {
 	}
 }
 
+async function executeZoom({ page, step, deadline, captureStart, cameraState }) {
+	if (Math.abs(cameraState.scale - step.from) > CAMERA_SCALE_EPSILON) {
+		throw new Error(`Zoom starts at ${step.from}, but the live camera is at ${cameraState.scale}.`);
+	}
+	const targetFocus = {
+		x: step.target.x + step.target.w / 2,
+		y: step.target.y + step.target.h / 2,
+	};
+	if (cameraState.scale !== 1 && cameraState.focus
+		&& (Math.abs(cameraState.focus.x - targetFocus.x) > CAMERA_SCALE_EPSILON
+			|| Math.abs(cameraState.focus.y - targetFocus.y) > CAMERA_SCALE_EPSILON)) {
+		throw new Error('A zoomed camera cannot change focus without first returning to scale 1.');
+	}
+	const currentFocus = cameraState.focus ?? targetFocus;
+	const boxes = await bounded(Promise.all(CAMERA_REGIONS.map(async (selector) => {
+		const box = await page.locator(selector).boundingBox();
+		if (!box) throw new Error(`Camera region ${selector} has no visible geometry.`);
+		return { selector, box };
+	})), deadline, 'camera region measurement');
+	const regions = boxes.map(({ selector, box }) => ({
+		selector,
+		x: (box.x + (cameraState.scale - 1) * currentFocus.x) / cameraState.scale,
+		y: (box.y + (cameraState.scale - 1) * currentFocus.y) / cameraState.scale,
+	}));
+	const moves = cameraTransformSteps({
+		target: step.target,
+		from: step.from,
+		to: step.to,
+		stepCount: step.step_count,
+		regions,
+	});
+	const declaredDurationMs = step.step_count * step.duration_ms_per_step;
+	cameraState.sequence += 1;
+	const animationCss = cameraAnimationCss(moves, {
+		name: `changedrop-camera-${cameraState.sequence}`,
+		durationMs: declaredDurationMs,
+	});
+	const started = performance.now();
+	await bounded(page.addStyleTag({ content: animationCss }), deadline, 'camera transform');
+	const remainingPictureMs = declaredDurationMs - (performance.now() - started);
+	if (remainingPictureMs > 0) {
+		await bounded(page.waitForTimeout(remainingPictureMs), deadline, 'camera picture duration');
+	}
+	await bounded(page.waitForTimeout(16), deadline, 'camera final frame');
+	const ended = performance.now();
+	cameraState.scale = step.to;
+	cameraState.focus = targetFocus;
+	return {
+		start_seconds: (started - captureStart) / 1000,
+		measured_duration_seconds: (ended - started) / 1000,
+	};
+}
+
 async function executeStep({
 	page,
 	annotationPage,
@@ -798,6 +998,7 @@ async function executeStep({
 	captureStart,
 	segmentStart,
 	activeRing,
+	cameraState,
 }) {
 	const timeout = Math.min(MAX_WAIT_MS, remainingMs(deadline));
 	switch (step.action) {
@@ -813,9 +1014,18 @@ async function executeStep({
 	case 'resize':
 		await bounded(page.setViewportSize({ width: step.width, height: step.height }), deadline, 'resize');
 		return null;
-	case 'click':
-		await bounded(page.locator(step.selector).click({ timeout }), deadline, 'click');
+	case 'click': {
+		const locator = page.locator(step.selector);
+		const [resolvedId, resolvedText] = await bounded(Promise.all([
+			locator.getAttribute('id'),
+			locator.textContent(),
+		]), deadline, 'click target identity');
+		if (resolvedId === 'save-open' || resolvedText?.trim() === 'Reset positions…') {
+			throw new Error('Changedrop click resolved to a dialog opener, which is forbidden for the complete script.');
+		}
+		await bounded(locator.click({ timeout }), deadline, 'click');
 		return null;
+	}
 	case 'hold':
 		if (step.floor_ms !== undefined) {
 			// Floor hold: wait until the segment has lasted at least floor_ms.
@@ -855,6 +1065,8 @@ async function executeStep({
 			await bounded(page.waitForTimeout(step.duration_ms), deadline, 'hold');
 		}
 		return null;
+	case 'zoom':
+		return executeZoom({ page, step, deadline, captureStart, cameraState });
 	case 'highlight': {
 		if (!segmentId) throw new Error('Highlight action requires a timed segment.');
 		if (activeRing.selector) await page.addStyleTag({ content: clearRingCss(activeRing.selector) });
@@ -936,8 +1148,12 @@ async function runBrowserCapture({ script, dist, output }) {
 		await bounded(page.goto(hosted.url, { waitUntil: 'domcontentloaded', timeout: Math.min(MAX_WAIT_MS, remainingMs(deadline)) }),
 			deadline, 'page load');
 		const activeRing = { selector: null };
+		const cameraState = { scale: 1, focus: null, sequence: 0 };
 		for (const step of script.setup) {
-			await executeStep({ page, annotationPage, step, deadline, output, captureStart, segmentStart: captureStart, activeRing });
+			await executeStep({
+				page, annotationPage, step, deadline, output, captureStart,
+				segmentStart: captureStart, activeRing, cameraState,
+			});
 		}
 		const observations = [];
 		for (const segment of script.segments) {
@@ -947,18 +1163,21 @@ async function runBrowserCapture({ script, dist, output }) {
 			}
 			const segmentStarted = performance.now();
 			const highlights = [];
+			const cameraMoves = [];
 			let highlightIndex = 0;
-			for (const step of segment.walkthrough) {
+			for (const [actionIndex, step] of segment.walkthrough.entries()) {
 				if (step.action === 'highlight') highlightIndex += 1;
-				const highlight = await executeStep({
+				const result = await executeStep({
 					page, annotationPage, step, deadline, output,
 					segmentId: segment.id,
 					highlightIndex,
 					captureStart,
 					segmentStart: segmentStarted,
 					activeRing,
+					cameraState,
 				});
-				if (highlight) highlights.push(highlight);
+				if (step.action === 'highlight' && result) highlights.push(result);
+				if (step.action === 'zoom' && result) cameraMoves.push({ action_index: actionIndex, ...result });
 			}
 			const segmentEnded = performance.now();
 			observations.push({
@@ -966,6 +1185,7 @@ async function runBrowserCapture({ script, dist, output }) {
 				start_seconds: (segmentStarted - captureStart) / 1000,
 				duration_seconds: (segmentEnded - segmentStarted) / 1000,
 				highlights,
+				camera_moves: cameraMoves,
 			});
 		}
 		if (activeRing.selector) await page.addStyleTag({ content: clearRingCss(activeRing.selector) });

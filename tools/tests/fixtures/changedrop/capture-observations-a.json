@@ -3,7 +3,8 @@
     "id": "intro",
     "start_seconds": 0.4,
     "duration_seconds": 0.71,
-    "highlights": []
+    "highlights": [],
+    "camera_moves": []
   },
   {
     "id": "snap-magnet",
@@ -19,12 +20,14 @@
         "basename": "stills/snap-magnet-1.png",
         "bytes": 2304
       }
-    ]
+    ],
+    "camera_moves": []
   },
   {
     "id": "outro",
     "start_seconds": 3.01,
     "duration_seconds": 0.61,
-    "highlights": []
+    "highlights": [],
+    "camera_moves": []
   }
 ]

@@ -210,6 +210,65 @@ test('review blocker: narration fit is asymmetric for overrun, ordinary quiet pi
 	}), /snap-magnet.*dead air.*audio.*1\.099.*capture.*3\.100.*bound.*2\.000/i);
 });
 
+test('camera travel is declared planned picture time for dead-air, while narration overrun stays unchanged', async () => {
+	assert.ifError(loadError);
+	const { script, timings } = await inputs();
+	const zoom = {
+		instruction: 'Travel into the changed control.',
+		action: 'zoom',
+		target: { x: 1088, y: 350, w: 312, h: 300 },
+		from: 1,
+		to: 2.5,
+		step_count: 16,
+		duration_ms_per_step: 50,
+	};
+	script.segments[1].walkthrough.unshift(zoom);
+	const { instruction: _instruction, ...zoomAction } = zoom;
+	timings.segments[1].actions.unshift(zoomAction);
+	timings.segments[1].camera_moves = [{
+		action_index: 0,
+		start_seconds: timings.segments[1].start_seconds,
+		declared_duration_seconds: 0.8,
+		measured_duration_seconds: 0.84,
+		delta_seconds: 0.04,
+		tolerance_seconds: null,
+		enforced: false,
+	}];
+	const audioDuration = 1.1;
+	timings.segments[1].duration_seconds = audioDuration + 0.8 + 2.0;
+	timings.segments[2].start_seconds = timings.segments[1].start_seconds
+		+ timings.segments[1].duration_seconds + 0.01;
+	timings.recording.duration_seconds = timings.segments[2].start_seconds
+		+ timings.segments[2].duration_seconds + 0.1;
+	timings.recording.container_duration_seconds = timings.recording.duration_seconds + 0.92;
+	const narration = {
+		schema_version: 'changedrop-narration/1',
+		project: 'ezhud',
+		voice_profile: 'xeri-en-v1',
+		segments: script.segments.map((segment, index) => ({
+			id: segment.id,
+			duration_seconds: index === 1 ? audioDuration : timings.segments[index].duration_seconds,
+		})),
+	};
+	const report = voice.assertNarrationFitsCapture({ script, timings, narration });
+	assert.equal(report.valid, true);
+	assert.equal(report.segments[1].planned_camera_seconds, 0.8);
+	assert.equal(report.segments[1].quiet_picture_seconds, 2.0);
+
+	const lostAction = structuredClone(timings);
+	lostAction.segments[1].duration_seconds += 0.001;
+	lostAction.segments[2].start_seconds += 0.001;
+	lostAction.recording.duration_seconds += 0.001;
+	lostAction.recording.container_duration_seconds += 0.001;
+	assert.throws(() => voice.assertNarrationFitsCapture({ script, timings: lostAction, narration }),
+		/snap-magnet.*dead air.*planned camera.*0\.800|planned camera.*0\.800.*snap-magnet/i);
+
+	const narrationOverrun = structuredClone(narration);
+	narrationOverrun.segments[1].duration_seconds = timings.segments[1].duration_seconds + 0.101;
+	assert.throws(() => voice.assertNarrationFitsCapture({ script, timings, narration: narrationOverrun }),
+		/snap-magnet.*overrun.*epsilon.*0\.100/i);
+});
+
 test('review blocker: padding fit adds a quarter-second visual safety handle', async () => {
 	assert.ifError(loadError);
 	assert.equal(voice.FIT_SAFETY_MARGIN_SECONDS, 0.25);

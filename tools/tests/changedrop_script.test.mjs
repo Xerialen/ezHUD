@@ -149,7 +149,7 @@ test('case 3: each changed surface has one budgeted segment and a keyed walkthro
 			`${segment.id} has no walkthrough steps`);
 		for (const step of segment.walkthrough) {
 			assert.ok(step.instruction.trim(), `${segment.id} has an empty walkthrough instruction`);
-			assert.match(step.action, /^(?:wait-for|resize|click|hold|highlight)$/);
+			assert.match(step.action, /^(?:wait-for|resize|click|hold|highlight|zoom)$/);
 		}
 		const padding = segment.walkthrough.filter((step) => step.fit === 'narration');
 		assert.ok(padding.length >= 1, `${segment.id} has no narration padding`);
@@ -274,6 +274,31 @@ test('reuse contract: a wholly synthetic surface is authored by data, never tool
 	);
 });
 
+test('camera verb is authored, copied, and published by the same closed schema contract', async () => {
+	assert.ifError(loadError);
+	const { summary, authoring } = await renderFixture();
+	const zoom = {
+		instruction: 'Travel into the changed control.',
+		action: 'zoom',
+		target: { x: 1088, y: 350, w: 312, h: 300 },
+		from: 1,
+		to: 2.5,
+		step_count: 16,
+		duration_ms_per_step: 50,
+	};
+	authoring.treatments[0].walkthrough.unshift(zoom);
+	const script = authorChangedropScript(summary, authoring, {
+		authoringPath: 'docs/release-1/changedrop-script.json',
+	});
+	assert.deepEqual(script.segments[1].walkthrough[0], zoom);
+	const emittedSchema = JSON.parse(await readFile(
+		path.join(repo, 'tools', 'changedrop', 'schemas', 'changedrop-script.v1.json'), 'utf8'));
+	const authoringSchema = JSON.parse(await readFile(
+		path.join(repo, 'tools', 'changedrop', 'schemas', 'changedrop-script-authoring.v1.json'), 'utf8'));
+	assert.deepEqual(schemaErrors(script, emittedSchema), []);
+	assert.deepEqual(schemaErrors(authoring, authoringSchema), []);
+});
+
 test('supporting contract: schemas, privacy, private CLI output, input validation, and npm wiring', async (t) => {
 	assert.ifError(loadError);
 	const schema = JSON.parse(await readFile(
@@ -293,7 +318,7 @@ test('supporting contract: schemas, privacy, private CLI output, input validatio
 	const emittedActions = schema.$defs.step.oneOf.map((branch) => branch.properties.action.const);
 	// The schema now has two hold variants (duration_ms and floor_ms), so the
 	// action constants list will have a duplicate. The set of actions must match.
-	assert.deepEqual([...new Set(authoredActions)], ['wait-for', 'resize', 'click', 'hold', 'highlight']);
+	assert.deepEqual([...new Set(authoredActions)], ['wait-for', 'resize', 'click', 'hold', 'highlight', 'zoom']);
 	assert.deepEqual([...new Set(emittedActions)], [...new Set(authoredActions)]);
 	assert.ok(authoringSchema.$defs.step.oneOf.every((branch) => branch.additionalProperties === false));
 	assert.ok(schema.$defs.step.oneOf.every((branch) => branch.additionalProperties === false));
