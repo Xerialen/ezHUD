@@ -1,0 +1,183 @@
+{
+  "version": 1,
+  "deployment": "bootstrap-main-1950c15068bf05c0db31dd0e0d709066d013c0a3",
+  "generatedAt": "2026-08-09T18:18:24.904Z",
+  "previews": [],
+  "files": [
+    {
+      "path": "core/bridge.js",
+      "size": 6392,
+      "sha256": "4eee27be81e4cd9d45b81a650277aff41568c5169f48c64b58b7aa6b9c846487"
+    },
+    {
+      "path": "core/fte-adapter.js",
+      "size": 19680,
+      "sha256": "6632ae63c2baec64c233dd359d2a5747132552342fffea9cc140bdaf161d59ea"
+    },
+    {
+      "path": "core/geometry.js",
+      "size": 2752,
+      "sha256": "2efbb3babfe3e9813f1b4f48b3100e9866ad4a457f43573d797f2324c7392037"
+    },
+    {
+      "path": "core/log.js",
+      "size": 3314,
+      "sha256": "0757a35c3451825a24d766c7a71a159c9f7413dc8f5220576a3de23d0aee13d4"
+    },
+    {
+      "path": "core/model.js",
+      "size": 34006,
+      "sha256": "06f4480986d05c6340eb1835f2d005ad4047422eba73a8d6ffefd082a0f46269"
+    },
+    {
+      "path": "core/quake-palette.js",
+      "size": 3113,
+      "sha256": "41bc445a54a6cbbea484af6426b98633d7023001b06db145857e06c20206c512"
+    },
+    {
+      "path": "default.fmf",
+      "size": 90,
+      "sha256": "d1f552e7cc36e35ee8a13a5371c4ceb316255e7bc86de5fc8a122a9710be7b4a"
+    },
+    {
+      "path": "favicon.svg",
+      "size": 411,
+      "sha256": "afc9a75100db9fde051ecf5d3b8adf30b13d6456f7f2de017f9d8496fe69f18d"
+    },
+    {
+      "path": "fte/boot.js",
+      "size": 15841,
+      "sha256": "50df2087af88b0e4a8b221bd335437d05d877b0c7a92c8882392800578b8a969"
+    },
+    {
+      "path": "fte/chrome.js",
+      "size": 13744,
+      "sha256": "599e9bea2794ac88872472d3cd29a5a763bc749bcc35ee9d883f2b8ebc08ce90"
+    },
+    {
+      "path": "fte/fte.css",
+      "size": 5493,
+      "sha256": "8b0be43f72b0242c6cbba8f111f119deebd7f6918290d75e05b9b55ae0971631"
+    },
+    {
+      "path": "fte/import.js",
+      "size": 13676,
+      "sha256": "37ae9db4a378b3e5a4b01ebfc34c86e4f8bbf22376653a38ff4ec21a404d9d66"
+    },
+    {
+      "path": "ftewebglcl.js",
+      "size": 151289,
+      "sha256": "d5ab281aee9238fc7189f84ea48d2c24ffc288d5f6a3312259ac2d85f96c106c"
+    },
+    {
+      "path": "ftewebglcl.wasm",
+      "size": 4736379,
+      "sha256": "ef0b056caf7457e00a24fb8681649ed7be700b0838a778b8b518552f5e08863c"
+    },
+    {
+      "path": "id1/gpl_maps.pk3",
+      "size": 3154863,
+      "sha256": "6e409cab705ea6046872383149a222fe76a351f03ac48055b3e5f1faaec9d6c6"
+    },
+    {
+      "path": "id1/nquake.pk3",
+      "size": 9467858,
+      "sha256": "7295a0ee15370a47fdaf492ebf7479241b5b36554c32eb9be9330a234083e8b4"
+    },
+    {
+      "path": "id1/pak0.pak",
+      "size": 18689235,
+      "sha256": "35a9c55e5e5a284a159ad2a62e0e8def23d829561fe2f54eb402dbc0a9a946af"
+    },
+    {
+      "path": "id1/qrp-dm3.pk3",
+      "size": 33613304,
+      "sha256": "581437b8a38e60d452eb8c0fc3080961acb8f0d686bed64123c150675b62ae98"
+    },
+    {
+      "path": "index.html",
+      "size": 8228,
+      "sha256": "1037a6ddca35105d994b431ca69be15f7a4dbbfcdd817ec1337a319eb2bb11d7"
+    },
+    {
+      "path": "qw/demos/hudtest_src.mvd",
+      "size": 14204985,
+      "sha256": "d9d2121e997e7980df3326dc1a91228c58aa523f56a843a152137f6c57871aa3"
+    },
+    {
+      "path": "qw/demos/tb4gf_book_vs_s.mvd",
+      "size": 12812333,
+      "sha256": "45f653c08fbb5488e2619a24ee0dd71347316e60265b8e4caaff0f3607ce0f30"
+    },
+    {
+      "path": "qw/fragfile.dat",
+      "size": 40652,
+      "sha256": "9b15a52c48079c57b7ea2482c0f5996026b3cb526f243a32a218465a78e3ab61"
+    },
+    {
+      "path": "release-1/img/after-bar.png",
+      "size": 8140,
+      "sha256": "2b2ac09728757020c1adc8e565b1ea10df4edc4844466e9ae4315925fb4d7c02"
+    },
+    {
+      "path": "release-1/img/after-paused.png",
+      "size": 969545,
+      "sha256": "c34935d4fa854fc5808f56db0057220e95cfd73d45fa8d9b10dfe6e07f42234c"
+    },
+    {
+      "path": "release-1/img/after-resized-window.png",
+      "size": 1059039,
+      "sha256": "e3b6f6d6164a8b747d6b0d36fb228630efec6f0ac860be00499a5bf60c22af5f"
+    },
+    {
+      "path": "release-1/img/after-state.json",
+      "size": 172,
+      "sha256": "c6ac4c5f60131f3761f91e75d6b0ac35fc2cf9392eab11ffd1ea0cf7d06daeed"
+    },
+    {
+      "path": "release-1/img/before-resized-window.png",
+      "size": 299863,
+      "sha256": "7ad07baf4b20ab29a213d68ebc175d8ef2c3ef0c84476ce31d1f0daaa11ccade"
+    },
+    {
+      "path": "release-1/img/before-state.json",
+      "size": 170,
+      "sha256": "4d88b3fb518574c9479f011768577bed385db13388f22aa51550ffe32e1de1ec"
+    },
+    {
+      "path": "release-1/img/pause-resume-focused-annotated.png",
+      "size": 571255,
+      "sha256": "07eff9f485d23222192a03d5265206e15fcf7c81e6f93345d6f7079f10032422"
+    },
+    {
+      "path": "release-1/img/window-follow-focused-annotated.png",
+      "size": 284002,
+      "sha256": "08f8aa4163b01c726784650a321060143c0b82e63d1509ffbb45c38ff39e03c3"
+    },
+    {
+      "path": "release-1/index.html",
+      "size": 11680,
+      "sha256": "b7b4e6dbb637871f6e717f87b8c184ffa72a8ec737494f076fd6bd94223873c6"
+    },
+    {
+      "path": "release-1/release-notes.html",
+      "size": 4733,
+      "sha256": "e89a40c4d5820f40a7c5802a9d420bd51d8546fa27b46dacc5cedd94a29734a2"
+    },
+    {
+      "path": "ui.css",
+      "size": 32675,
+      "sha256": "53c4b7ba8e96f01182a393a7db4e0c0e8ab2d3aea4ef7a0152307abbe8fdae22"
+    },
+    {
+      "path": "view/app.js",
+      "size": 71354,
+      "sha256": "4a8ad1c9295e1fb1698e8c087f0a8d8c6f0ecd2f4dc7bc57a100010559296a78"
+    },
+    {
+      "path": "view/debug.js",
+      "size": 4060,
+      "sha256": "96b44dd47d1549e2bc4ceef8be331193ddcdc5340ab7692b3139356ad2603137"
+    }
+  ]
+}

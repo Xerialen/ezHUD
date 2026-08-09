@@ -1,0 +1,134 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+import {
+  PUBLIC_ARTIFACT_PATHS,
+  composePreview,
+  composeRelease,
+  createManifest,
+  guardArtifact,
+  guardSite,
+} from '../fte-web/pages-site.mjs';
+
+async function artifact(root, label, basePath) {
+  for (const relative of PUBLIC_ARTIFACT_PATHS) {
+    const target = path.join(root, relative);
+    await mkdir(path.dirname(target), { recursive: true });
+    let contents = `${label}:${relative}\n`;
+    if (relative === 'index.html') {
+      contents = `"${basePath}core/bridge.js"\n"${basePath}core/fte-adapter.js"\n`;
+    }
+    await writeFile(target, contents);
+  }
+}
+
+async function snapshot(root) {
+  const result = new Map();
+  async function walk(directory, prefix = '') {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const relative = path.posix.join(prefix, entry.name);
+      if (entry.isDirectory()) await walk(path.join(directory, entry.name), relative);
+      else result.set(relative, await readFile(path.join(directory, entry.name), 'hex'));
+    }
+  }
+  await walk(root);
+  return result;
+}
+
+test('publishing preview B preserves the release root and preview A byte for byte', async () => {
+  const run = await mkdtemp(path.join(os.tmpdir(), 'ezhud-pages-preserve-'));
+  try {
+    const initial = path.join(run, 'initial');
+    const previewA = path.join(run, 'preview-a');
+    const previewB = path.join(run, 'preview-b');
+    const afterA = path.join(run, 'after-a');
+    const afterB = path.join(run, 'after-b');
+    await artifact(initial, 'release-one', '/ezHUD/');
+    await createManifest(initial, { previews: [], deployment: 'release-1' });
+    await artifact(previewA, 'grid', '/ezHUD/preview/grid/');
+    await artifact(previewB, 'edges', '/ezHUD/preview/edges/');
+
+    await composePreview({ currentDir: initial, previewDir: previewA, outputDir: afterA,
+      name: 'grid', ref: 'feature/grid', commit: 'a'.repeat(40), publishedAt: '2026-08-09T18:00:00Z', deployment: 'run-a' });
+    const rootBefore = await readFile(path.join(afterA, 'index.html'));
+    const previewBefore = await snapshot(path.join(afterA, 'preview/grid'));
+
+    await composePreview({ currentDir: afterA, previewDir: previewB, outputDir: afterB,
+      name: 'edges', ref: 'feature/edges', commit: 'b'.repeat(40), publishedAt: '2026-08-09T19:00:00Z', deployment: 'run-b' });
+
+    assert.deepEqual(await readFile(path.join(afterB, 'index.html')), rootBefore);
+    assert.deepEqual(await snapshot(path.join(afterB, 'preview/grid')), previewBefore);
+    assert.match(await readFile(path.join(afterB, 'preview/index.html'), 'utf8'), /preview\/grid\//);
+    assert.match(await readFile(path.join(afterB, 'preview/index.html'), 'utf8'), /preview\/edges\//);
+    await guardSite(afterB);
+  } finally {
+    await rm(run, { recursive: true, force: true });
+  }
+});
+
+test('a release publication preserves every existing preview', async () => {
+  const run = await mkdtemp(path.join(os.tmpdir(), 'ezhud-pages-release-'));
+  try {
+    const initial = path.join(run, 'initial');
+    const preview = path.join(run, 'preview');
+    const withPreview = path.join(run, 'with-preview');
+    const nextRelease = path.join(run, 'next-release');
+    const output = path.join(run, 'output');
+    await artifact(initial, 'release-one', '/ezHUD/');
+    await createManifest(initial, { previews: [], deployment: 'release-1' });
+    await artifact(preview, 'grid', '/ezHUD/preview/grid/');
+    await composePreview({ currentDir: initial, previewDir: preview, outputDir: withPreview,
+      name: 'grid', ref: 'feature/grid', commit: 'a'.repeat(40), publishedAt: '2026-08-09T18:00:00Z', deployment: 'run-a' });
+    const previewBefore = await snapshot(path.join(withPreview, 'preview/grid'));
+    await artifact(nextRelease, 'release-two', '/ezHUD/');
+
+    await composeRelease({ currentDir: withPreview, releaseDir: nextRelease, outputDir: output,
+      deployment: 'release-run' });
+
+    assert.deepEqual(await snapshot(path.join(output, 'preview/grid')), previewBefore);
+    assert.equal(await readFile(path.join(output, 'index.html'), 'utf8'),
+      '"/ezHUD/core/bridge.js"\n"/ezHUD/core/fte-adapter.js"\n');
+    await guardSite(output);
+  } finally {
+    await rm(run, { recursive: true, force: true });
+  }
+});
+
+test('the preview index cannot list a preview that is not in the preserved site', async () => {
+  const run = await mkdtemp(path.join(os.tmpdir(), 'ezhud-pages-index-'));
+  try {
+    const initial = path.join(run, 'initial');
+    const preview = path.join(run, 'preview');
+    const site = path.join(run, 'site');
+    await artifact(initial, 'release-one', '/ezHUD/');
+    await createManifest(initial, { previews: [], deployment: 'release-1' });
+    await artifact(preview, 'grid', '/ezHUD/preview/grid/');
+    await composePreview({ currentDir: initial, previewDir: preview, outputDir: site,
+      name: 'grid', ref: 'feature/grid', commit: 'a'.repeat(40), publishedAt: '2026-08-09T18:00:00Z', deployment: 'run-a' });
+
+    const indexPath = path.join(site, 'preview/index.html');
+    const index = await readFile(indexPath, 'utf8');
+    await writeFile(indexPath, index.replace('</ul>', '<li><a href="/ezHUD/preview/ghost/">ghost</a></li></ul>'));
+    const manifest = JSON.parse(await readFile(path.join(site, 'pages-manifest.json'), 'utf8'));
+    await createManifest(site, { previews: manifest.previews, deployment: manifest.deployment });
+
+    await assert.rejects(guardSite(site), /preview index links do not match live previews/);
+  } finally {
+    await rm(run, { recursive: true, force: true });
+  }
+});
+
+test('the public allowlist rejects registered game data and owner files in a preview', async () => {
+  const run = await mkdtemp(path.join(os.tmpdir(), 'ezhud-pages-poison-'));
+  try {
+    await artifact(run, 'preview', '/ezHUD/preview/safe/');
+    await writeFile(path.join(run, 'id1/pak1.pak'), 'registered data');
+    await writeFile(path.join(run, 'owner-config.cfg'), 'personal data');
+    await assert.rejects(guardArtifact(run, '/ezHUD/preview/safe/'), /outside the public allowlist/);
+  } finally {
+    await rm(run, { recursive: true, force: true });
+  }
+});

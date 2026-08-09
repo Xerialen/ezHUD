@@ -1,65 +1,83 @@
-# Build the FTE-web editor and publish the sanitized public site to GitHub Pages.
+# Build the FTE-web editor and publish one complete, sanitized Pages site.
 #
-# Nothing is copied from the owner's dev site: the engine is built here from
-# pinned upstream source plus spikes/fte-web/fteqw.diff, every game-data file is
-# a download whose sha256 is pinned in tools/fte-web/game-data.sha256, and
-# tools/fte-web/assemble-public.sh copies an explicit allowlist into dist/. The
-# reasoning, and what must never ship, is spikes/fte-web/PUBLISH.md.
+# A Pages deployment replaces the whole site. Manual branch previews therefore
+# start from the currently deployed, hash-manifested site and overlay exactly
+# one /preview/<name>/ subtree. Pushes to main replace the release root while
+# carrying every preview forward. tools/fte-web/pages-site.mjs guards the final
+# combined artifact with the same explicit public-file allowlist as a release.
 name: Pages
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch, tag, or commit to build
+        required: true
+        default: main
+        type: string
+      name:
+        description: Preview URL name (lowercase letters, digits, hyphens)
+        required: true
+        type: string
 
 permissions:
   contents: read
 
-# One deploy at a time, and never cancel one in flight: a cancelled deploy can
-# leave Pages serving whatever half of the artifact it had already taken.
+# Deployment is the state lock. The deploy job does not finish until the new
+# public manifest and the release/preview index proofs are visible through the
+# Pages CDN, so the next run cannot preserve a stale predecessor.
 concurrency:
   group: pages
   cancel-in-progress: false
 
 env:
-  # Xerialen/fteqw@ezhud-base: fte-team master f937b9d + our own plugin work
-  # (#15 — d01ffbc0 scr_newhud 0/1/2, plus f895ba34f's plugins/ezhud/vx_tracker.c,
-  # a ported ezQuake tracker registering the ezQuake-dialect r_tracker* cvars
-  # NATIVELY (killfeed, #15 P2), incl. fteqw.diff's ezquakeisms.c hunk
-  # committed). fteqw.diff still applies the remaining files on top. Spelled
-  # out in full: the patch is context-sensitive, so a branch name would let
-  # the base move under it and turn a deploy into a merge conflict.
   FTEQW_SHA: 9d8aa3815c65ac65d1f2950eb4d876da51d5635f
-  # The emscripten the spike built and debugged against. Two of our Makefile
-  # flags exist purely because of how *this* emscripten dead-strips (NOTES.md);
-  # an older one needs a different flag set, and a newer one is untested.
   EMSDK_VERSION: 6.0.5
-  # id's own shareware 1.06 archive, from a mirror of ftp.idsoftware.com. It is
-  # the canonical source of pak0.pak: no mirror serves the bare pak, so we take
-  # the archive and extract it (see the game-data step).
   QUAKE106_URL: https://ftp.gwdg.de/pub/misc/ftp.idsoftware.com/idstuff/quake/quake106.zip
-  # nQuake's own distfiles, pinned to a commit rather than master.
   NQUAKE_PK3_URL: https://raw.githubusercontent.com/nQuake/distfiles/d93997920e028343eee24377f75b2addff066990/non-gpl/qw/nquake.pk3
-  # GPL remakes of the id maps, same pinned commit. Without this neither
-  # bundled demo can play: they are on dm3, shareware pak0 has no dm maps,
-  # and FTE's runtime map download cannot work from a Pages origin (the
-  # community map repo hosts no id maps and sends no CORS headers) -- see
-  # tools/fte-web/game-data.sha256 for the full finding.
   GPL_MAPS_URL: https://raw.githubusercontent.com/nQuake/distfiles/d93997920e028343eee24377f75b2addff066990/gpl/id1/gpl_maps.pk3
-  # Our own release, holding the two demos nothing else publishes. Rolling the
-  # demos means a new tag here plus new pins -- see NOTES.md, "Publishing".
   WEB_ASSETS_BASE: https://github.com/Xerialen/ezHUD/releases/download/web-assets-v1
-  # A project site lives under /<repo>/, and that is not cosmetic: the editor's
-  # import map keys on a resolved URL, so assemble-public.sh has to rewrite it
-  # to match where the page is actually served from (NOTES.md, "Running it").
-  BASE_PATH: /ezHUD/
+  PAGES_URL: https://xerialen.github.io/ezHUD/
 
 jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
-      - name: Check out ez-hud
+      # Keep publication/allowlist code on the workflow ref and source-under-test
+      # in a separate checkout. A preview branch need not contain this workflow.
+      - name: Check out publication controls
         uses: actions/checkout@v4
+        with:
+          path: control
+
+      - name: Resolve publication mode and base path
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PREVIEW_NAME: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            node control/tools/fte-web/pages-site.mjs validate-name --name "$PREVIEW_NAME"
+            echo "PUBLICATION_MODE=preview" >> "$GITHUB_ENV"
+            echo "PREVIEW_NAME=$PREVIEW_NAME" >> "$GITHUB_ENV"
+            echo "BASE_PATH=/ezHUD/preview/$PREVIEW_NAME/" >> "$GITHUB_ENV"
+          else
+            echo "PUBLICATION_MODE=release" >> "$GITHUB_ENV"
+            echo "BASE_PATH=/ezHUD/" >> "$GITHUB_ENV"
+          fi
+          echo "PUBLISHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          echo "DEPLOYMENT_ID=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - name: Check out source to publish
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || github.sha }}
+          path: source
+
+      - name: Record the exact source commit
+        run: echo "SOURCE_SHA=$(git -C source rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Check out fteqw at the pinned commit
         uses: actions/checkout@v4
@@ -68,18 +86,15 @@ jobs:
           ref: ${{ env.FTEQW_SHA }}
           path: fteqw
 
-      - name: Apply the ez-hud engine patches
+      - name: Apply the source branch's engine patches
         working-directory: fteqw
-        run: git apply --verbose "$GITHUB_WORKSPACE/spikes/fte-web/fteqw.diff"
+        run: git apply --verbose "$GITHUB_WORKSPACE/source/spikes/fte-web/fteqw.diff"
 
       - name: Cache emsdk
         id: emsdk-cache
         uses: actions/cache@v4
         with:
           path: emsdk
-          # emscripten's own sysroot cache (the compiled libc and ports) lives
-          # under emsdk/, so this one key covers the toolchain *and* the several
-          # minutes of library building the first compile would otherwise redo.
           key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}
 
       - name: Install emsdk ${{ env.EMSDK_VERSION }}
@@ -93,65 +108,35 @@ jobs:
         uses: actions/cache@v4
         with:
           path: fteqw/engine/release
-          # No restore-keys, deliberately. These objects were compiled against
-          # one (emsdk, source, patch) triple, and the Makefile does not list
-          # itself as a dependency of the link -- so a near-miss restore would
-          # happily relink stale objects with the old EMCC_LDFLAGS and produce
-          # an engine that looks built and is missing exports (NOTES.md).
-          key: fteqw-release-${{ runner.os }}-${{ env.EMSDK_VERSION }}-${{ env.FTEQW_SHA }}-${{ hashFiles('spikes/fte-web/fteqw.diff') }}
+          # No restore-keys: these objects belong to one toolchain/source/patch triple.
+          key: fteqw-release-${{ runner.os }}-${{ env.EMSDK_VERSION }}-${{ env.FTEQW_SHA }}-${{ hashFiles('source/spikes/fte-web/fteqw.diff') }}
 
       - name: Build ftewebglcl
         working-directory: fteqw/engine
         run: |
           set -eo pipefail
-          # The dev machine's ~/.profile exports CFLAGS/CXXFLAGS/LDFLAGS with
-          # -march=native, which is meaningless to a wasm target; emcc fails on
-          # it with an error that never mentions your profile (NOTES.md). A
-          # runner has no such profile, so this line does nothing here -- it
-          # stays so that this recipe is the same one a human can paste locally.
           unset CFLAGS CXXFLAGS LDFLAGS
-          # emsdk_env.sh reads variables it has not set, so no `set -u` here.
           source "$GITHUB_WORKSPACE/emsdk/emsdk_env.sh"
-          # Same Makefile-does-not-track-itself trap as above, from the other
-          # side: drop the link outputs so a restored tree always relinks with
-          # the flags this checkout's diff asks for.
           rm -f release/ftewebglcl.js release/ftewebglcl.wasm release/ftewebglcl.html
           make webcl-rel -j"$(nproc)"
 
       - name: Verify the patched exports survived the link
         run: |
           js=fteqw/engine/release/ftewebglcl.js
-          # Both of these have actually been shipped missing, and both fail only
-          # in a browser: without EZHud_StateJSON the page has an engine it
-          # cannot read state from, and without the run-dependency API prejs.js
-          # aborts preRun and the engine comes up with no files and no video
-          # mode (NOTES.md, "The five engine patches"). Two greps, no browser.
           grep -q _EZHud_StateJSON "$js"
           grep -qF 'Module["UTF8ToString"]' "$js"
           grep -qF 'addRunDependency' "$js"
 
-      - name: Download the game data
+      - name: Download hash-pinned public game data
         run: |
           set -eo pipefail
-          pins="$GITHUB_WORKSPACE/tools/fte-web/game-data.sha256"
+          pins="$GITHUB_WORKSPACE/source/tools/fte-web/game-data.sha256"
           mkdir -p downloads
           cd downloads
-
-          # grep-then-check rather than `sha256sum -c --ignore-missing`: a pin
-          # we forgot to write must be an error, and --ignore-missing would turn
-          # both a missing pin and a failed download into a silent pass.
-          verify() {
-            grep -E "  $1\$" "$pins" | sha256sum -c -
-          }
+          verify() { grep -E "  $1\$" "$pins" | sha256sum -c -; }
 
           curl -fsSL --retry 3 --retry-delay 5 -o quake106.zip "$QUAKE106_URL"
           verify quake106.zip
-
-          # pak0.pak is not served on its own by any mirror whose bytes match
-          # ours, so it comes out of id's archive: quake106.zip holds resource.1,
-          # an lh5-encoded LZH archive, which 7-Zip reads. The runner image calls
-          # it 7z or 7zz depending on whether it still has p7zip or the 7zip
-          # package that replaced it, so ask rather than assume.
           unzip -q quake106.zip resource.1
           sevenzip=$(command -v 7z || command -v 7zz || command -v 7za)
           "$sevenzip" e -y -o. resource.1 ID1/PAK0.PAK > /dev/null
@@ -160,130 +145,45 @@ jobs:
 
           curl -fsSL --retry 3 --retry-delay 5 -o nquake.pk3 "$NQUAKE_PK3_URL"
           verify nquake.pk3
-
           curl -fsSL --retry 3 --retry-delay 5 -o gpl_maps.pk3 "$GPL_MAPS_URL"
           verify gpl_maps.pk3
-
-          # qrp-dm3.pk3 comes off our release like the demos: it is a subset
-          # nobody else publishes (build-qrp-subset.py documents the bytes).
           for asset in hudtest_src.mvd tb4gf_book_vs_s.mvd qrp-dm3.pk3; do
             curl -fsSL --retry 3 --retry-delay 5 -o "$asset" "$WEB_ASSETS_BASE/$asset"
             verify "$asset"
           done
 
-          # Laid out exactly like the game-data half of the dist, which is what
-          # assemble-public.sh's GAME_DATA_DIR means.
           gd="$GITHUB_WORKSPACE/game-data"
           mkdir -p "$gd/id1" "$gd/qw/demos"
           cp pak0.pak nquake.pk3 gpl_maps.pk3 qrp-dm3.pk3 "$gd/id1/"
           cp hudtest_src.mvd tb4gf_book_vs_s.mvd "$gd/qw/demos/"
 
       - name: Install test dependencies
-        # npm ci restores the one devDependency (playwright, the library only).
-        # No `npx playwright install`: both FTE test lanes launch the runner
-        # image's own Google Chrome via channel:'chrome' (docs/TESTING.md), so
-        # there is no browser download to trust or wait for.
+        working-directory: source
         run: npm ci
 
       - name: Tier 1 (core units, C placement tests, public-dist guard)
-        # The full tier, C half included -- the runner has the compiler the
-        # dev sandbox lacks. This also runs tier1_public_dist.sh, the fixture
-        # guard, before the real assemble ever happens.
+        working-directory: source
         run: npm run test:tier1
 
       - name: Tier 3F (FTE page against the fake engine)
+        working-directory: source
         run: npm run test:tier3:fte
 
-      - name: Assemble the public dist
+      - name: Assemble the selected release or preview
+        working-directory: source
         run: |
-          DIST_DIR="$GITHUB_WORKSPACE/dist" \
+          DIST_DIR="$GITHUB_WORKSPACE/publication" \
           ENGINE_DIR="$GITHUB_WORKSPACE/fteqw/engine/release" \
           GAME_DATA_DIR="$GITHUB_WORKSPACE/game-data" \
           BASE_PATH="$BASE_PATH" \
           bash tools/fte-web/assemble-public.sh
 
-      - name: Guard the real dist
-        # The fixture guard proves what assemble-public.sh does to placeholders;
-        # this proves what is in the bytes we are about to publish. Same
-        # allowlist, applied to the artifact rather than to a rehearsal of it.
-        run: |
-          set -eo pipefail
-          cd dist
+      - name: Guard the real branch artifact with the publication allowlist
+        run: node control/tools/fte-web/pages-site.mjs guard-artifact --dir publication --base-path "$BASE_PATH"
 
-          # Present and non-empty -- a 0-byte pak is a download that "worked".
-          for f in index.html ui.css favicon.svg default.fmf \
-                   ftewebglcl.js ftewebglcl.wasm \
-                   id1/pak0.pak id1/nquake.pk3 id1/gpl_maps.pk3 id1/qrp-dm3.pk3 \
-                   qw/demos/hudtest_src.mvd qw/demos/tb4gf_book_vs_s.mvd qw/fragfile.dat \
-                   release-1/index.html release-1/release-notes.html \
-                   release-1/img/after-bar.png release-1/img/after-paused.png \
-                   release-1/img/after-resized-window.png release-1/img/after-state.json \
-                   release-1/img/before-resized-window.png release-1/img/before-state.json \
-                   release-1/img/pause-resume-focused-annotated.png \
-                   release-1/img/window-follow-focused-annotated.png; do
-            if [ ! -s "$f" ]; then
-              echo "dist: missing or empty $f" >&2
-              exit 1
-            fi
-          done
-
-          # ...and nothing else. Matched by shape, not by a copied file list:
-          # core/, view/ and fte/ are the editor's own sources and their
-          # inventory is whatever this checkout holds, while anything outside
-          # these shapes is by definition something nobody meant to publish.
-          bad=
-          while IFS= read -r f; do
-            case $f in
-              ./index.html|./ui.css|./favicon.svg|./default.fmf) ;;
-              ./ftewebglcl.js|./ftewebglcl.wasm) ;;
-              ./id1/pak0.pak|./id1/nquake.pk3|./id1/gpl_maps.pk3|./id1/qrp-dm3.pk3) ;;
-              ./qw/demos/hudtest_src.mvd|./qw/demos/tb4gf_book_vs_s.mvd) ;;
-              ./qw/fragfile.dat) ;;
-              ./release-1/index.html|./release-1/release-notes.html) ;;
-              ./release-1/img/after-bar.png|./release-1/img/after-paused.png) ;;
-              ./release-1/img/after-resized-window.png|./release-1/img/after-state.json) ;;
-              ./release-1/img/before-resized-window.png|./release-1/img/before-state.json) ;;
-              ./release-1/img/pause-resume-focused-annotated.png) ;;
-              ./release-1/img/window-follow-focused-annotated.png) ;;
-              # core/ is flat; a nested path means core/tests/ came along.
-              ./core/*/*) bad="$bad $f" ;;
-              ./core/*.js) ;;
-              ./view/*|./fte/*) ;;
-              *) bad="$bad $f" ;;
-            esac
-          done < <(find . -type f | sort)
-          if [ -n "$bad" ]; then
-            echo "dist: files outside the allowlist:$bad" >&2
-            exit 1
-          fi
-
-          # Belt and braces, by name, for the two categories PUBLISH.md says
-          # must be structurally unable to reach a deploy: registered game data
-          # and the owner's personal files.
-          poison=$(find . \( -name 'pak1.pak' -o -name 'owner-*' -o -name 'xerial-*' \) -print)
-          if [ -n "$poison" ]; then
-            echo "dist: non-distributable or personal files present: $poison" >&2
-            exit 1
-          fi
-
-          # An import-map key is a resolved URL, so an unrewritten one is not a
-          # cosmetic miss: the page would load the ezQuake HTTP bridge instead
-          # of the FTE adapter and report a lost connection (NOTES.md).
-          if ! grep -qF "\"${BASE_PATH}core/bridge.js\"" index.html; then
-            echo "dist: index.html has no ${BASE_PATH}core/bridge.js import-map key" >&2
-            exit 1
-          fi
-          if grep -qF '"/core/bridge.js"' index.html; then
-            echo "dist: index.html still has the site-root import-map key" >&2
-            exit 1
-          fi
-
-      - name: Tier 4F (the dist itself, end to end in a browser)
-        # The deploy gate that matters most: the exact artifact below is
-        # served under the /ezHUD/ prefix and booted in Chrome -- engine,
-        # pak0, gpl_maps' dm3, demo playback, drag, import, export. If this
-        # is red, there is nothing worth publishing.
-        run: DIST_DIR="$GITHUB_WORKSPACE/dist" npm run test:tier4:fte
+      - name: Tier 4F (the selected artifact end to end in Chrome)
+        working-directory: source
+        run: DIST_DIR="$GITHUB_WORKSPACE/publication" BASE_PATH="$BASE_PATH" npm run test:tier4:fte
 
       - name: Upload tier 4F artifacts on failure
         if: failure()
@@ -293,24 +193,74 @@ jobs:
           path: /tmp/ezhud-tier4-fte-artifacts
           if-no-files-found: ignore
 
-      - name: Upload the Pages artifact
+      - name: Fetch and verify the complete currently deployed site
+        run: |
+          node control/tools/fte-web/pages-site.mjs fetch \
+            --base-url "$PAGES_URL" \
+            --bootstrap control/tools/fte-web/pages-bootstrap-1950c15.json \
+            --output current-site \
+            --cache-key "$DEPLOYMENT_ID"
+
+      - name: Compose the complete replacement artifact
+        env:
+          SOURCE_REF: ${{ inputs.branch || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$PUBLICATION_MODE" = preview ]; then
+            node control/tools/fte-web/pages-site.mjs compose-preview \
+              --current current-site --artifact publication --output pages-site \
+              --name "$PREVIEW_NAME" --ref "$SOURCE_REF" --commit "$SOURCE_SHA" \
+              --published-at "$PUBLISHED_AT" --deployment "$DEPLOYMENT_ID"
+          else
+            node control/tools/fte-web/pages-site.mjs compose-release \
+              --current current-site --artifact publication --output pages-site \
+              --deployment "$DEPLOYMENT_ID"
+          fi
+          node control/tools/fte-web/pages-site.mjs verification-bundle \
+            --site pages-site --output pages-verification
+
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: pages-site
+
+      - name: Upload live-verification proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: pages-verification
+          retention-days: 7
 
   deploy:
-    # A manual run from another ref still builds and guards; only main is ever
-    # published. The build job is the test, this job is the publication.
-    if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-24.04
     permissions:
+      contents: read
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy to GitHub Pages
+      - name: Deploy the complete site to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Check out publication controls
+        uses: actions/checkout@v4
+        with:
+          path: control
+
+      - name: Download the expected manifest and preservation proofs
+        uses: actions/download-artifact@v4
+        with:
+          name: pages-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: pages-verification
+
+      - name: Prove the release root and every preview survived
+        run: |
+          node control/tools/fte-web/pages-site.mjs verify-remote \
+            --base-url "$PAGES_URL" \
+            --expected-manifest pages-verification/pages-manifest.json \
+            --proof-dir pages-verification \
+            --cache-key "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
