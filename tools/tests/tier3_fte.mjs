@@ -1183,75 +1183,81 @@ try {
 	await page.waitForFunction(() => localStorage.getItem('ezhud.ui.scale') === '1.25');
 	console.log('  15 editor scale: 1440p minimums, visible presets, persistence seed, canvas and state propagation');
 
-	// ---- 16. deterministic demo moments (#23) -------------------------------
+	// ---- 16. deterministic Jump to points (#23) ------------------------------
 	// These are points in the bundled tb4gf match, not editor-owned timestamps.
 	// Start on the other bundled demo so the first control must select its own
 	// match and wait for the engine-owned title signal before it seeks.
 	await page.waitForFunction(() => document.querySelectorAll('[data-demo-jump]').length === 3);
+	assert(await page.locator('#fte-moments').getAttribute('aria-label') === 'Jump to',
+		'the control group is not named Jump to');
 	await page.evaluate(() => { window.__fake.refuseDemo = false; });
 	await page.selectOption('#fte-demo', 'qw/demos/hudtest_src.mvd');
 	await page.waitForFunction(() => document.title.includes('hudtest_src.mvd'));
 
-	const fullHud = page.locator('[data-demo-jump="9:00"]');
-	const sentBeforeRunningMoment = (await sentLines()).length;
-	await fullHud.click();
-	await page.waitForFunction(() => window.__fake.state.demo.position === '9:00');
-	const runningMomentLines = (await sentLines()).slice(sentBeforeRunningMoment);
-	assert(JSON.stringify(runningMomentLines) === JSON.stringify([
+	const prewar = page.locator('[data-demo-jump="0:00"]');
+	const sentBeforeRunningJump = (await sentLines()).length;
+	await prewar.click();
+	await page.waitForFunction(() => window.__fake.state.demo.position === '0:00'
+		&& window.__fake.state.demo.cl_demospeed === '0');
+	const runningJumpLines = (await sentLines()).slice(sentBeforeRunningJump);
+	assert(JSON.stringify(runningJumpLines) === JSON.stringify([
 		'playdemo demos/tb4gf_book_vs_s.mvd',
+		'demo_setspeed 0',
 		'demo_jump 0:00',
-		'demo_jump 9:00',
-	]), `running Full HUD sent ${JSON.stringify(runningMomentLines)}`);
-	assert((await engineState()).demo.cl_demospeed === '1',
-		'selecting a moment paused normal playback');
-	const runningFromMoment = await page.evaluate(() => window.__fake.demoCursor);
+		'demo_jump 0:00',
+		'demo_setspeed 0',
+	]), `running Prewar sent ${JSON.stringify(runningJumpLines)}`);
+	const parkedAtPrewar = await page.evaluate(() => window.__fake.demoCursor);
 	await page.waitForTimeout(300);
-	assert(await page.evaluate(() => window.__fake.demoCursor) > runningFromMoment,
-		'the fake demo cursor did not continue after a running moment seek');
+	assert(await page.evaluate(() => window.__fake.demoCursor) === parkedAtPrewar,
+		'Prewar did not stay parked after a running Jump to gesture');
 
-	// Keep playback frozen for the repeatability and paused-edit cases.
-	await page.evaluate(() => window.FTEC.cbufadd('demo_setspeed 0\n'));
-	await page.waitForFunction(async () =>
-		(await import('/core/bridge.js')).currentBridge()?.lastState?.demo?.cl_demospeed === '0');
+	// Prove each authored point pauses running playback. The exact command order
+	// also guards the required origin reset and pause-after-seek semantics.
 	for (const expected of [
-		{ target: '9:00', label: 'Full HUD' },
+		{ target: '0:00', label: 'Prewar' },
+		{ target: '10:00', label: '10:00' },
 		{ target: '20:10', label: 'Scoreboard' },
-		{ target: '0:10', label: 'Quiet' },
 	]) {
+		await page.evaluate(() => window.FTEC.cbufadd('demo_setspeed 100\n'));
+		await page.waitForFunction(() => window.__fake.state.demo.cl_demospeed === '1');
 		const control = page.locator(`[data-demo-jump="${expected.target}"]`);
 		assert(await control.textContent() === expected.label,
-			`moment ${expected.target} has the wrong label`);
-		const sentBeforeMoment = (await sentLines()).length;
+			`Jump to ${expected.target} has the wrong label`);
+		const sentBeforeJump = (await sentLines()).length;
 		await control.click();
-		await page.waitForFunction((count) => window.__fake.sent.length >= count + 3,
-			sentBeforeMoment);
-		await page.waitForFunction((target) => window.__fake.state.demo.position === target,
-			expected.target);
-		const momentLines = (await sentLines()).slice(sentBeforeMoment);
-		assert(JSON.stringify(momentLines) === JSON.stringify([
-			'demo_setspeed 0', 'demo_jump 0:00', `demo_jump ${expected.target}`,
-		]), `${expected.label} sent ${JSON.stringify(momentLines)}`);
-		assert((await engineState()).demo.cl_demospeed === '0',
-			`${expected.label} unexpectedly resumed paused playback`);
+		await page.waitForFunction((count) => window.__fake.sent.length >= count + 4,
+			sentBeforeJump);
+		await page.waitForFunction((target) => window.__fake.state.demo.position === target
+			&& window.__fake.state.demo.cl_demospeed === '0', expected.target);
+		const jumpLines = (await sentLines()).slice(sentBeforeJump);
+		assert(JSON.stringify(jumpLines) === JSON.stringify([
+			'demo_setspeed 0', 'demo_jump 0:00', `demo_jump ${expected.target}`, 'demo_setspeed 0',
+		]), `${expected.label} sent ${JSON.stringify(jumpLines)}`);
+		const parkedCursor = await page.evaluate(() => window.__fake.demoCursor);
+		await page.waitForTimeout(300);
+		assert(await page.evaluate(() => window.__fake.demoCursor) === parkedCursor,
+			`${expected.label} did not stay parked after the jump`);
 	}
 
 	// The same command must reset the engine-owned cursor to the same value,
 	// rather than accumulate a relative editor-side offset.
+	const scoreboard = page.locator('[data-demo-jump="20:10"]');
 	let sentBeforeRepeat = (await sentLines()).length;
-	await fullHud.click();
-	await page.waitForFunction((count) => window.__fake.sent.length >= count + 3,
+	await scoreboard.click();
+	await page.waitForFunction((count) => window.__fake.sent.length >= count + 4,
 		sentBeforeRepeat);
-	const firstFullHudCursor = await page.evaluate(() => window.__fake.demoCursor);
+	const firstScoreboardCursor = await page.evaluate(() => window.__fake.demoCursor);
 	sentBeforeRepeat = (await sentLines()).length;
-	await fullHud.click();
-	await page.waitForFunction((count) => window.__fake.sent.length >= count + 3,
+	await scoreboard.click();
+	await page.waitForFunction((count) => window.__fake.sent.length >= count + 4,
 		sentBeforeRepeat);
 	await page.waitForTimeout(250);
-	assert(await page.evaluate(() => window.__fake.demoCursor) === firstFullHudCursor,
-		'two Full HUD seeks did not land on the same paused engine cursor');
+	assert(await page.evaluate(() => window.__fake.demoCursor) === firstScoreboardCursor,
+		'two Scoreboard jumps did not land on the same paused engine cursor');
 
 	// A placement gesture while the demo is paused still crosses the engine
-	// boundary and is present in the export. The moment controls must not own or
+	// boundary and is present in the export. The Jump to controls must not own or
 	// block editor placement state.
 	await page.locator('.tree__row[data-name="health"]').click();
 	const pausedPos = page.locator('#f-health-pos_x');
@@ -1271,7 +1277,7 @@ try {
 		window.FTEC.cbufadd('demo_setspeed 100\n');
 	});
 	await page.waitForFunction(() => window.__fake.state.demo.cl_demospeed === '1');
-	console.log('  16 demo moments: own match selection, three seeks, repeatable point, paused edit + export');
+	console.log('  16 Jump to: own match selection, three paused seeks, repeatable point, paused edit + export');
 
 	// ---- 17. volume ----------------------------------------------------------
 	// The page's own sound knob (#10). The engine side is a plain cvar write, so
