@@ -290,40 +290,82 @@ function cssNumber(value) {
 	return Number(stable.toFixed(12));
 }
 
+function clampedCameraFocus(targetCenter, scale) {
+	const viewportCenter = { x: CAPTURE_VIEWPORT.width / 2, y: CAPTURE_VIEWPORT.height / 2 };
+	const halfWindow = {
+		x: CAPTURE_VIEWPORT.width / (2 * scale),
+		y: CAPTURE_VIEWPORT.height / (2 * scale),
+	};
+	return {
+		x: halfWindow.x <= viewportCenter.x
+			? Math.min(CAPTURE_VIEWPORT.width - halfWindow.x, Math.max(halfWindow.x, targetCenter.x))
+			: viewportCenter.x,
+		y: halfWindow.y <= viewportCenter.y
+			? Math.min(CAPTURE_VIEWPORT.height - halfWindow.y, Math.max(halfWindow.y, targetCenter.y))
+			: viewportCenter.y,
+	};
+}
+
 export function cameraTransformSteps({ target, from, to, stepCount, regions } = {}) {
 	if (!target || typeof target !== 'object' || !Array.isArray(regions) || regions.length === 0) {
 		throw new Error('Camera transform steps require a target and region origins.');
 	}
 	for (const field of ['x', 'y', 'w', 'h']) finiteNumber(target[field], `Camera target ${field}`);
 	if (target.w <= 0 || target.h <= 0) throw new Error('Camera target dimensions must be positive.');
-	const focus = { x: target.x + target.w / 2, y: target.y + target.h / 2 };
-	return geometricZoomScales(from, to, stepCount).map((scale) => ({
-		scale,
-		focus: { ...focus },
-		regions: regions.map((region) => {
-			if (!CAMERA_REGIONS.includes(region.selector)) {
-				throw new Error(`Camera region ${String(region.selector)} is outside the three-sibling contract.`);
-			}
-			finiteNumber(region.x, `Camera region ${region.selector} x`);
-			finiteNumber(region.y, `Camera region ${region.selector} y`);
-			const translateX = cssNumber((scale - 1) * (region.x - focus.x));
-			const translateY = cssNumber((scale - 1) * (region.y - focus.y));
-			const stableScale = cssNumber(scale);
-			const transform = `translate(${translateX}px,${translateY}px) scale(${stableScale})`;
-			return {
-				selector: region.selector,
-				originX: region.x,
-				originY: region.y,
-				translateX,
-				translateY,
-				scaleX: scale,
-				scaleY: scale,
-				transform,
-				css: `${region.selector}{animation:none!important;transition:none!important;transform-origin:0 0!important;`
-					+ `transform:${transform}!important}`,
-			};
-		}),
-	}));
+	const targetCenter = { x: target.x + target.w / 2, y: target.y + target.h / 2 };
+	const viewportCenter = { x: CAPTURE_VIEWPORT.width / 2, y: CAPTURE_VIEWPORT.height / 2 };
+	return geometricZoomScales(from, to, stepCount).map((scale) => {
+		const focus = clampedCameraFocus(targetCenter, scale);
+		return {
+			scale,
+			focus: { ...focus },
+			regions: regions.map((region) => {
+				if (!CAMERA_REGIONS.includes(region.selector)) {
+					throw new Error(`Camera region ${String(region.selector)} is outside the three-sibling contract.`);
+				}
+				finiteNumber(region.x, `Camera region ${region.selector} x`);
+				finiteNumber(region.y, `Camera region ${region.selector} y`);
+				const translateX = cssNumber(viewportCenter.x + scale * (region.x - focus.x) - region.x);
+				const translateY = cssNumber(viewportCenter.y + scale * (region.y - focus.y) - region.y);
+				const stableScale = cssNumber(scale);
+				const transform = `translate(${translateX}px,${translateY}px) scale(${stableScale})`;
+				return {
+					selector: region.selector,
+					originX: region.x,
+					originY: region.y,
+					translateX,
+					translateY,
+					scaleX: scale,
+					scaleY: scale,
+					transform,
+					css: `${region.selector}{animation:none!important;transition:none!important;transform-origin:0 0!important;`
+						+ `transform:${transform}!important}`,
+				};
+			}),
+		};
+	});
+}
+
+export function cameraRegionOrigins({ boxes, scale, focus } = {}) {
+	if (!Array.isArray(boxes) || boxes.length === 0 || !focus || typeof focus !== 'object') {
+		throw new Error('Camera region origins require live boxes, scale, and focus.');
+	}
+	finiteNumber(scale, 'Camera scale', { positive: true });
+	finiteNumber(focus.x, 'Camera focus x');
+	finiteNumber(focus.y, 'Camera focus y');
+	const viewportCenter = { x: CAPTURE_VIEWPORT.width / 2, y: CAPTURE_VIEWPORT.height / 2 };
+	return boxes.map(({ selector, box }) => {
+		if (!CAMERA_REGIONS.includes(selector) || !box || typeof box !== 'object') {
+			throw new Error(`Camera region ${String(selector)} has invalid live geometry.`);
+		}
+		finiteNumber(box.x, `Camera region ${selector} live x`);
+		finiteNumber(box.y, `Camera region ${selector} live y`);
+		return {
+			selector,
+			x: focus.x + (box.x - viewportCenter.x) / scale,
+			y: focus.y + (box.y - viewportCenter.y) / scale,
+		};
+	});
 }
 
 export function cameraAnimationCss(moves, { name, durationMs } = {}) {
@@ -942,22 +984,21 @@ async function executeZoom({ page, step, deadline, captureStart, cameraState }) 
 		x: step.target.x + step.target.w / 2,
 		y: step.target.y + step.target.h / 2,
 	};
-	if (cameraState.scale !== 1 && cameraState.focus
-		&& (Math.abs(cameraState.focus.x - targetFocus.x) > CAMERA_SCALE_EPSILON
-			|| Math.abs(cameraState.focus.y - targetFocus.y) > CAMERA_SCALE_EPSILON)) {
+	if (cameraState.scale !== 1 && cameraState.target
+		&& (Math.abs(cameraState.target.x - targetFocus.x) > CAMERA_SCALE_EPSILON
+			|| Math.abs(cameraState.target.y - targetFocus.y) > CAMERA_SCALE_EPSILON)) {
 		throw new Error('A zoomed camera cannot change focus without first returning to scale 1.');
 	}
-	const currentFocus = cameraState.focus ?? targetFocus;
+	const currentFocus = cameraState.focus ?? {
+		x: CAPTURE_VIEWPORT.width / 2,
+		y: CAPTURE_VIEWPORT.height / 2,
+	};
 	const boxes = await bounded(Promise.all(CAMERA_REGIONS.map(async (selector) => {
 		const box = await page.locator(selector).boundingBox();
 		if (!box) throw new Error(`Camera region ${selector} has no visible geometry.`);
 		return { selector, box };
 	})), deadline, 'camera region measurement');
-	const regions = boxes.map(({ selector, box }) => ({
-		selector,
-		x: (box.x + (cameraState.scale - 1) * currentFocus.x) / cameraState.scale,
-		y: (box.y + (cameraState.scale - 1) * currentFocus.y) / cameraState.scale,
-	}));
+	const regions = cameraRegionOrigins({ boxes, scale: cameraState.scale, focus: currentFocus });
 	const moves = cameraTransformSteps({
 		target: step.target,
 		from: step.from,
@@ -980,7 +1021,8 @@ async function executeZoom({ page, step, deadline, captureStart, cameraState }) 
 	await bounded(page.waitForTimeout(16), deadline, 'camera final frame');
 	const ended = performance.now();
 	cameraState.scale = step.to;
-	cameraState.focus = targetFocus;
+	cameraState.focus = moves.at(-1).focus;
+	cameraState.target = Math.abs(step.to - 1) <= CAMERA_SCALE_EPSILON ? null : targetFocus;
 	return {
 		start_seconds: (started - captureStart) / 1000,
 		measured_duration_seconds: (ended - started) / 1000,
@@ -1148,7 +1190,7 @@ async function runBrowserCapture({ script, dist, output }) {
 		await bounded(page.goto(hosted.url, { waitUntil: 'domcontentloaded', timeout: Math.min(MAX_WAIT_MS, remainingMs(deadline)) }),
 			deadline, 'page load');
 		const activeRing = { selector: null };
-		const cameraState = { scale: 1, focus: null, sequence: 0 };
+		const cameraState = { scale: 1, focus: null, target: null, sequence: 0 };
 		for (const step of script.setup) {
 			await executeStep({
 				page, annotationPage, step, deadline, output, captureStart,

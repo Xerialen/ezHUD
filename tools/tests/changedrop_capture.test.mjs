@@ -203,6 +203,10 @@ test('camera verb: geometric uniform steps drive three siblings and receipt two-
 	assert.ok(Math.max(...ratios) - Math.min(...ratios) < 1e-12, 'adjacent scales are not geometric');
 
 	const targetCenter = { x: 1244, y: 500 };
+	const viewportCenter = {
+		x: capture.CAPTURE_VIEWPORT.width / 2,
+		y: capture.CAPTURE_VIEWPORT.height / 2,
+	};
 	const moves = capture.cameraTransformSteps({
 		target: zoom.target,
 		from: zoom.from,
@@ -216,11 +220,24 @@ test('camera verb: geometric uniform steps drive three siblings and receipt two-
 	});
 	assert.equal(moves.length, 16);
 	for (const move of moves) {
+		const halfWindow = {
+			x: capture.CAPTURE_VIEWPORT.width / (2 * move.scale),
+			y: capture.CAPTURE_VIEWPORT.height / (2 * move.scale),
+		};
+		const cameraCenter = {
+			x: Math.min(capture.CAPTURE_VIEWPORT.width - halfWindow.x,
+				Math.max(halfWindow.x, targetCenter.x)),
+			y: Math.min(capture.CAPTURE_VIEWPORT.height - halfWindow.y,
+				Math.max(halfWindow.y, targetCenter.y)),
+		};
+		assert.deepEqual(move.focus, cameraCenter);
 		for (const region of move.regions) {
 			assert.equal(region.scaleX, move.scale);
 			assert.equal(region.scaleY, move.scale);
-			assert.ok(Math.abs(region.translateX - (move.scale - 1) * (region.originX - targetCenter.x)) < 1e-9);
-			assert.ok(Math.abs(region.translateY - (move.scale - 1) * (region.originY - targetCenter.y)) < 1e-9);
+			assert.ok(Math.abs(region.translateX - (viewportCenter.x
+				+ move.scale * (region.originX - cameraCenter.x) - region.originX)) < 1e-9);
+			assert.ok(Math.abs(region.translateY - (viewportCenter.y
+				+ move.scale * (region.originY - cameraCenter.y) - region.originY)) < 1e-9);
 			assert.match(region.css, /animation:none!important/);
 			assert.match(region.css, /transform-origin:0 0!important/);
 		}
@@ -266,6 +283,71 @@ test('camera verb: geometric uniform steps drive three siblings and receipt two-
 		instruction: 'Open save.', action: 'click', selector: '#save-open',
 	});
 	assert.throws(() => capture.validateCaptureScript(dialogTrap), /save-open.*click|click.*save-open/i);
+});
+
+test('camera verb contains every approved target while transformed chrome covers the viewport', async () => {
+	assert.ifError(loadError);
+	const plan = JSON.parse(await readFile(path.join(repo, 'docs', 'release-2', 'captures.json'), 'utf8'));
+	const regions = [
+		{ selector: '.bar', x: 0, y: 0, w: 1400, h: 46 },
+		{ selector: '.shell', x: 0, y: 46, w: 1400, h: 718 },
+		{ selector: '.statusbar', x: 0, y: 764, w: 1400, h: 24 },
+	];
+	const transformedRect = (rect, move, transformedRegion) => {
+		const left = transformedRegion.originX + transformedRegion.translateX
+			+ move.scale * (rect.x - transformedRegion.originX);
+		const top = transformedRegion.originY + transformedRegion.translateY
+			+ move.scale * (rect.y - transformedRegion.originY);
+		return {
+			left,
+			top,
+			right: left + move.scale * rect.w,
+			bottom: top + move.scale * rect.h,
+		};
+	};
+	for (const approved of plan.captures) {
+		assert.deepEqual(approved.viewport, capture.CAPTURE_VIEWPORT,
+			`${approved.id} target was approved against a different viewport`);
+		const moves = capture.cameraTransformSteps({
+			target: approved.clip,
+			from: 1,
+			to: 2.5,
+			stepCount: 16,
+			regions,
+		});
+		for (const [index, move] of moves.entries()) {
+			const target = transformedRect(approved.clip, move, move.regions[0]);
+			assert.ok(target.left >= -1e-9 && target.top >= -1e-9
+				&& target.right <= capture.CAPTURE_VIEWPORT.width + 1e-9
+				&& target.bottom <= capture.CAPTURE_VIEWPORT.height + 1e-9,
+			`${approved.id} step ${index + 1} at scale ${move.scale} leaves viewport: `
+				+ `[${target.left},${target.top}]..[${target.right},${target.bottom}]`);
+
+			const chrome = regions.map((region, regionIndex) => transformedRect(
+				region, move, move.regions[regionIndex],
+			));
+			const recovered = capture.cameraRegionOrigins({
+				boxes: chrome.map((rect, regionIndex) => ({
+					selector: regions[regionIndex].selector,
+					box: { x: rect.left, y: rect.top },
+				})),
+				scale: move.scale,
+				focus: move.focus,
+			});
+			for (const [regionIndex, origin] of recovered.entries()) {
+				assert.ok(Math.abs(origin.x - regions[regionIndex].x) < 1e-9
+					&& Math.abs(origin.y - regions[regionIndex].y) < 1e-9,
+				`${approved.id} step ${index + 1} does not recover ${origin.selector} layout origin`);
+			}
+			assert.ok(chrome.every((rect) => rect.left <= 1e-9
+				&& rect.right >= capture.CAPTURE_VIEWPORT.width - 1e-9),
+			`${approved.id} step ${index + 1} does not cover the viewport width`);
+			assert.ok(chrome[0].top <= 1e-9
+				&& chrome.at(-1).bottom >= capture.CAPTURE_VIEWPORT.height - 1e-9
+				&& chrome.slice(1).every((rect, regionIndex) => rect.top <= chrome[regionIndex].bottom + 1e-9),
+			`${approved.id} step ${index + 1} leaves an uncovered viewport row`);
+		}
+	}
 });
 
 test('supporting contract: closed safe DSL, bounded runtime, schema/privacy, npm wiring, and no browser in tier 1', async () => {
