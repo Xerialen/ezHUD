@@ -73,22 +73,29 @@ test('a release publication preserves every existing preview', async () => {
   const run = await mkdtemp(path.join(os.tmpdir(), 'ezhud-pages-release-'));
   try {
     const initial = path.join(run, 'initial');
-    const preview = path.join(run, 'preview');
-    const withPreview = path.join(run, 'with-preview');
+    const previewGrid = path.join(run, 'preview-grid');
+    const previewEdges = path.join(run, 'preview-edges');
+    const afterGrid = path.join(run, 'after-grid');
+    const withPreviews = path.join(run, 'with-previews');
     const nextRelease = path.join(run, 'next-release');
     const output = path.join(run, 'output');
     await artifact(initial, 'release-one', '/ezHUD/');
     await createManifest(initial, { previews: [], deployment: 'release-1' });
-    await artifact(preview, 'grid', '/ezHUD/preview/grid/');
-    await composePreview({ currentDir: initial, previewDir: preview, outputDir: withPreview,
+    await artifact(previewGrid, 'grid', '/ezHUD/preview/grid/');
+    await artifact(previewEdges, 'edges', '/ezHUD/preview/edges/');
+    await composePreview({ currentDir: initial, previewDir: previewGrid, outputDir: afterGrid,
       name: 'grid', ref: 'feature/grid', commit: 'a'.repeat(40), publishedAt: '2026-08-09T18:00:00Z', deployment: 'run-a' });
-    const previewBefore = await snapshot(path.join(withPreview, 'preview/grid'));
+    await composePreview({ currentDir: afterGrid, previewDir: previewEdges, outputDir: withPreviews,
+      name: 'edges', ref: 'feature/edges', commit: 'b'.repeat(40), publishedAt: '2026-08-09T19:00:00Z', deployment: 'run-b' });
+    const gridBefore = await snapshot(path.join(withPreviews, 'preview/grid'));
+    const edgesBefore = await snapshot(path.join(withPreviews, 'preview/edges'));
     await artifact(nextRelease, 'release-two', '/ezHUD/');
 
-    await composeRelease({ currentDir: withPreview, releaseDir: nextRelease, outputDir: output,
+    await composeRelease({ currentDir: withPreviews, releaseDir: nextRelease, outputDir: output,
       deployment: 'release-run' });
 
-    assert.deepEqual(await snapshot(path.join(output, 'preview/grid')), previewBefore);
+    assert.deepEqual(await snapshot(path.join(output, 'preview/grid')), gridBefore);
+    assert.deepEqual(await snapshot(path.join(output, 'preview/edges')), edgesBefore);
     assert.equal(await readFile(path.join(output, 'index.html'), 'utf8'),
       '"/ezHUD/core/bridge.js"\n"/ezHUD/core/fte-adapter.js"\n');
     await guardSite(output);
@@ -121,11 +128,21 @@ test('the preview index cannot list a preview that is not in the preserved site'
   }
 });
 
-test('the public allowlist rejects registered game data and owner files in a preview', async () => {
-  const run = await mkdtemp(path.join(os.tmpdir(), 'ezhud-pages-poison-'));
+test('the public allowlist rejects registered game data in a preview', async () => {
+  const run = await mkdtemp(path.join(os.tmpdir(), 'ezhud-pages-pak1-'));
   try {
     await artifact(run, 'preview', '/ezHUD/preview/safe/');
     await writeFile(path.join(run, 'id1/pak1.pak'), 'registered data');
+    await assert.rejects(guardArtifact(run, '/ezHUD/preview/safe/'), /outside the public allowlist/);
+  } finally {
+    await rm(run, { recursive: true, force: true });
+  }
+});
+
+test('the public allowlist rejects owner files in a preview', async () => {
+  const run = await mkdtemp(path.join(os.tmpdir(), 'ezhud-pages-owner-'));
+  try {
+    await artifact(run, 'preview', '/ezHUD/preview/safe/');
     await writeFile(path.join(run, 'owner-config.cfg'), 'personal data');
     await assert.rejects(guardArtifact(run, '/ezHUD/preview/safe/'), /outside the public allowlist/);
   } finally {
