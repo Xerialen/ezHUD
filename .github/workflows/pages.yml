@@ -185,6 +185,9 @@ jobs:
         # there is no browser download to trust or wait for.
         run: npm ci
 
+      - name: Install ffmpeg (required by changedrop_capture video validation)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
       - name: Tier 1 (core units, C placement tests, public-dist guard)
         # The full tier, C half included -- the runner has the compiler the
         # dev sandbox lacks. This also runs tier1_public_dist.sh, the fixture
