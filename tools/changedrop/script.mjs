@@ -16,7 +16,7 @@ const MAX_SURFACE_SECONDS = 10.0;
 const MAX_HOLD_MS = 5_000;
 const ACTIONS = new Set(['wait-for', 'resize', 'click', 'hold', 'highlight', 'drag']);
 const DRAG_MODIFIERS = new Set(['Alt', 'Control', 'Meta', 'Shift']);
-const SELECTOR_PATTERN = /^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\[data-changedrop="[a-z0-9]+(?:-[a-z0-9]+)*"\])$/;
+const SELECTOR_PATTERN = /^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\[data-changedrop="[a-z0-9]+(?:-[a-z0-9]+)*"\]|\.box\[data-name="[A-Za-z_][A-Za-z0-9_]{0,63}"\])$/;
 
 // 2.2 words/s is 132 wpm: a deliberately conservative planning rate near the
 // low end of clear conversational narration. It is only an early 10-second
@@ -77,7 +77,7 @@ function validateValueSummary(summary) {
 
 function validateSelector(value, at) {
 	if (typeof value !== 'string' || !SELECTOR_PATTERN.test(value)) {
-		throw new Error(`${at} selector must be id-style (#name) or [data-changedrop="kebab-name"].`);
+		throw new Error(`${at} selector must be id-style (#name), [data-changedrop="kebab-name"], or .box[data-name="element_name"].`);
 	}
 }
 

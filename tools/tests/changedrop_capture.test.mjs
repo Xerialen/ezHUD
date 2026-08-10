@@ -186,15 +186,17 @@ test('case 5: drag holds its modifier through mouse down, every visible move, an
 	const events = [];
 	const held = new Set();
 	let dragging = false;
+	let dragStart;
+	let pointer;
+	let sourceBox = { x: 300, y: 200, width: 80, height: 40 };
 	const boxes = new Map([
-		['#gameclock', { x: 300, y: 200, width: 80, height: 40 }],
 		['#left-corner', { x: 40, y: 60, width: 20, height: 20 }],
 	]);
 	const page = {
 		locator(selector) {
 			return {
 				waitFor: async () => {},
-				boundingBox: async () => boxes.get(selector) ?? null,
+				boundingBox: async () => selector === '.box[data-name="gameclock"]' ? { ...sourceBox } : boxes.get(selector) ?? null,
 			};
 		},
 		keyboard: {
@@ -203,16 +205,29 @@ test('case 5: drag holds its modifier through mouse down, every visible move, an
 		},
 		mouse: {
 			move: async (x, y) => {
+				pointer = { x, y };
 				if (dragging) events.push(['move', x, y, held.has('Shift')]);
 			},
-			down: async () => { dragging = true; events.push(['mouse-down', held.has('Shift')]); },
-			up: async () => { events.push(['mouse-up', held.has('Shift')]); dragging = false; },
+			down: async () => {
+				dragging = true;
+				dragStart = { ...pointer };
+				events.push(['mouse-down', held.has('Shift')]);
+			},
+			up: async () => {
+				events.push(['mouse-up', held.has('Shift')]);
+				sourceBox = {
+					...sourceBox,
+					x: sourceBox.x + pointer.x - dragStart.x,
+					y: sourceBox.y + pointer.y - dragStart.y,
+				};
+				dragging = false;
+			},
 		},
 		waitForTimeout: async () => {},
 	};
 
 	await capture.executeDrag(page, {
-		selector: '#gameclock',
+		selector: '.box[data-name="gameclock"]',
 		target: { selector: '#left-corner' },
 		modifier: 'Shift',
 	}, 1_000);
@@ -226,12 +241,28 @@ test('case 5: drag holds its modifier through mouse down, every visible move, an
 
 	events.length = 0;
 	await capture.executeDrag(page, {
-		selector: '#gameclock',
+		selector: '.box[data-name="gameclock"]',
 		target: { x: 80, y: 100 },
 	}, 1_000);
 	const coordinateMoves = events.filter(([name]) => name === 'move');
 	assert.deepEqual(coordinateMoves.at(-1), ['move', 80, 100, false]);
 	assert.equal(events.some(([name]) => name.startsWith('key-')), false, 'modifier is optional');
+});
+
+test('case 5b: drag rejects a gesture that leaves the source at the same position', async () => {
+	assert.ifError(loadError);
+	const box = { x: 300, y: 200, width: 80, height: 40 };
+	const page = {
+		locator: () => ({ waitFor: async () => {}, boundingBox: async () => ({ ...box }) }),
+		keyboard: { down: async () => {}, up: async () => {} },
+		mouse: { move: async () => {}, down: async () => {}, up: async () => {} },
+		waitForTimeout: async () => {},
+	};
+	await assert.rejects(capture.executeDrag(page, {
+		selector: '.box[data-name="gameclock"]',
+		target: { x: 80, y: 100 },
+		modifier: 'Shift',
+	}, 1_000), /drag.*did not move|did not move.*drag/i);
 });
 
 test('case 6: drag validates selector and coordinate targets and is present in all script schemas', async () => {
@@ -240,7 +271,7 @@ test('case 6: drag validates selector and coordinate targets and is present in a
 	const drag = {
 		instruction: 'Drag the clock freely.',
 		action: 'drag',
-		selector: '#gameclock',
+		selector: '.box[data-name="gameclock"]',
 		target: { x: 80, y: 100 },
 		modifier: 'Shift',
 	};
@@ -252,7 +283,7 @@ test('case 6: drag validates selector and coordinate targets and is present in a
 		observations: await fixture('capture-observations-a.json'),
 	});
 	assert.deepEqual(receipt.segments[1].actions[1], {
-		action: 'drag', selector: '#gameclock', target: { x: 80, y: 100 }, modifier: 'Shift',
+		action: 'drag', selector: '.box[data-name="gameclock"]', target: { x: 80, y: 100 }, modifier: 'Shift',
 	});
 	const badModifier = structuredClone(script);
 	badModifier.segments[1].walkthrough[1].modifier = 'CapsLock';

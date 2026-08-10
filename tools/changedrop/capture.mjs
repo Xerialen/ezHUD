@@ -47,7 +47,7 @@ const MAX_PROBE_OUTPUT_BYTES = 65_536;
 const PROBE_TIMEOUT_MS = 30_000;
 
 export const ACTIONS = Object.freeze(['wait-for', 'resize', 'click', 'hold', 'highlight', 'drag']);
-export const SELECTOR_PATTERN = /^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\[data-changedrop="[a-z0-9]+(?:-[a-z0-9]+)*"\])$/;
+export const SELECTOR_PATTERN = /^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\[data-changedrop="[a-z0-9]+(?:-[a-z0-9]+)*"\]|\.box\[data-name="[A-Za-z_][A-Za-z0-9_]{0,63}"\])$/;
 
 // Five seconds (5000 ms) is long enough to hold a current narration beat or
 // changed control legibly, but short enough that one typo cannot stall a run.
@@ -61,6 +61,7 @@ const ACTION_SET = new Set(ACTIONS);
 const DRAG_MODIFIERS = new Set(['Alt', 'Control', 'Meta', 'Shift']);
 const DRAG_STEPS = 20;
 const DRAG_STEP_DELAY_MS = 16;
+const DRAG_SETTLE_ATTEMPTS = 10;
 
 function exactObject(value, expectedKeys, at) {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${at} must be an object.`);
@@ -85,7 +86,7 @@ function finiteNumber(value, at, { minimum = null, positive = false } = {}) {
 
 function validateSelector(value, at) {
 	if (typeof value !== 'string' || !SELECTOR_PATTERN.test(value)) {
-		throw new Error(`${at} selector must be id-style (#name) or [data-changedrop="kebab-name"].`);
+		throw new Error(`${at} selector must be id-style (#name), [data-changedrop="kebab-name"], or .box[data-name="element_name"].`);
 	}
 }
 
@@ -855,6 +856,14 @@ export async function executeDrag(page, step, timeout) {
 		if (mouseDown) await page.mouse.up().catch(() => {});
 		if (modifierDown) await page.keyboard.up(step.modifier);
 	}
+
+	for (let attempt = 0; attempt < DRAG_SETTLE_ATTEMPTS; attempt += 1) {
+		const settledBox = await source.boundingBox();
+		if (settledBox && (Math.abs(settledBox.x - sourceBox.x) > 0.5
+			|| Math.abs(settledBox.y - sourceBox.y) > 0.5)) return;
+		await page.waitForTimeout(DRAG_STEP_DELAY_MS);
+	}
+	throw new Error(`Drag source ${step.selector} did not move.`);
 }
 
 async function executeStep({
