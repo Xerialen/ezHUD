@@ -14,7 +14,8 @@ const INTRO = "Hey guys, it's Xerial. Here's what's new in ezHUD.";
 const OUTRO = "Be safe, and don't walk on spawns.";
 const MAX_SURFACE_SECONDS = 10.0;
 const MAX_HOLD_MS = 5_000;
-const ACTIONS = new Set(['wait-for', 'resize', 'click', 'hold', 'highlight']);
+const ACTIONS = new Set(['wait-for', 'resize', 'click', 'hold', 'highlight', 'drag']);
+const DRAG_MODIFIERS = new Set(['Alt', 'Control', 'Meta', 'Shift']);
 const SELECTOR_PATTERN = /^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\[data-changedrop="[a-z0-9]+(?:-[a-z0-9]+)*"\])$/;
 
 // 2.2 words/s is 132 wpm: a deliberately conservative planning rate near the
@@ -80,6 +81,21 @@ function validateSelector(value, at) {
 	}
 }
 
+function validateDragTarget(value, at) {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${at} must be an object.`);
+	if ('selector' in value) {
+		exactObject(value, ['selector'], at);
+		validateSelector(value.selector, at);
+		return;
+	}
+	exactObject(value, ['x', 'y'], at);
+	for (const coordinate of ['x', 'y']) {
+		if (typeof value[coordinate] !== 'number' || !Number.isFinite(value[coordinate]) || value[coordinate] < 0) {
+			throw new Error(`${at} ${coordinate} must be a non-negative finite number.`);
+		}
+	}
+}
+
 function validateWalkthrough(value, at, { setup = false } = {}) {
 	if (!Array.isArray(value) || value.length === 0) throw new Error(`${at} must be a non-empty array.`);
 	for (const [index, step] of value.entries()) {
@@ -105,6 +121,16 @@ function validateWalkthrough(value, at, { setup = false } = {}) {
 		case 'click':
 			exactObject(step, ['instruction', 'action', 'selector'], label);
 			validateSelector(step.selector, label);
+			break;
+		case 'drag':
+			exactObject(step, step.modifier === undefined
+				? ['instruction', 'action', 'selector', 'target']
+				: ['instruction', 'action', 'selector', 'target', 'modifier'], label);
+			validateSelector(step.selector, label);
+			validateDragTarget(step.target, `${label} target`);
+			if (step.modifier !== undefined && !DRAG_MODIFIERS.has(step.modifier)) {
+				throw new Error(`${label} drag modifier must be Alt, Control, Meta, or Shift.`);
+			}
 			break;
 		case 'hold':
 			exactObject(step, step.fit === undefined
@@ -152,6 +178,7 @@ function copyWalkthrough(walkthrough) {
 	return walkthrough.map((step) => ({
 		...step,
 		...(step.crop ? { crop: { ...step.crop } } : {}),
+		...(step.target ? { target: { ...step.target } } : {}),
 	}));
 }
 
