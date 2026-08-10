@@ -131,10 +131,15 @@ free from GitHub's side in all cases.
 | `tier2-engine.yml` — engine build (ccache) + curl contract tests | self-hosted (home) | PRs touching `engine/**` |
 | `tier3.yml` — Playwright headless vs fixture | `ubuntu-latest` (Playwright container) | PRs touching `hud_web_ui/**` |
 | `tier4.yml` — full e2e + screenshots | self-hosted (GPU host) | release tags, nightly schedule, `workflow_dispatch` |
-| `pages.yml` — public build, tiers 1(js)+3F on the checkout and 4F on the built dist, then deploy | `ubuntu-24.04` | push to `main`, `workflow_dispatch` |
+| `pages.yml` — public build, tiers 1(js)+3F on the checkout and 4F on the built dist, then deploy | `ubuntu-24.04` | push to `main` (release root); `workflow_dispatch` with branch + name (`/preview/<name>/`) |
 
-The pages workflow is the FTE lanes' natural CI home: nothing can deploy
-without the artifact itself passing tier 4F first. The self-hosted rows
+The Pages workflow is the FTE lanes' natural CI home: nothing can deploy
+without the artifact itself passing tier 4F first. Before upload it verifies the
+currently deployed site's hash manifest, preserves the release root and all
+other named previews, and applies the public-file allowlist to the complete
+replacement artifact. After deployment it fetches the live root and every
+preview `index.html` and compares their hashes with the uploaded artifact. The
+self-hosted rows
 describe pinnacle, which has run native Ubuntu Desktop since its 2026
 reinstall (it was WSL when this file was first written — the WSLg/D3D12
 notes in `tools/tests/tier4.sh` are kept as history).

@@ -265,11 +265,15 @@ The engine itself is built from a pinned FTEQW commit plus
 **Publishing is CI's job, not a hand-run.** `.github/workflows/pages.yml`
 builds the engine from source, downloads every game-data file against sha256
 pins (`tools/fte-web/game-data.sha256`), assembles the dist from the allowlist,
-runs the test tiers against the exact artifact, and deploys on `main`. Nothing
-is ever copied out of the dev site: the sanitization is structural
-(`spikes/fte-web/PUBLISH.md` argues why), and a guard test fails the build on
-any extra *or* missing file — registered Quake data and personal configs cannot
-reach a deploy by construction.
+runs the test tiers against the exact artifact, and deploys the release root on
+`main`. A manual run takes a branch and preview name and publishes it at
+`/ezHUD/preview/<name>/`; `/ezHUD/preview/` lists the live previews. Every run
+rebuilds one complete Pages artifact from the hash-verified current site, so a
+preview cannot remove the release root or another preview, and a later release
+cannot remove previews. Nothing is ever copied out of the dev site: the
+sanitization is structural (`spikes/fte-web/PUBLISH.md` argues why), and a guard
+test fails the build on any extra *or* missing file — registered Quake data and
+personal configs cannot reach a deploy by construction.
 
 ### After changing the UI
 
