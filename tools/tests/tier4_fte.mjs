@@ -511,12 +511,7 @@ async function trackerClip(messageRows, timeout = 90000) {
 	const sx = canvasBox.width / state.screen.vid_width;
 	const sy = canvasBox.height / state.screen.vid_height;
 	const viewport = page.viewportSize();
-	// The pinned engine's classic-text tracker reports its right-aligned rect X
-	// from the New-HUD anchor while drawing at the mirrored screen coordinate;
-	// tools/fte-web/fragfile-proof.mjs established the same mapping against this
-	// dist. Width/Y still come straight from the state-tree rect.
-	const screenX = state.screen.vid_width - state.element.rect.x - state.element.rect.w;
-	const x = Math.max(0, canvasBox.x + screenX * sx);
+	const x = Math.max(0, canvasBox.x + state.element.rect.x * sx);
 	const y = Math.max(0, canvasBox.y + state.element.rect.y * sy);
 	// The rect reserves r_tracker_messages rows even when only one retained frag
 	// is drawn. At the new console scale that unused tail reaches into the 3-D
