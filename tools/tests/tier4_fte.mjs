@@ -55,6 +55,15 @@ const ENGINE_WAIT = 60000;
 // Editor-side waits: the DOM reacting to something the engine already did.
 const UI_WAIT = 20000;
 
+const DEMO_MOMENTS = [
+	{ target: '0:00', label: 'Prewar' },
+	{ target: '10:00', label: '10:00' },
+	{ target: '20:10', label: 'Scoreboard' },
+];
+const DEMO_STATE_ELEMENTS = [
+	'key1', 'gun2', 'gun4', 'teamfrags', 'health', 'tracking',
+];
+
 // Import-map key, not a file path: index.html maps `${basePath}core/bridge.js`
 // to the FTE adapter, so importing that exact specifier from page context
 // hands back the same module instance app.js is polling -- and therefore the
@@ -216,8 +225,10 @@ const readState = (name) => page.evaluate(async ([spec, wanted]) => {
 		demo: state.demo ?? null,
 		element: target
 			? {
-				name: target.name, place: target.place, align_x: target.align_x, align_y: target.align_y,
-				pos_x: target.pos_x, pos_y: target.pos_y, rect: target.rect ?? null,
+				name: target.name, place: target.place, parent: target.parent ?? null,
+				align_x: target.align_x, align_y: target.align_y,
+				pos_x: target.pos_x, pos_y: target.pos_y, order: target.order, frame: target.frame,
+				rect: target.rect ?? null,
 			}
 			: null,
 	};
@@ -230,11 +241,73 @@ const readDrawn = () => page.evaluate(async (spec) => {
 	return (state.elements ?? [])
 		.filter((element) => element.rect)
 		.map((element) => ({
-			name: element.name, place: element.place,
+			name: element.name, place: element.place, parent: element.parent ?? null,
 			align_x: element.align_x, align_y: element.align_y,
 			pos_x: element.pos_x, pos_y: element.pos_y, rect: element.rect,
 		}));
 }, BRIDGE);
+
+// #87 covers four empty/non-drawing paths. Native ezQuake still publishes
+// unrelated zero-area layouts (for example frags with hud_frags_notintp 1 in
+// teamplay), so this contract deliberately rejects non-positive rects only for
+// tracker, ownfrags, tracking and net rather than claiming a global invariant.
+const readRectContract = () => page.evaluate(async (spec) => {
+	const { currentBridge } = await import(spec);
+	const state = await currentBridge().state();
+	const covered = new Set(['tracker', 'ownfrags', 'tracking', 'net']);
+	const byName = (name) => state.elements.find((element) => element.name === name);
+	return {
+		screen: state.screen,
+		tracker: byName('tracker')?.rect ?? null,
+		ownfrags: byName('ownfrags')?.rect ?? null,
+		tracking: byName('tracking')?.rect ?? null,
+		net: byName('net')?.rect ?? null,
+		nonPositive: state.elements
+			.filter((element) => covered.has(element.name)
+				&& element.rect && (element.rect.w <= 0 || element.rect.h <= 0))
+			.map((element) => ({ name: element.name, rect: element.rect })),
+	};
+}, BRIDGE);
+
+// A compact projection of the engine-owned layout at a Jump to point. These
+// elements distinguish the three reviewed frames without depending on a page
+// clock or on tracker, whose false zero-area rect is independently tracked by
+// #87. Three identical projections while cl_demospeed is zero establish a
+// settled consumed-packet state rather than a page-owned timing guess.
+const readDemoMomentState = () => page.evaluate(async ([spec, names]) => {
+	const { currentBridge } = await import(spec);
+	const state = await currentBridge().state();
+	return {
+		speed: state.demo?.cl_demospeed ?? null,
+		elements: names.map((name) => {
+			const element = state.elements.find((entry) => entry.name === name);
+			return { name, rect: element?.rect ?? null };
+		}),
+	};
+}, [BRIDGE, DEMO_STATE_ELEMENTS]);
+
+const demoMomentSignature = (state) => JSON.stringify(state.elements);
+
+async function waitForDemoMoment(label) {
+	let lastSignature = null;
+	let stableReads = 0;
+	return eventually(async () => {
+		const state = await readDemoMomentState();
+		const signature = demoMomentSignature(state);
+		if (state.speed !== '0') {
+			lastSignature = null;
+			stableReads = 0;
+			return null;
+		}
+		if (signature === lastSignature) {
+			stableReads += 1;
+		} else {
+			lastSignature = signature;
+			stableReads = 1;
+		}
+		return stableReads >= 3 ? { state, signature } : null;
+	}, `${label} to settle in engine state while paused`, ENGINE_WAIT);
+}
 
 const waitLive = (label) => eventually(
 	async () => ((await readState()).live ? true : null), label, ENGINE_WAIT,
@@ -455,8 +528,19 @@ async function operateControl(row) {
 
 async function proveControl(row) {
 	let unchangedBefore = null;
+	let editorBefore = null;
 	if (row.exportOnly) {
 		unchangedBefore = await readCvar(row.exportOnly.unchangedCvar);
+	}
+	if (row.editorOnly) {
+		unchangedBefore = await readCvar(row.editorOnly.unchangedCvar);
+		const state = await readState();
+		editorBefore = {
+			metric: await page.locator(row.editorOnly.metricSelector).evaluate(
+				(node, property) => node.getBoundingClientRect()[property], row.editorOnly.metricProperty),
+			screen: state.screen,
+			physical: state.physical,
+		};
 	}
 	await operateControl(row);
 	if (row.expect) {
@@ -477,6 +561,52 @@ async function proveControl(row) {
 			return text.split('\n').includes(row.exportOnly.line) ? text : null;
 		}, `${row.label} to land ${row.exportOnly.line} in the full export`, UI_WAIT);
 		assert(exportedText, `${row.label} did not land in the full export`);
+	}
+	if (row.editorOnly) {
+		const changed = await eventually(async () => {
+			const metric = await page.locator(row.editorOnly.metricSelector).evaluate(
+				(node, property) => node.getBoundingClientRect()[property], row.editorOnly.metricProperty);
+			const state = await readState();
+			const screenChanged = state.screen?.vid_width !== editorBefore.screen?.vid_width
+				|| state.screen?.vid_height !== editorBefore.screen?.vid_height;
+			const physicalChanged = state.physical?.[0] !== editorBefore.physical?.[0]
+				|| state.physical?.[1] !== editorBefore.physical?.[1];
+			return metric > editorBefore.metric * row.editorOnly.minimumFactor
+				&& screenChanged && physicalChanged ? { metric, state } : null;
+		}, `${row.label} to resize chrome, canvas and exported screen state`, UI_WAIT);
+		const unchangedAfter = await readCvar(row.editorOnly.unchangedCvar);
+		assert(unchangedAfter === unchangedBefore,
+			`${row.label} changed HUD placement ${row.editorOnly.unchangedCvar} `
+			+ `${unchangedBefore} -> ${unchangedAfter}`);
+		assert(await page.evaluate((key) => localStorage.getItem(key), row.editorOnly.storageKey)
+			=== row.operation.value,
+			`${row.label} did not persist ${row.operation.value}`);
+		const exported = await readExport();
+		assert(!exported.includes(row.editorOnly.forbiddenExport),
+			`${row.label} leaked editor-only state into the HUD export`);
+		const backing = await page.locator('#canvas').evaluate((canvas) =>
+			[canvas.width, canvas.height]);
+		assert(changed.state.physical[0] === backing[0] && changed.state.physical[1] === backing[1],
+			`${row.label} physical state does not match the canvas backing store: `
+			+ `${JSON.stringify({ physical: changed.state.physical, backing })}`);
+		// vid_conautoscale may intentionally make console screen dimensions a
+		// fraction of the physical backing store. "Follows" means both resize by
+		// the same ratio, not that they are numerically equal.
+		const ratios = {
+			screenX: changed.state.screen.vid_width / editorBefore.screen.vid_width,
+			screenY: changed.state.screen.vid_height / editorBefore.screen.vid_height,
+			physicalX: changed.state.physical[0] / editorBefore.physical[0],
+			physicalY: changed.state.physical[1] / editorBefore.physical[1],
+		};
+		assert(Math.abs(ratios.screenX - ratios.physicalX) < 0.02
+			&& Math.abs(ratios.screenY - ratios.physicalY) < 0.02,
+			`${row.label} screen did not follow physical resize ratios: ${JSON.stringify(ratios)}`);
+		if (row.editorOnly.restore != null) {
+			await controlLocator(row.target).selectOption(String(row.editorOnly.restore));
+			await eventually(async () => await page.evaluate((value) =>
+				document.documentElement.dataset.uiScale === value ? true : null,
+			String(row.editorOnly.restore)), `${row.label} cleanup`, UI_WAIT);
+		}
 	}
 }
 
@@ -511,12 +641,11 @@ async function trackerClip(messageRows, timeout = 90000) {
 	const sx = canvasBox.width / state.screen.vid_width;
 	const sy = canvasBox.height / state.screen.vid_height;
 	const viewport = page.viewportSize();
-	// The pinned engine's classic-text tracker reports its right-aligned rect X
-	// from the New-HUD anchor while drawing at the mirrored screen coordinate;
-	// tools/fte-web/fragfile-proof.mjs established the same mapping against this
-	// dist. Width/Y still come straight from the state-tree rect.
-	const screenX = state.screen.vid_width - state.element.rect.x - state.element.rect.w;
-	const x = Math.max(0, canvasBox.x + screenX * sx);
+	// Consume the engine-reported rect directly. A tracker-specific mirror here
+	// would make the editor overlay disagree with the pixels while both appeared
+	// internally consistent, which is exactly the stale #61 workaround this
+	// Release 2 contract removes.
+	const x = Math.max(0, canvasBox.x + state.element.rect.x * sx);
 	const y = Math.max(0, canvasBox.y + state.element.rect.y * sy);
 	// The rect reserves r_tracker_messages rows even when only one retained frag
 	// is drawn. At the new console scale that unused tail reaches into the 3-D
@@ -864,9 +993,10 @@ try {
 	// Interactive engine/export controls rendered by the public FTE page:
 	//
 	//   FTE chrome: demo picker (case 6), cfg drop target (case 4), demo pause
-	//   and resume, volume range, mute and unmute. The Overlay/filter/Hidden/Spectator controls are
-	//   editor-view filters only; Save is an export workflow (case 5), not an
-	//   engine setting.
+	//   and resume, volume range, mute and unmute. Editor size (#25) has its own
+	//   row proving visible chrome growth, persisted choice, engine resize and
+	//   unchanged HUD placement. Overlay/filter/Hidden/Spectator are editor-view
+	//   filters only; Save is an export workflow (case 5), not an engine setting.
 	//
 	//   HUD systems: Classic/New/Both (scr_newhud), QW262 overlay (cl_hud),
 	//   classic bar (cl_sbar), compact style (scr_compacthud), viewsize, and
@@ -901,6 +1031,13 @@ try {
 			label: 'resume demo button', target: { selector: '#fte-pause' },
 			operation: { kind: 'click' }, expect: { cl_demospeed: '1' },
 		},
+		...DEMO_MOMENTS.map((moment) => ({
+			issue: 23,
+			label: `${moment.label} Jump to point`,
+			target: { selector: `[data-demo-jump="${moment.target}"]` },
+			operation: { kind: 'click' },
+			moment,
+		})),
 		{
 			label: 'volume slider', target: { selector: '#fte-volume' },
 			operation: { kind: 'fill', value: '0.35' }, expect: { volume: '0.35' },
@@ -912,6 +1049,31 @@ try {
 		{
 			label: 'unmute button restores the slider', target: { selector: '#fte-mute' },
 			operation: { kind: 'click' }, expect: { volume: '0.35' },
+		},
+		{
+			issue: 24,
+			label: 'Snap grid toggle', target: { selector: '#snap-grid' },
+			operation: { kind: 'click' },
+		},
+		{
+			issue: 24,
+			label: 'Snap grid step', target: { selector: '#snap-step' },
+			operation: { kind: 'fill', value: '5' },
+		},
+		{
+			issue: 24,
+			label: 'Magnet toggle', target: { selector: '#snap-magnet' },
+			operation: { kind: 'click' },
+		},
+		{
+			issue: 25,
+			label: 'Editor size: 125%', target: { selector: '#ui-scale' },
+			operation: { kind: 'select', value: '1.25' },
+			editorOnly: {
+				unchangedCvar: `hud_${candidate.name}_pos_y`,
+				metricSelector: '.panel--tree', metricProperty: 'width', minimumFactor: 1.15,
+				storageKey: 'ezhud.ui.scale', forbiddenExport: 'ezhud.ui.scale', restore: '1',
+			},
 		},
 		{
 			label: 'killfeed Where: Console messages',
@@ -1053,7 +1215,7 @@ try {
 	];
 
 	let nextCase = 8;
-	for (const row of controlCases.filter((entry) => entry.issue !== 43)) {
+	for (const row of controlCases.filter((entry) => ![23, 24, 25, 43].includes(entry.issue))) {
 		await proveControl(row);
 		const effect = row.expect
 			? Object.entries(row.expect).map(([name, value]) => `${name}=${value}`).join(', ')
@@ -1291,13 +1453,381 @@ try {
 	pass(nextCase++, visualPassText);
 
 	// Preserve the historical 1–36 numbering (especially the anti-stale audit
-	// at case 35), then append #43's functional cases and mandatory control rows.
+	// at case 35), then append new-ticket functional/control rows.
 	pass(nextCase++, demoPausePassText);
 	pass(nextCase++, demoReadbackPassText);
-	// Case 36 resumes through the raw channel in its finally block. Wait for
-	// that engine state to reach the visible toggle before asking the toggle for
-	// its opposite; otherwise a deliberately stale aria-pressed=true would
-	// correctly request another resume rather than the pause this row expects.
+	for (const row of controlCases.filter((entry) => entry.issue === 25)) {
+		await proveControl(row);
+		pass(nextCase++, `${row.label} — chrome, canvas and state resized; HUD placement unchanged`);
+	}
+
+	// ---- #32 alignment-first workflow against the real wasm engine ----------
+	// The tracker pixel case deliberately hid editor outlines. Relationship
+	// visualization is the subject now, so restore the visible Overlay control.
+	if (!(await page.locator('#chrome').isChecked())) {
+		await page.locator('#chrome').click();
+	}
+	const alignmentPool = await readDrawn();
+	const anchorParent = alignmentPool.find((entry) => entry.name === candidate.name)
+		?? alignmentPool.find((entry) => !entry.parent);
+	const anchorChild = alignmentPool.find((entry) => entry.name !== anchorParent?.name
+		&& entry.name !== 'tracker'
+		&& entry.parent !== anchorParent?.name
+		&& anchorParent?.parent !== entry.name
+		&& entry.rect.w !== anchorParent?.rect.w);
+	assert(anchorParent && anchorChild,
+		`could not choose two independent drawn elements for #32: ${JSON.stringify(alignmentPool)}`);
+	const originals = {
+		parent: await readState(anchorParent.name),
+		child: await readState(anchorChild.name),
+	};
+	const selectForPlacement = async (name) => {
+		await page.locator(`.tree__row[data-name="${name}"]`).click();
+		await eventually(async () => await page.locator('#inspector .inspect__name').textContent() === name
+			? true : null, `the inspector to select ${name}`, UI_WAIT);
+	};
+	const setPlacementField = async (name, suffix, value) => {
+		await selectForPlacement(name);
+		const control = page.locator(`#f-${name}-${suffix}`);
+		await control.waitFor({ state: 'visible', timeout: UI_WAIT });
+		if (await control.evaluate((node) => node.tagName === 'SELECT')) {
+			await control.selectOption(String(value));
+		} else {
+			await control.fill(String(value));
+			await control.press('Enter');
+		}
+		await eventually(async () => await readCvar(`hud_${name}_${suffix}`) === String(value)
+			? true : null, `${name} ${suffix}=${value}`, UI_WAIT);
+	};
+	try {
+		await setPlacementField(anchorChild.name, 'place', `@${anchorParent.name}`);
+		await setPlacementField(anchorChild.name, 'align_x', 'left');
+		await setPlacementField(anchorChild.name, 'align_y', 'top');
+		await setPlacementField(anchorChild.name, 'pos_x', '0');
+		await setPlacementField(anchorChild.name, 'pos_y', '0');
+		await setPlacementField(anchorChild.name, 'order', '7');
+		const anchored = await eventually(async () => {
+			const parentState = await readState(anchorParent.name);
+			const childState = await readState(anchorChild.name);
+			return childState.element?.parent === anchorParent.name
+				&& childState.element.rect?.x === parentState.element.rect?.x
+				&& childState.element.rect?.y === parentState.element.rect?.y
+				? { parent: parentState.element, child: childState.element } : null;
+		}, 'the child engine rect to land on its parent anchor', UI_WAIT);
+		await page.locator(`#overlay .anchor-link[data-child="${anchorChild.name}"]`
+			+ `[data-anchor="${anchorParent.name}"]`).waitFor({ timeout: UI_WAIT });
+
+		// Moving the parent through the real overlay gesture must move both engine
+		// rects by one identical delta.
+		await selectForPlacement(anchorParent.name);
+		const parentBox = page.locator('#overlay .box[data-selected="true"]');
+		const parentBounds = await parentBox.boundingBox();
+		assert(parentBounds, `${anchorParent.name} has no draggable overlay box`);
+		await page.mouse.move(parentBounds.x + parentBounds.width / 2,
+			parentBounds.y + parentBounds.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(parentBounds.x + parentBounds.width / 2 + 30,
+			parentBounds.y + parentBounds.height / 2, { steps: 6 });
+		await page.mouse.up();
+		const movedPair = await eventually(async () => {
+			const parentState = (await readState(anchorParent.name)).element;
+			const childState = (await readState(anchorChild.name)).element;
+			return parentState.rect?.x !== anchored.parent.rect.x ? { parentState, childState } : null;
+		}, 'the anchored pair to move from one parent drag', UI_WAIT);
+		const parentDelta = movedPair.parentState.rect.x - anchored.parent.rect.x;
+		const childDelta = movedPair.childState.rect.x - anchored.child.rect.x;
+		assert(parentDelta !== 0 && childDelta === parentDelta,
+			`parent/child rect delta mismatch: ${parentDelta} vs ${childDelta}`);
+
+		// Alignment and offsets are all checked from engine rect readback.
+		for (const alignment of ['left', 'center', 'right']) {
+			await setPlacementField(anchorChild.name, 'align_x', alignment);
+			const pair = await eventually(async () => {
+				const parentState = (await readState(anchorParent.name)).element;
+				const childState = (await readState(anchorChild.name)).element;
+				return childState.align_x === alignment ? { parentState, childState } : null;
+			}, `${alignment} alignment readback`, UI_WAIT);
+			const expected = alignment === 'left' ? pair.parentState.rect.x
+				: alignment === 'center'
+					? pair.parentState.rect.x + Math.trunc((pair.parentState.rect.w - pair.childState.rect.w) / 2)
+					: pair.parentState.rect.x + pair.parentState.rect.w - pair.childState.rect.w;
+			assert(pair.childState.rect.x === expected,
+				`${alignment} expected engine x=${expected}, got ${pair.childState.rect.x}`);
+		}
+		await setPlacementField(anchorChild.name, 'pos_x', '7');
+		await setPlacementField(anchorChild.name, 'pos_y', '9');
+		const offsetPair = {
+			parent: (await readState(anchorParent.name)).element,
+			child: (await readState(anchorChild.name)).element,
+		};
+		assert(offsetPair.child.rect.x === offsetPair.parent.rect.x + offsetPair.parent.rect.w
+			- offsetPair.child.rect.w + 7
+			&& offsetPair.child.rect.y === offsetPair.parent.rect.y + 9,
+			`fine-tune offsets disagree with engine rects: ${JSON.stringify(offsetPair)}`);
+
+		await selectForPlacement(anchorParent.name);
+		const cycle = await page.locator(`#f-${anchorParent.name}-place option[value="@${anchorChild.name}"]`)
+			.evaluate((option) => ({ disabled: option.disabled, text: option.textContent }));
+		assert(cycle.disabled && /unavailable.*cycle/i.test(cycle.text),
+			`placement cycle was not refused with a reason: ${JSON.stringify(cycle)}`);
+
+		const relationshipCfg = await readExport();
+		assert(relationshipCfg.split('\n').includes(`hud_${anchorChild.name}_place "@${anchorParent.name}"`),
+			'the anchored full export omitted the relationship');
+		await page.evaluate(([name]) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			channel.cbufadd(`set hud_${name}_place screen\nhud_recalculate\n`);
+		}, [anchorChild.name]);
+		await eventually(async () => (await readState(anchorChild.name)).element?.parent === null
+			? true : null, 'the child relationship to be disturbed before re-import', UI_WAIT);
+		const relationshipTransfer = await page.evaluateHandle(([text, name]) => {
+			const data = new DataTransfer();
+			data.items.add(new File([text], name, { type: 'text/plain' }));
+			return data;
+		}, [relationshipCfg, 'alignment-roundtrip.cfg']);
+		await page.dispatchEvent('#fte-drop', 'drop', { dataTransfer: relationshipTransfer });
+		await eventually(async () => (await readState(anchorChild.name)).element?.parent === anchorParent.name
+			? true : null, 're-import to restore the parent relationship', UI_WAIT);
+		pass(nextCase++, `${anchorChild.name} anchored to ${anchorParent.name}: drag, 3 alignments, offsets, cycle refusal and relationship round trip`);
+	} finally {
+		await page.evaluate(({ parentName, childName, parent, child }) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) return;
+			for (const [name, value] of [
+				[`hud_${parentName}_pos_x`, parent.pos_x], [`hud_${parentName}_pos_y`, parent.pos_y],
+				[`hud_${childName}_place`, child.place], [`hud_${childName}_align_x`, child.align_x],
+				[`hud_${childName}_align_y`, child.align_y], [`hud_${childName}_pos_x`, child.pos_x],
+				[`hud_${childName}_pos_y`, child.pos_y], [`hud_${childName}_order`, child.order],
+			]) channel.cbufadd(`set ${name} ${value}\n`);
+			channel.cbufadd('hud_recalculate\n');
+		}, {
+			parentName: anchorParent.name, childName: anchorChild.name,
+			parent: originals.parent.element, child: originals.child.element,
+		}).catch(() => {});
+	}
+
+	// ---- #24 grid + magnet against the real wasm engine ---------------------
+	const snapGrid = page.locator('#snap-grid');
+	const snapStep = page.locator('#snap-step');
+	const snapMagnet = page.locator('#snap-magnet');
+	assert(!(await snapGrid.isChecked()) && !(await snapMagnet.isChecked()),
+		'drag assistance did not start visibly off');
+	const dragSubjectOriginal = (await readState(candidate.name)).element;
+	const snapPool = await readDrawn();
+	const magnetTarget = snapPool.find((entry) => entry.name !== candidate.name
+		&& entry.parent !== candidate.name && candidate.parent !== entry.name
+		&& entry.rect.x > candidate.rect.w + 12 && entry.name !== 'tracker');
+	assert(magnetTarget, `no drawn target can host the magnet case: ${JSON.stringify(snapPool)}`);
+	const placeSubject = async (x, y) => {
+		await page.evaluate(({ name, x, y }) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			channel.cbufadd(`set hud_${name}_place screen\nset hud_${name}_align_x left\n`
+				+ `set hud_${name}_align_y top\nset hud_${name}_pos_x ${x}\n`
+				+ `set hud_${name}_pos_y ${y}\nhud_recalculate\n`);
+		}, { name: candidate.name, x, y });
+		await eventually(async () => {
+			const state = (await readState(candidate.name)).element;
+			return state.place === 'screen' && state.align_x === 'left' && state.align_y === 'top'
+				&& state.pos_x === String(x) && state.pos_y === String(y) ? state : null;
+		}, `${candidate.name} screen placement ${x},${y}`, UI_WAIT);
+		await waitEditorCaughtUp(candidate.name);
+	};
+	const dragSubject = async (dx, dy, { modifier = null, beforeUp = null } = {}) => {
+		await selectForPlacement(candidate.name);
+		const beforeDrag = (await readState(candidate.name)).element;
+		const subjectBox = page.locator('#overlay .box[data-selected="true"]');
+		const rect = await subjectBox.boundingBox();
+		assert(rect, `${candidate.name} has no box for drag assistance`);
+		if (modifier) await page.keyboard.down(modifier);
+		try {
+			await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+			await page.mouse.down();
+			await page.mouse.move(rect.x + rect.width / 2 + dx,
+				rect.y + rect.height / 2 + dy, { steps: 5 });
+			if (beforeUp) await beforeUp();
+			await page.mouse.up();
+		} finally {
+			if (modifier) await page.keyboard.up(modifier);
+		}
+		return eventually(async () => {
+			const state = (await readState(candidate.name)).element;
+			return state && (state.pos_x !== beforeDrag.pos_x || state.pos_y !== beforeDrag.pos_y)
+				? state : null;
+		}, `${candidate.name} drag readback`, UI_WAIT);
+	};
+	try {
+		await snapGrid.click();
+		await snapStep.fill('8');
+		await placeSubject(13, 80);
+		let gridResult = await dragSubject(29, 0);
+		assert(Number(gridResult.pos_x) % 8 === 0,
+			`8px live grid produced pos_x=${gridResult.pos_x}`);
+
+		await snapStep.fill('5');
+		await placeSubject(13, 80);
+		gridResult = await dragSubject(29, 0);
+		assert(Number(gridResult.pos_x) % 5 === 0,
+			`5px live grid produced pos_x=${gridResult.pos_x}`);
+
+		await snapGrid.click();
+		await placeSubject(13, 80);
+		const freeResult = await dragSubject(7, 0);
+		assert(Number(freeResult.pos_x) % 5 !== 0,
+			`grid-off live drag still quantized pos_x=${freeResult.pos_x}`);
+
+		await snapMagnet.click();
+		const nearX = magnetTarget.rect.x - candidate.rect.w - 3;
+		await placeSubject(nearX, magnetTarget.rect.y);
+		let guideTarget = null;
+		let guideAxis = null;
+		const magnetResult = await dragSubject(4, 0, {
+			beforeUp: async () => {
+				const guide = page.locator('#overlay .snap-guide').first();
+				await guide.waitFor({ timeout: UI_WAIT });
+				guideTarget = await guide.getAttribute('data-target');
+				guideAxis = (await guide.getAttribute('class')).includes('snap-guide--x') ? 'x' : 'y';
+			},
+		});
+		const targetAfterMagnet = (await readDrawn()).find((entry) => entry.name === guideTarget)?.rect;
+		const sourcePoints = guideAxis === 'x'
+			? [magnetResult.rect.x, magnetResult.rect.x + magnetResult.rect.w / 2,
+				magnetResult.rect.x + magnetResult.rect.w]
+			: [magnetResult.rect.y, magnetResult.rect.y + magnetResult.rect.h / 2,
+				magnetResult.rect.y + magnetResult.rect.h];
+		const targetPoints = !targetAfterMagnet ? [] : guideAxis === 'x'
+			? [targetAfterMagnet.x, targetAfterMagnet.x + targetAfterMagnet.w / 2,
+				targetAfterMagnet.x + targetAfterMagnet.w]
+			: [targetAfterMagnet.y, targetAfterMagnet.y + targetAfterMagnet.h / 2,
+				targetAfterMagnet.y + targetAfterMagnet.h];
+		assert(sourcePoints.some((value) => targetPoints.includes(value)),
+			`live magnet guide ${guideAxis}/${guideTarget} did not end in exact engine alignment`);
+
+		await snapMagnet.click();
+		await placeSubject(nearX, magnetTarget.rect.y);
+		await dragSubject(4, 0, {
+			beforeUp: async () => assert(await page.locator('#overlay .snap-guide').count() === 0,
+				'magnet-off live drag still drew a guide'),
+		});
+
+		await snapGrid.click();
+		await snapStep.fill('8');
+		const instruction = await snapGrid.evaluate((node) =>
+			node.closest('section')?.querySelector('.font-state')?.textContent?.trim() ?? '');
+		const modifierMatch = /^Hold ([A-Za-z]+) while dragging to bypass both\.$/.exec(instruction);
+		assert(modifierMatch,
+			`drag-assistance label does not name a modifier: ${JSON.stringify(instruction)}`);
+		const documentedModifier = modifierMatch[1];
+
+		await placeSubject(14, 80);
+		const altResult = await dragSubject(7, 0, { modifier: 'Alt' });
+		assert(Number(altResult.pos_x) % 8 === 0,
+			`Alt still bypassed the live grid at pos_x=${altResult.pos_x}`);
+
+		await placeSubject(14, 80);
+		const bypassResult = await dragSubject(7, 0, { modifier: documentedModifier });
+		assert(Number(bypassResult.pos_x) % 8 !== 0,
+			`${documentedModifier} still grid-snapped live pos_x=${bypassResult.pos_x}`);
+		assert(await page.evaluate(() => window.getSelection()?.toString() === ''),
+			`${documentedModifier}-drag selected page text`);
+		const dragAssistExport = await readExport();
+		assert(!/snap|magnet/i.test(dragAssistExport),
+			'drag assistance leaked editor-only state into the full export');
+		pass(nextCase++, `${candidate.name} drag: 8/5 grids, free pixels, magnet guide + exact engine edge, ${documentedModifier} bypass, Alt snap, clean export`);
+	} finally {
+		if (await snapGrid.isChecked()) await snapGrid.click().catch(() => {});
+		if (await snapMagnet.isChecked()) await snapMagnet.click().catch(() => {});
+		await snapStep.fill('8').catch(() => {});
+		await page.evaluate(({ name, original }) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) return;
+			for (const [suffix, value] of Object.entries({
+				place: original.place, align_x: original.align_x, align_y: original.align_y,
+				pos_x: original.pos_x, pos_y: original.pos_y, order: original.order,
+			})) channel.cbufadd(`set hud_${name}_${suffix} ${value}\n`);
+			channel.cbufadd('hud_recalculate\n');
+		}, { name: candidate.name, original: dragSubjectOriginal }).catch(() => {});
+	}
+
+	// ---- #23 Jump to against the real wasm engine ----------------------------
+	// Case 6 already selected the bundled tb4gf match. Drive every authored
+	// button from running playback: every point must settle paused, and a second
+	// Scoreboard run must match the first. Exact command order and target strings
+	// are independently asserted in tier 3F.
+	await eventually(async () => {
+		const state = await readState();
+		return state.demo?.cl_demospeed === '1'
+			&& await pauseButton.getAttribute('aria-pressed') === 'false'
+			&& await pauseButton.isEnabled() ? true : null;
+	}, 'normal playback before Jump to', UI_WAIT);
+
+	const momentRows = new Map(controlCases
+		.filter((entry) => entry.issue === 23)
+		.map((row) => [row.moment.target, row]));
+	const momentStates = new Map();
+	const momentSubjectOriginal = (await readState(candidate.name)).element;
+	const jumpOrder = ['20:10', '0:00', '10:00', '20:10'];
+	try {
+		for (const [index, target] of jumpOrder.entries()) {
+			const row = momentRows.get(target);
+			assert(row, `missing declarative 4F row for Jump to ${target}`);
+			await operateControl(row);
+			const settledMoment = await waitForDemoMoment(row.label);
+			await sleep(300);
+			const heldMoment = await readDemoMomentState();
+			assert(heldMoment.speed === '0', `${row.label} resumed after its paused landing`);
+			assert(demoMomentSignature(heldMoment) === settledMoment.signature,
+				`${row.label} engine state changed after its paused landing`);
+			const first = momentStates.get(target);
+			if (first) {
+				assert(settledMoment.signature === first,
+					`${row.label} was not repeatable: ${first} != ${settledMoment.signature}`);
+			} else {
+				momentStates.set(target, settledMoment.signature);
+				pass(nextCase++, `${row.label} — running playback reached a settled paused engine state`);
+			}
+			if (index < jumpOrder.length - 1) {
+				await eventually(async () => await pauseButton.getAttribute('aria-pressed') === 'true'
+					&& await pauseButton.isEnabled() ? true : null,
+				`${row.label} paused readback to reach Resume`, UI_WAIT);
+				await pauseButton.click();
+				await eventually(async () => (await readState()).demo?.cl_demospeed === '1'
+					&& await pauseButton.getAttribute('aria-pressed') === 'false' ? true : null,
+				`${row.label} cleanup to running playback`, UI_WAIT);
+			}
+		}
+		assert(momentStates.size === DEMO_MOMENTS.length,
+			`expected three settled Jump to states, got ${momentStates.size}`);
+
+		// A visible placement edit while the same consumed-packet cursor is frozen
+		// must still cross into the engine and into the user's full config export.
+		await selectForPlacement(candidate.name);
+		const pausedPosition = String((Number(momentSubjectOriginal.pos_x) || 0) + 3);
+		const pausedControl = page.locator(`#f-${candidate.name}-pos_x`);
+		await pausedControl.fill(pausedPosition);
+		await pausedControl.press('Enter');
+		await eventually(async () => await readCvar(`hud_${candidate.name}_pos_x`) === pausedPosition
+			? true : null, `paused ${candidate.name} placement readback`, UI_WAIT);
+		const pausedExport = await readExport();
+		assert(pausedExport.split('\n').includes(`hud_${candidate.name}_pos_x "${pausedPosition}"`),
+			`paused placement omitted hud_${candidate.name}_pos_x "${pausedPosition}" from the export`);
+		assert((await readState()).demo?.cl_demospeed === '0',
+			'the paused placement edit resumed demo playback');
+		pass(nextCase++, 'Scoreboard repeated exactly; paused placement reached engine and full export');
+	} finally {
+		await page.evaluate(({ name, posX }) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) return;
+			channel.cbufadd(`set hud_${name}_pos_x ${posX}\nhud_recalculate\ndemo_setspeed 100\n`);
+		}, { name: candidate.name, posX: momentSubjectOriginal.pos_x }).catch(() => {});
+		await eventually(async () => (await readState()).demo?.cl_demospeed === '1'
+			? true : null, 'demo-moment cleanup to resume playback', UI_WAIT).catch(() => {});
+	}
+
+	// Case 36 resumes through the raw channel in its finally block, and #23's
+	// cleanup does the same. Wait for that engine state to reach the visible
+	// toggle before asking the toggle for its opposite; otherwise a deliberately
+	// stale aria-pressed=true would correctly request another resume rather than
+	// the pause this row expects.
 	await eventually(async () => {
 		const state = await readState();
 		return state.demo?.cl_demospeed === '1'
@@ -1310,6 +1840,148 @@ try {
 			.map(([name, value]) => `${name}=${value}`).join(', ');
 		pass(nextCase++, `${row.label} — ${effect}`);
 	}
+
+	// ---- #87: native-sized empty layouts stay positive ----------------------
+	// Native ezQuake prepares tracking's real text footprint before deciding
+	// whether there is tracking text to draw, and prepares net's fixed footprint
+	// before deciding whether live network samples exist. This lane regression-
+	// covers tracking off-CAM and pins net's normal positive footprint. It cannot
+	// enter capturing=2 in the staged WebAssembly build, so the netstats capture
+	// branch is covered by source parity only, as recorded in fork PR #1.
+	const trackingLayoutBefore = (await readState('tracking')).element;
+	const netLayoutBefore = (await readState('net')).element;
+	assert(trackingLayoutBefore && netLayoutBefore,
+		`tracking/net are absent from engine state: ${JSON.stringify({ trackingLayoutBefore, netLayoutBefore })}`);
+	const nativeLayoutOriginals = {
+		trackingShow: await readCvar('hud_tracking_show'),
+		trackingScale: await readCvar('hud_tracking_scale'),
+		netShow: await readCvar('hud_net_show'),
+	};
+	try {
+		await page.evaluate(() => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) throw new Error('the live FTE command channel is unavailable');
+			channel.cbufadd('autotrack off\ntrack off\n'
+				+ 'set hud_tracking_show 1\nset hud_tracking_place screen\n'
+				+ 'set hud_tracking_align_x left\nset hud_tracking_align_y top\n'
+				+ 'set hud_tracking_pos_x 24\nset hud_tracking_pos_y 24\n'
+				+ 'set hud_tracking_scale 1\n'
+				+ 'set hud_net_show 1\nset hud_net_place screen\n'
+				+ 'set hud_net_align_x left\nset hud_net_align_y top\n'
+				+ 'set hud_net_pos_x 24\nset hud_net_pos_y 48\nhud_recalculate\n');
+		});
+		await eventually(async () => await readCvar('hud_tracking_scale') === '1' ? true : null,
+			'the controlled tracking scale to apply', UI_WAIT);
+		await eventually(async () => {
+			const nativeEmptyLayouts = await readRectContract();
+			const missing = ['tracking', 'net']
+				.filter((name) => !nativeEmptyLayouts[name]
+					|| nativeEmptyLayouts[name].w <= 0 || nativeEmptyLayouts[name].h <= 0)
+				.map((name) => ({ name, rect: nativeEmptyLayouts[name] }));
+			assert(missing.length === 0,
+				`native-sized empty layouts must stay positive: ${JSON.stringify({ missing, nativeEmptyLayouts })}`);
+			assert(nativeEmptyLayouts.tracking.h === 8,
+				`tracking must use its real 8px scaled height, got ${JSON.stringify(nativeEmptyLayouts.tracking)}`);
+			assert(nativeEmptyLayouts.net.w === 128 && nativeEmptyLayouts.net.h === 132,
+				`net must use its real fixed footprint, got ${JSON.stringify(nativeEmptyLayouts.net)}`);
+			assert(nativeEmptyLayouts.nonPositive.length === 0,
+				`#87 elements reported non-positive rects: ${JSON.stringify(nativeEmptyLayouts)}`);
+			return nativeEmptyLayouts;
+		}, 'the #87 tracking/net layouts to publish their next-frame contract', UI_WAIT);
+		pass(nextCase++, 'off-CAM tracking retains its native positive footprint; net capture path is source-parity only');
+	} finally {
+		await page.evaluate(({ tracking, net, originals }) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) return;
+			channel.cbufadd(`set hud_tracking_show ${originals.trackingShow}\n`
+				+ `set hud_tracking_place ${tracking.place}\nset hud_tracking_align_x ${tracking.align_x}\n`
+				+ `set hud_tracking_align_y ${tracking.align_y}\nset hud_tracking_pos_x ${tracking.pos_x}\n`
+				+ `set hud_tracking_pos_y ${tracking.pos_y}\nset hud_tracking_scale ${originals.trackingScale}\n`
+				+ `set hud_net_show ${originals.netShow}\nset hud_net_place ${net.place}\n`
+				+ `set hud_net_align_x ${net.align_x}\nset hud_net_align_y ${net.align_y}\n`
+				+ `set hud_net_pos_x ${net.pos_x}\nset hud_net_pos_y ${net.pos_y}\n`
+				+ 'autotrack\nhud_recalculate\n');
+		}, { tracking: trackingLayoutBefore, net: netLayoutBefore, originals: nativeLayoutOriginals })
+			.catch(() => {});
+	}
+
+	// ---- #87: a truly empty draw path is null, never a zero-area rect -------
+	// Preserve a genuinely laid-out tracker, force the exact disabled branch
+	// that used to call HUD_PrepareDraw(0, 0), and give its right alignment the
+	// owner's positive offset. The old engine then reports x=screen+294,w=h=0.
+	// The fixed engine must report null, as ownfrags already should when empty,
+	// without suppressing the active tracker when the original layout returns.
+	// A child anchored to the tracker must follow the same contract: once its
+	// parent has no layout, it cannot invent placement from the parent's stale rect.
+	const trackerBeforeEmpty = await eventually(async () => {
+		const state = await readState('tracker');
+		return state.element?.rect?.w > 0 && state.element.rect.h > 0 ? state : null;
+	}, 'an active tracker rect before the empty-path contract', UI_WAIT);
+	const trackerLayout = trackerBeforeEmpty.element;
+	const anchoredChildName = 'gun2';
+	const anchoredChildLayout = (await readDrawn())
+		.find((element) => element.name === anchoredChildName);
+	assert(anchoredChildLayout?.name === anchoredChildName && !anchoredChildLayout.parent,
+		`${anchoredChildName} is not independently drawn before the inactive-parent case: `
+		+ JSON.stringify(await readDrawn()));
+	try {
+		await page.evaluate(({ childName }) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) throw new Error('the live FTE command channel is unavailable');
+			channel.cbufadd(`set hud_${childName}_place @tracker\nhud_recalculate\n`);
+		}, { childName: anchoredChildLayout.name });
+		await eventually(async () => {
+			const state = (await readState(anchoredChildLayout.name)).element;
+			return state?.parent === 'tracker' && state.rect ? state : null;
+		}, `${anchoredChildLayout.name} to lay out from its active tracker parent`, UI_WAIT);
+		await page.evaluate(() => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) throw new Error('the live FTE command channel is unavailable');
+			channel.cbufadd('r_tracker 0\nset hud_tracker_place screen\n'
+				+ 'set hud_tracker_align_x right\nset hud_tracker_align_y top\n'
+				+ 'set hud_tracker_pos_x 294\nset hud_tracker_pos_y 161\nhud_recalculate\n');
+		});
+		await eventually(async () => await readCvar('r_tracker') === '0' ? true : null,
+			'the tracker content path to become inactive', UI_WAIT);
+		await eventually(async () => {
+			const inactive = await readRectContract();
+			const anchoredInactive = (await readState(anchoredChildLayout.name)).element;
+			assert(anchoredInactive?.parent === 'tracker' && anchoredInactive.rect === null,
+				`${anchoredChildLayout.name} anchored to inactive tracker must report rect:null, got `
+				+ JSON.stringify(anchoredInactive));
+			assert(inactive.tracker === null,
+				`inactive tracker must report rect:null, got ${JSON.stringify(inactive.tracker)}`);
+			assert(inactive.ownfrags === null,
+				`empty ownfrags must report rect:null, got ${JSON.stringify(inactive.ownfrags)}`);
+			assert(inactive.nonPositive.length === 0,
+				`#87 elements reported non-positive rects: ${JSON.stringify(inactive)}`);
+			return inactive;
+		}, 'the inactive tracker and named child to publish their next-frame contract', UI_WAIT);
+	} finally {
+		await page.evaluate(({ tracker, child }) => {
+			const channel = window.EZHUD_FTE?.engine()?.ftec;
+			if (!channel) return;
+			channel.cbufadd(`r_tracker 1\nset hud_tracker_place ${tracker.place}\n`
+				+ `set hud_tracker_align_x ${tracker.align_x}\nset hud_tracker_align_y ${tracker.align_y}\n`
+				+ `set hud_tracker_pos_x ${tracker.pos_x}\nset hud_tracker_pos_y ${tracker.pos_y}\n`
+				+ `set hud_${child.name}_place ${child.place}\nhud_recalculate\n`);
+		}, { tracker: trackerLayout, child: anchoredChildLayout }).catch(() => {});
+	}
+	const trackerAfterEmpty = await eventually(async () => {
+		const state = await readState('tracker');
+		return state.element?.rect ? state.element.rect : null;
+	}, 'the active tracker rect after the empty-path contract', UI_WAIT);
+	assert(['x', 'y', 'w', 'h'].every((field) =>
+		trackerAfterEmpty[field] === trackerLayout.rect[field]),
+		`the empty-path fix changed an active tracker rect: ${JSON.stringify({
+			before: trackerLayout.rect, after: trackerAfterEmpty,
+		})}`);
+	await eventually(async () => {
+		const state = (await readState(anchoredChildLayout.name)).element;
+		return state?.place === anchoredChildLayout.place && state.rect ? state : null;
+	}, `${anchoredChildLayout.name} to return to its original active layout`, UI_WAIT);
+	pass(nextCase++, 'inactive beyond-screen tracker and empty ownfrags are null; all #87 rects are positive; active tracker unchanged');
+	pass(nextCase++, `${anchoredChildLayout.name} anchored to an inactive tracker is also null; restoring the parent restores both layouts`);
 } catch (err) {
 	failure = err;
 	const file = await shot('tier4-fte-failure');

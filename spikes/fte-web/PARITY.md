@@ -135,6 +135,40 @@ printed positions through `%g` and truncated `"200.288666"` to `"200.289"`
 export rewrote every applied line even when unchanged, churning 481 lines of
 formatting (fixed: unchanged values write the user's own line back).
 
+## Inactive tracker dependencies (#87, measured 2026-08-07)
+
+An element anchored to `tracker` cannot keep a meaningful position after the
+preview decides that tracker had no layout. The #87 fork fix therefore leaves
+both the inactive parent and its dependency unstamped:
+
+| engine/state | tracker rect | anchored child rect |
+|---|---|---|
+| FTE base `9d8aa3815`, `r_tracker 0` | `806,161 0x0` | `gun2`: `806,145 24x16` (placed from the phantom parent) |
+| FTE fix `fcc189e292`, `r_tracker 0` | `null` | `gun2`: `null` |
+| native ezQuake `f35d7f8ac`, `r_tracker 0` | `733,161 201x20` | `health`: `733,161 60x20` |
+
+The FTE result is intentional: `HUD_DrawObject` already suppresses a child
+when a hidden parent did not stamp `last_draw_sequence`; an inactive parent
+now follows that existing dependency rule instead of lending its child stale
+geometry. The live tier-4 FTE lane turns this into an explicit contract and
+restores both layouts after re-enabling the parent.
+
+The same source comparison rejected early returns for `tracking` and `net`.
+Native prepares tracking's real text footprint before its spectator/CAM draw
+check, and prepares net's fixed footprint before its network-data draw check.
+Fork head `fcc189e292` mirrors that structure: non-drawing tracking/net layouts
+remain positive and available to children, rather than becoming either zero
+area or `null`. Case 48 regression-covers tracking and observes net's normal
+positive footprint, but the staged WebAssembly build cannot enter
+`plugnetinfo.capturing=2`; netstats' capture-return branch therefore has
+source-parity evidence only, with no committed fixture claiming otherwise.
+
+Native ezQuake differs in the tracker mode itself. Its New-HUD tracker measures retained
+messages without consulting `r_tracker`; that cvar gates the separate direct
+tracker draw in `VX_TrackerThink`. Consequently both its tracker and child
+remain laid out when `r_tracker` changes from 1 to 0. This is a known semantic
+parity gap, not a reason to revive the preview's zero-area parent rect.
+
 ## Verdict: **go, with caveats**
 
 The core promise of the spike holds: a live demo plays behind the real editor

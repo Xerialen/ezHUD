@@ -23,7 +23,7 @@ repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 workspace=$(cd "$repo_dir/.." && pwd)
 cd "$workspace"
 
-FTEQW_SHA=9d8aa3815c65ac65d1f2950eb4d876da51d5635f
+FTEQW_SHA=41e13638d62779b79e27defe74fe961910a260d3
 EMSDK_VERSION=6.0.5
 QUAKE106_URL=https://ftp.gwdg.de/pub/misc/ftp.idsoftware.com/idstuff/quake/quake106.zip
 NQUAKE_PK3_URL=https://raw.githubusercontent.com/nQuake/distfiles/d93997920e028343eee24377f75b2addff066990/non-gpl/qw/nquake.pk3

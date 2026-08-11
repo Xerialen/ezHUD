@@ -34,6 +34,7 @@ core/geometry.js
 core/log.js
 core/model.js
 core/quake-palette.js
+core/snapping.js
 default.fmf
 favicon.svg
 fte/boot.js

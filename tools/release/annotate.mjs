@@ -1,17 +1,21 @@
 #!/usr/bin/env node
-// Ring changed controls in focused Release 1 captures. The source is embedded
-// as data and never written; Playwright screenshots an exact-size SVG overlay
-// into the separate output declared by annotations.json.
+// Ring changed controls in focused release captures. The source is embedded as
+// data and never written; Playwright screenshots an exact-size SVG overlay into
+// the separate output declared by annotations.json.
 import assert from 'node:assert/strict';
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { resolveReleaseDir } from './paths.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const releaseDir = path.join(repo, 'docs/release-1');
+const releaseDir = resolveReleaseDir(repo);
+const releaseSlug = path.basename(releaseDir);
 const manifest = JSON.parse(await readFile(path.join(releaseDir, 'annotations.json'), 'utf8'));
 const RING_PADDING = 6;
+const BADGE_RADIUS = 8;
+const BADGE_CLEAR_THRESHOLD = 0.02;
 const LIGHT = '#fffaf2';
 const DARK = '#11100f';
 
@@ -25,7 +29,7 @@ function pngDimensions(bytes, label) {
 function releasePath(rel, label) {
 	assert.equal(typeof rel, 'string', `${label} must be a string`);
 	const resolved = path.resolve(releaseDir, rel);
-	assert(resolved.startsWith(`${releaseDir}${path.sep}`), `${label} escapes docs/release-1`);
+	assert(resolved.startsWith(`${releaseDir}${path.sep}`), `${label} escapes docs/${releaseSlug}`);
 	return resolved;
 }
 
@@ -38,20 +42,62 @@ function ringRect(target) {
 	};
 }
 
+function defaultBadgeX(ring) {
+	return ring.x >= 18 ? ring.x - 9 : ring.x + ring.w + 9;
+}
+
 function calloutSvg(callout, accent) {
 	const ring = ringRect(callout.target);
 	const rx = Math.min(9, ring.h / 2);
 	const common = `x="${ring.x}" y="${ring.y}" width="${ring.w}" height="${ring.h}" rx="${rx}" fill="none"`;
-	const badgeX = ring.x >= 18 ? ring.x - 9 : ring.x + ring.w + 9;
+	const badgeX = defaultBadgeX(ring);
 	const badgeY = ring.y + ring.h / 2;
 	// The 5px light stroke under the 3px accent leaves a visible 1px light
 	// hairline on both sides. The only other mark is the optional small badge.
 	return `<g aria-label="Callout ${callout.badge}">\n`
 		+ `<rect ${common} stroke="${LIGHT}" stroke-width="5"/>\n`
 		+ `<rect ${common} stroke="${accent}" stroke-width="3"/>\n`
-		+ `<circle cx="${badgeX}" cy="${badgeY}" r="8" fill="${accent}" stroke="${LIGHT}" stroke-width="1"/>\n`
+		+ `<circle cx="${badgeX}" cy="${badgeY}" r="${BADGE_RADIUS}" fill="${accent}" stroke="${LIGHT}" stroke-width="1"/>\n`
 		+ `<text x="${badgeX}" y="${badgeY + 4}" text-anchor="middle" fill="${DARK}" font-family="monospace" font-size="11" font-weight="800">${callout.badge}</text>\n`
 		+ '</g>';
+}
+
+async function collisionAwareBadgeX(page, callout, label) {
+	const ring = ringRect(callout.target);
+	const candidates = {
+		left: ring.x - BADGE_RADIUS - 1,
+		right: ring.x + ring.w + BADGE_RADIUS + 1,
+	};
+	const badgeY = Math.round(ring.y + ring.h / 2);
+	const occupancy = await page.locator('#source').evaluate((image, { candidates: xs, badgeY: cy, radius }) => {
+		const canvas = document.createElement('canvas');
+		canvas.width = image.naturalWidth;
+		canvas.height = image.naturalHeight;
+		const context = canvas.getContext('2d', { willReadFrequently: true });
+		context.drawImage(image, 0, 0);
+		return Object.fromEntries(Object.entries(xs).map(([side, cx]) => {
+			if (cx - radius < 0 || cy - radius < 0
+				|| cx + radius >= canvas.width || cy + radius >= canvas.height) {
+				return [side, { inBounds: false, litFraction: 1 }];
+			}
+			const pixels = context.getImageData(
+				cx - radius, cy - radius, 2 * radius + 1, 2 * radius + 1,
+			).data;
+			let lit = 0;
+			for (let offset = 0; offset < pixels.length; offset += 4) {
+				if (pixels[offset] > 70 || pixels[offset + 1] > 70 || pixels[offset + 2] > 70) lit += 1;
+			}
+			return [side, { inBounds: true, litFraction: lit / (pixels.length / 4) }];
+		}));
+	}, { candidates, badgeY, radius: BADGE_RADIUS });
+	const preferred = defaultBadgeX(ring) === candidates.left ? 'left' : 'right';
+	const alternate = preferred === 'left' ? 'right' : 'left';
+	if (occupancy[preferred].inBounds && occupancy[preferred].litFraction <= BADGE_CLEAR_THRESHOLD) {
+		return candidates[preferred];
+	}
+	assert(occupancy[alternate].inBounds && occupancy[alternate].litFraction <= BADGE_CLEAR_THRESHOLD,
+		`${label}: neither badge side is clear`);
+	return candidates[alternate];
 }
 
 function documentHtml(asset, sourceBytes, size) {
@@ -97,6 +143,16 @@ try {
 					image.addEventListener('error', reject, { once: true });
 				})));
 		});
+		for (const [index, callout] of asset.callouts.entries()) {
+			const badgeX = await collisionAwareBadgeX(page, callout, `${asset.id}.callouts[${index}]`);
+			const ring = ringRect(callout.target);
+			if (badgeX !== defaultBadgeX(ring)) {
+				await page.locator('svg g').nth(index).evaluate((group, x) => {
+					group.querySelector('circle').setAttribute('cx', x);
+					group.querySelector('text').setAttribute('x', x);
+				}, badgeX);
+			}
+		}
 		await mkdir(path.dirname(outputPath), { recursive: true });
 		await page.locator('#frame').screenshot({ path: outputPath, type: 'png', animations: 'disabled' });
 		await context.close();

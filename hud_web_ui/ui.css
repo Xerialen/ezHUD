@@ -17,6 +17,10 @@
 @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap");
 
 :root {
+	/* Editor chrome scale. This never participates in HUD coordinate maths;
+	   it only grows the browser UI around the engine-owned render. */
+	--ui-scale: 1;
+
 	/* -- raw: id1 palette anchors ------------------------------------------ */
 	--qk-ember-400: #db7f3b;
 	--qk-gold-500: #dfab27;
@@ -78,6 +82,7 @@
 	--danger-wash: rgb(226 69 58 / 0.13);
 	--info: var(--qk-ice-400);
 	--info-wash: rgb(127 191 255 / 0.12);
+	--grid-line: rgb(127 191 255 / 0.18);   /* drag-assist grid over the render */
 
 	/* -- semantic: HUD element taxonomy ------------------------------------
 	   Tree rows are tinted by element family so 83 entries stay scannable.
@@ -95,12 +100,12 @@
 	--font-ui: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
 	--font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-	--fs-micro: 9px;
-	--fs-caption: 10.5px;
-	--fs-small: 11.5px;
-	--fs-base: 12.5px;
-	--fs-ui: 13px;
-	--fs-lead: 15px;
+	--fs-micro: calc(9px * var(--ui-scale));
+	--fs-caption: calc(10.5px * var(--ui-scale));
+	--fs-small: calc(11.5px * var(--ui-scale));
+	--fs-base: calc(12.5px * var(--ui-scale));
+	--fs-ui: calc(13px * var(--ui-scale));
+	--fs-lead: calc(15px * var(--ui-scale));
 
 	--ls-eyebrow: 0.14em;
 	--ls-caps: 0.07em;
@@ -131,11 +136,13 @@
 	--dur-fast: 110ms;
 	--dur-slow: 200ms;
 
-	/* Layout constants of the editor shell. */
-	--bar-h: 46px;
-	--rail-w: 252px;
-	--inspect-w: 300px;
-	--statusbar-h: 24px;
+	/* Layout constants of the editor shell. The viewport caps keep 125/150%
+	   useful on a smaller high-DPI monitor instead of letting both rails eat
+	   the live stage. At 1440px and above the requested preset is exact. */
+	--bar-h: calc(46px * var(--ui-scale));
+	--rail-w: clamp(220px, calc(252px * var(--ui-scale)), 28vw);
+	--inspect-w: clamp(260px, calc(300px * var(--ui-scale)), 32vw);
+	--statusbar-h: calc(24px * var(--ui-scale));
 
 	/* Textures: a soot checker behind the render, 1px scanlines that hint CRT
 	   without ever touching the game pixels. */
@@ -221,6 +228,23 @@ body {
 
 .bar__spacer { flex: 1; }
 
+/* Deliberately named Editor size rather than Scale: the adjacent readout is the
+   HUD's console-pixel scale, while this control changes only browser chrome. */
+.ui-scale {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--text-faint);
+	font: var(--type-meta);
+	white-space: nowrap;
+}
+
+.ui-scale select {
+	flex: 0 0 auto;
+	width: calc(70px * var(--ui-scale));
+	padding-block: calc(5px * var(--ui-scale));
+}
+
 /* One real model, not three numbers: what a console pixel is worth on screen.
    Expands to per-axis form only when the factors differ — then the layout is
    stretched and the user has to notice. */
@@ -295,7 +319,10 @@ body {
 	flex: 1;
 	min-height: 0;
 	display: grid;
-	grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--inspect-w);
+	/* A monitor move can reduce the CSS-pixel viewport when DPR increases. The
+	   stage keeps a real editing surface rather than collapsing to a zero-width
+	   grid item; the capped rails above absorb the reduction first. */
+	grid-template-columns: var(--rail-w) minmax(280px, 1fr) var(--inspect-w);
 }
 
 .panel {
@@ -517,6 +544,82 @@ button:focus-visible,
 	/* Elements can extend past the canvas (gameclock is x=304 w=112 on a 320
 	   canvas). Clip so the overlay never paints over the panels beside it. */
 	overflow: hidden;
+}
+
+/* The selected element's engine-reported parent relationship. It sits below
+   element boxes and uses their projected rect centres; no placement arithmetic
+   is invented here. */
+.anchor-link {
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	pointer-events: none;
+	overflow: visible;
+}
+
+.anchor-link line {
+	stroke: var(--accent);
+	stroke-width: 1.5;
+	stroke-dasharray: 5 4;
+	vector-effect: non-scaling-stroke;
+	opacity: 0.9;
+}
+
+.anchor-link circle {
+	fill: var(--bg-stage);
+	stroke: var(--accent);
+	stroke-width: 2;
+	vector-effect: non-scaling-stroke;
+}
+
+/* The grid a drag snaps to. It sits under everything else on the stage: it is
+   the ruler the picture is judged against, not something to read in its own
+   right, so it never competes with an element edge or a magnet guide. */
+.snap-grid {
+	position: absolute;
+	z-index: 0;
+	pointer-events: none;
+	background: var(--grid-line);
+}
+
+.snap-grid--x { top: 0; bottom: 0; width: 1px; }
+.snap-grid--y { left: 0; right: 0; height: 1px; }
+
+.snap-guide {
+	position: absolute;
+	z-index: 4;
+	pointer-events: none;
+	background: var(--qk-ice-400);
+	box-shadow: 0 0 4px rgb(127 191 255 / 0.7);
+}
+
+.snap-guide--x { top: 0; bottom: 0; width: 1px; }
+.snap-guide--y { left: 0; right: 0; height: 1px; }
+
+/* A compact reminder in the live surface, visible only while Grid or Magnet
+   can affect the active drag. Keeping it in the corner rather than beside the
+   pointer leaves the HUD pixels and snap target unobstructed. */
+.drag-assist__live {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	z-index: 5;
+	margin: 0;
+	padding: 5px 8px;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-sm);
+	background: rgb(10 11 12 / 0.88);
+	box-shadow: var(--shadow-md);
+	color: var(--text-strong);
+	font: var(--type-label);
+	line-height: 1.2;
+	pointer-events: none;
+	user-select: none;
+}
+
+.drag-assist__live[data-bypass="true"] {
+	border-color: var(--live);
+	color: var(--live);
 }
 
 .box {
@@ -825,6 +928,38 @@ button:focus-visible,
 	cursor: help;
 }
 .field[data-inert="true"] input { opacity: 0.62; }
+
+.drag-assist { border-bottom: 1px solid var(--line); }
+.drag-assist .group { padding-block: 8px; }
+.drag-assist__row {
+	display: grid;
+	grid-template-columns: auto minmax(78px, 1fr) auto;
+	align-items: center;
+	gap: 8px;
+}
+.drag-assist__step {
+	display: grid;
+	grid-template-columns: auto minmax(42px, 1fr);
+	align-items: center;
+	gap: 6px;
+	color: var(--text-dim);
+	font: var(--type-label);
+}
+.drag-assist__step input { padding: 4px 6px; }
+.drag-assist .font-state { margin-block: 7px 0; }
+
+.placement-workflow {
+	border-left: 2px solid var(--accent-deep);
+	background: var(--accent-wash-soft);
+}
+
+.placement-workflow__hint {
+	margin-bottom: 0;
+}
+
+.placement-workflow .notice {
+	margin: 9px 0 0;
+}
 
 #fonts { border-bottom: 1px solid var(--line); }
 #fonts .field { grid-template-columns: 92px minmax(0, 1fr); }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Deterministically capture focused Release 1 evidence sources from an
-// assembled FTE-web dist. Cropping is declared in captures.json and performed
-// by Playwright's screenshot clip; no committed source is hand-cropped.
+// Deterministically capture focused release evidence sources from an assembled
+// FTE-web dist. Cropping is declared in captures.json and performed by
+// Playwright's screenshot clip; no committed source is hand-cropped.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -10,10 +10,12 @@ import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { resolveReleaseDir } from './paths.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const workspace = path.dirname(repo);
-const releaseDir = path.join(repo, 'docs/release-1');
+const releaseDir = resolveReleaseDir(repo);
+const releaseSlug = path.basename(releaseDir);
 const dist = path.resolve(process.env.DIST_DIR ?? path.join(workspace, 'dist'));
 const basePath = process.env.BASE_PATH ?? '/ezHUD/';
 const manifest = JSON.parse(await readFile(path.join(releaseDir, 'captures.json'), 'utf8'));
@@ -40,7 +42,7 @@ const mime = new Map([
 function releasePath(rel, label) {
 	assert.equal(typeof rel, 'string', `${label} must be a string`);
 	const resolved = path.resolve(releaseDir, rel);
-	assert(resolved.startsWith(`${releaseDir}${path.sep}`), `${label} escapes docs/release-1`);
+	assert(resolved.startsWith(`${releaseDir}${path.sep}`), `${label} escapes docs/${releaseSlug}`);
 	return resolved;
 }
 
@@ -153,6 +155,15 @@ async function driveState(page, state) {
 		const button = document.querySelector('#fte-pause');
 		return button && !button.disabled;
 	}, null, { timeout: 120_000 });
+	if (state?.uiScale !== undefined) {
+		assert(['1', '1.25', '1.5'].includes(String(state.uiScale)),
+			'uiScale must be one of 1, 1.25, or 1.5');
+		await page.locator('#ui-scale').selectOption(String(state.uiScale));
+		await page.waitForFunction((scale) =>
+			document.documentElement.dataset.uiScale === scale
+			&& getComputedStyle(document.documentElement).getPropertyValue('--ui-scale').trim() === scale,
+		String(state.uiScale));
+	}
 	if (state?.demoTimeSeconds !== undefined) {
 		assert.equal(state.demo, 'paused', 'demoTimeSeconds requires a paused demo');
 		assert(Number.isInteger(state.demoTimeSeconds) && state.demoTimeSeconds > 0,
@@ -208,6 +219,12 @@ async function driveState(page, state) {
 			return !button?.disabled && button?.getAttribute('aria-pressed') === String(paused);
 		}, wantPaused, { timeout: 30_000 });
 	}
+	if (state?.selectElement !== undefined) {
+		assert.equal(typeof state.selectElement, 'string', 'selectElement must be a string');
+		assert.match(state.selectElement, /^[a-z0-9_]+$/, 'selectElement contains unsafe characters');
+		await page.locator(`.tree__row[data-name="${state.selectElement}"]`).click();
+		await page.waitForSelector(`#f-${state.selectElement}-place`);
+	}
 	return waitForStableReadout(page);
 }
 
@@ -261,6 +278,9 @@ try {
 		}
 		if (capture.state?.demoTimeSeconds !== undefined) await freezeEngineFrame(page);
 		await page.evaluate(() => document.fonts.ready);
+		if (capture.state?.scrollFocus) {
+			await page.locator(capture.focusSelector).scrollIntoViewIfNeeded();
+		}
 		const focus = await page.locator(capture.focusSelector).boundingBox();
 		assert(focus, `${capture.id}.focusSelector has no box`);
 		assert(focus.x >= capture.clip.x && focus.y >= capture.clip.y
@@ -288,6 +308,12 @@ try {
 			w: Math.round(focus.width * capture.deviceScaleFactor),
 			h: Math.round(focus.height * capture.deviceScaleFactor),
 		};
+		if (capture.expectedTarget !== undefined) {
+			assert.deepEqual(Object.keys(capture.expectedTarget).sort(), ['h', 'w', 'x', 'y'],
+				`${capture.id}.expectedTarget may contain only x, y, w, and h`);
+			assert.deepEqual(target, capture.expectedTarget,
+				`${capture.id}: live focus selector differs from its declared annotation target`);
+		}
 		const stateReceipt = physical ? ` readout=${JSON.stringify(readout)} physical=${JSON.stringify(physical)}` : '';
 		console.log(`capture: ${capture.output} (${size.width}x${size.height}) focus=${JSON.stringify(target)}${stateReceipt}`);
 		await context.close();

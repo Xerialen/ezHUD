@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "changedrop-review-payload/1",
+  "title": "ezHUD changedrop prepared owner-review payload v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release",
+    "destination",
+    "message",
+    "attachments",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {"const": "changedrop-review-payload/1"},
+    "release": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "channel_id", "purpose", "state", "posted"],
+      "properties": {
+        "kind": {"const": "discord-channel"},
+        "channel_id": {"const": "1534452186266734683"},
+        "purpose": {"const": "owner-review"},
+        "state": {"const": "prepared"},
+        "posted": {"const": false}
+      }
+    },
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["content", "allowed_mentions", "suppress_embeds"],
+      "properties": {
+        "content": {"type": "string", "minLength": 1, "maxLength": 1900},
+        "allowed_mentions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["parse"],
+          "properties": {
+            "parse": {"type": "array", "maxItems": 0}
+          }
+        },
+        "suppress_embeds": {"const": true}
+      }
+    },
+    "attachments": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "oneOf": [
+          {"$ref": "#/$defs/video_attachment"},
+          {"$ref": "#/$defs/image_attachment"}
+        ]
+      },
+      "contains": {"$ref": "#/$defs/video_attachment"},
+      "minContains": 1,
+      "maxContains": 1
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest_sha256", "capture_sha256", "narration"],
+      "properties": {
+        "manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "capture_sha256": {"$ref": "#/$defs/sha256"},
+        "narration": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "sha256", "duration_seconds"],
+            "properties": {
+              "id": {"$ref": "#/$defs/kebab"},
+              "sha256": {"$ref": "#/$defs/sha256"},
+              "duration_seconds": {"type": "number", "exclusiveMinimum": 0}
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "kebab": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "video_attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "sha256", "bytes", "duration_seconds"],
+      "properties": {
+        "name": {"const": "changedrop.mp4"},
+        "kind": {"const": "video"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "bytes": {"type": "integer", "minimum": 1},
+        "duration_seconds": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "image_attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "surface", "sha256", "bytes"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*-[1-9][0-9]*\\.png$"
+        },
+        "kind": {"const": "image"},
+        "surface": {"$ref": "#/$defs/kebab"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "bytes": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

@@ -9,23 +9,93 @@ import {
 	needsRecalculate, parseColor, resizeTo, resizedRect,
 } from '../core/model.js';
 import {
-	consoleToFrame, displayDeltaToConsole, elementAt, quantize, scaleFactors,
+	alignmentBase, consoleToFrame, displayDeltaToConsole, elementAt, normaliseElementName,
+	quantize, scaleFactors,
 } from '../core/geometry.js';
+import {
+	gridLines, magnetizeRect, screenMagnetTarget, snapToGrid,
+} from '../core/snapping.js';
 import * as syslog from '../core/log.js';
 import { initDebugPanel } from './debug.js';
 
 const $ = (id) => document.getElementById(id);
 const el = {
-	readout: $('readout'), status: $('status'), chrome: $('chrome'),
+	readout: $('readout'), status: $('status'), chrome: $('chrome'), uiScale: $('ui-scale'),
 	sbCursor: $('sb-cursor'), sbDrawn: $('sb-drawn'), sbEngine: $('engine'),
 	sbFont: $('sb-font'), sbFrame: $('sb-frame'),
 	filter: $('filter'), showHidden: $('show-hidden'), showSpectator: $('show-spectator'), tree: $('tree'), treeCount: $('tree-count'),
-	stage: $('stage'), frame: $('frame'), overlay: $('overlay'), empty: $('empty'),
+	stage: $('stage'), frame: $('frame'), overlay: $('overlay'), dragAssistLive: $('drag-assist-live'), empty: $('empty'),
 	emptyTitle: $('empty-title'), emptyBody: $('empty-body'),
 	inspector: $('inspector'), fontPanel: $('fonts'), groupPanel: $('groups'),
 	saveOpen: $('save-open'), saveDialog: $('save-dialog'),
 	modePanel: $('hudmodes'), killfeedPanel: $('killfeed'), resetDialog: $('reset-dialog'),
+	snapGrid: $('snap-grid'), snapStep: $('snap-step'), snapMagnet: $('snap-magnet'),
 };
+
+// step 32 by default (owner, 2026-08-09): a HUD is laid out in a handful of
+// coarse positions, so the useful default is one you can see and aim at rather
+// than the finest one the engine allows. The markup's value attribute is the
+// same number -- they are read independently, so they have to agree.
+const dragAssist = { grid: false, step: 32, magnet: false, thresholdCss: 8 };
+
+// Editor chrome scale is browser-local preference, not HUD state. Keeping the
+// accepted values closed avoids a corrupted localStorage entry producing an
+// unusable shell, and never creates a cvar/export path that could be confused
+// with the engine's console-pixel scale model.
+const UI_SCALE_KEY = 'ezhud.ui.scale';
+const UI_SCALES = new Set(['1', '1.25', '1.5']);
+
+function storedUiScale() {
+	try {
+		const value = localStorage.getItem(UI_SCALE_KEY);
+		return UI_SCALES.has(value) ? value : '1';
+	} catch {
+		return '1';
+	}
+}
+
+function wakeEngineResize() {
+	// FTE's wasm host listens for window resize; changing a CSS variable does not
+	// emit one. Wake that existing path rather than duplicating its backing-store
+	// or state.screen arithmetic in the editor.
+	requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+}
+
+function applyUiScale(value, { persist = false, wake = false } = {}) {
+	const accepted = UI_SCALES.has(String(value)) ? String(value) : '1';
+	document.documentElement.style.setProperty('--ui-scale', accepted);
+	document.documentElement.dataset.uiScale = accepted;
+	el.uiScale.value = accepted;
+	if (persist) {
+		try {
+			localStorage.setItem(UI_SCALE_KEY, accepted);
+		} catch { /* private mode: the in-session choice still works */ }
+	}
+	if (wake) {
+		wakeEngineResize();
+	}
+}
+
+applyUiScale(storedUiScale());
+
+// Browsers normally emit resize when a window crosses monitors, but the DPR
+// media query is the reliable signal when the CSS-pixel viewport happens to be
+// unchanged. Re-arm at the new ratio, then wake the engine's existing resize
+// glue so its canvas and exported state follow the monitor.
+let dprQuery = null;
+function onDevicePixelRatioChange() {
+	watchDevicePixelRatio();
+	wakeEngineResize();
+}
+function watchDevicePixelRatio() {
+	if (!window.matchMedia) {
+		return;
+	}
+	dprQuery?.removeEventListener('change', onDevicePixelRatioChange);
+	dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+	dprQuery.addEventListener('change', onDevicePixelRatioChange, { once: true });
+}
+watchDevicePixelRatio();
 
 const bridge = Bridge.fromLocation(location.search);
 const model = new Model();
@@ -160,6 +230,16 @@ async function applyAll(changes) {
 }
 
 const apply = (cvar, value) => applyAll([[cvar, value]]);
+
+function applyPlacement(item, value) {
+	const reason = model.placementRefusal(item.name, value);
+	if (reason) {
+		model.set({ placementError: { element: item.name, reason } });
+		return;
+	}
+	model.placementError = null;
+	return apply(`hud_${item.name}_place`, value);
+}
 
 function currentCvar(cvar) {
 	for (const element of model.elements) {
@@ -426,6 +506,27 @@ function renderTree() {
 		}
 
 		row.dataset.name = item.name;
+
+		// Every tree row carries a data-changedrop attribute for the filming
+		// pipeline. The value is a kebab-case name prefixed with
+		// "hud-element-", validated against the DSL's
+		// [a-z0-9]+(?:-[a-z0-9]+)* pattern. Runs of non-alphanumeric
+		// characters are collapsed to a single hyphen and leading/trailing
+		// hyphens are trimmed. A name whose normalised value still fails the
+		// pattern is skipped with a console.warn rather than throwing — the
+		// invariant is enforced at test time; an editor must never break on
+		// an unanticipated engine name.
+		const { fragment, valid } = normaliseElementName(item.name);
+		if (!valid) {
+			console.warn(
+				`Element name "${item.name}" normalises to "${fragment}" ` +
+				`which does not match [a-z0-9]+(?:-[a-z0-9]+)* — ` +
+				`skipping data-changedrop`,
+			);
+		} else {
+			row.dataset.changedrop = `hud-element-${fragment}`;
+		}
+
 		const meta = document.createElement('span');
 		meta.className = 'tree__meta';
 		// Say what the engine knows: a drawn element has a real position, an
@@ -503,10 +604,22 @@ function renderOverlay() {
 	}
 	const displayScale = shown / natural;
 
+	// Before the boxes, so element edges stay readable against it.
+	renderGrid();
+
+	const selected = model.selectedElement;
+	if (selected?.parent && selected.rect) {
+		const parent = model.element(selected.parent);
+		if (parent?.rect) {
+			el.overlay.append(anchorLink(selected, parent, s, p, displayScale));
+		}
+	}
+
 	for (const item of model.placedElements) {
 		const r = consoleToFrame(item.rect, s, p);
 		const box = document.createElement('div');
 		box.className = 'box';
+		box.dataset.name = item.name;
 		box.dataset.selected = String(item.name === model.selected);
 		// Selecting a container should show what moves with it.
 		box.dataset.child = String(item.parent != null && item.parent === model.selected);
@@ -534,6 +647,41 @@ function renderOverlay() {
 		}
 		el.overlay.append(box);
 	}
+}
+
+function anchorLink(child, parent, screen, physical, displayScale) {
+	const childRect = consoleToFrame(child.rect, screen, physical);
+	const parentRect = consoleToFrame(parent.rect, screen, physical);
+	const point = (rect) => ({
+		x: (rect.x + rect.w / 2) * displayScale,
+		y: (rect.y + rect.h / 2) * displayScale,
+	});
+	const from = point(childRect);
+	const to = point(parentRect);
+	const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+	svg.classList.add('anchor-link');
+	svg.dataset.child = child.name;
+	svg.dataset.anchor = parent.name;
+	svg.setAttribute('width', String(el.frame.clientWidth));
+	svg.setAttribute('height', String(el.frame.clientHeight));
+	svg.setAttribute('aria-hidden', 'true');
+	const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+	title.textContent = `${child.name} is anchored to ${parent.name}`;
+	const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+	line.setAttribute('x1', String(from.x));
+	line.setAttribute('y1', String(from.y));
+	line.setAttribute('x2', String(to.x));
+	line.setAttribute('y2', String(to.y));
+	const childDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+	childDot.setAttribute('cx', String(from.x));
+	childDot.setAttribute('cy', String(from.y));
+	childDot.setAttribute('r', '3');
+	const parentDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+	parentDot.setAttribute('cx', String(to.x));
+	parentDot.setAttribute('cy', String(to.y));
+	parentDot.setAttribute('r', '4');
+	svg.append(title, line, childDot, parentDot);
+	return svg;
 }
 
 // Corners that can move get a grab handle; corners the engine has pinned get an
@@ -704,6 +852,118 @@ function beginGesture() {
 	};
 }
 
+function descendantNames(name, out = new Set()) {
+	for (const child of model.childrenOf(name)) {
+		if (out.has(child.name)) continue;
+		out.add(child.name);
+		descendantNames(child.name, out);
+	}
+	return out;
+}
+
+function clearSnapGuides() {
+	el.overlay.querySelectorAll('.snap-guide').forEach((guide) => guide.remove());
+}
+
+function updateDragAssistHint(bypass) {
+	if (!dragAssist.grid && !dragAssist.magnet) {
+		el.dragAssistLive.hidden = true;
+		return;
+	}
+	el.dragAssistLive.hidden = false;
+	el.dragAssistLive.dataset.bypass = String(bypass);
+	el.dragAssistLive.textContent = bypass
+		? 'Free move · Shift held'
+		: 'Hold Shift for free move';
+}
+
+function clearDragAssistHint() {
+	el.dragAssistLive.hidden = true;
+	el.dragAssistLive.removeAttribute('data-bypass');
+	el.dragAssistLive.textContent = '';
+}
+
+// The closest the grid may be drawn, in displayed CSS pixels. Chosen by looking
+// at candidate spacings composited over a real recorded frame (412x231 console
+// on an 830px stage, warm brown Quake geometry, not the near-black test fake):
+// at 16 it reads as a grid, at 10 as a veil, at 6 it visibly dims the picture.
+// A step under this is coarsened to a multiple of itself, never blanked.
+const GRID_MIN_CSS = 12;
+
+function clearGrid() {
+	el.overlay.querySelectorAll('.snap-grid').forEach((line) => line.remove());
+}
+
+
+// Draw the grid a drag would snap to. Called from renderOverlay (which wipes the
+// overlay) and directly from the Grid and Step controls, because toggling them
+// changes nothing the overlay's staleness check looks at.
+function renderGrid() {
+	clearGrid();
+	if (!dragAssist.grid || !model.frameReady) {
+		return;
+	}
+	const s = model.screen;
+	const p = model.physical;
+	const natural = el.frame.naturalWidth;
+	const shown = el.frame.clientWidth;
+	if (!s || !p || !p[0] || !p[1] || !natural || !shown) {
+		return;
+	}
+	const displayScale = shown / natural;
+	// The floor is a display measurement, and the step is in console units. Send
+	// it through the transform the drag itself uses rather than comparing the two
+	// directly: at any UI scale but 1 they are different quantities.
+	const floor = displayDeltaToConsole(GRID_MIN_CSS, GRID_MIN_CSS, s, p, shown);
+	// One fixed lattice on the screen, the same for every element. That is what
+	// makes it something you can snap things INTO: two elements dragged onto the
+	// same line end up aligned with each other. A per-element lattice would be
+	// truthful about one element at a time and useless for lining up two.
+	const lines = gridLines(
+		dragAssist.step,
+		{ w: s.vid_width, h: s.vid_height },
+		{ x: Math.abs(floor.dx), y: Math.abs(floor.dy) },
+	);
+	const fragment = document.createDocumentFragment();
+	for (const axis of ['x', 'y']) {
+		for (const value of lines[axis]) {
+			const projected = consoleToFrame(
+				{ x: axis === 'x' ? value : 0, y: axis === 'y' ? value : 0, w: 0, h: 0 },
+				s, p,
+			);
+			const node = document.createElement('div');
+			node.className = `snap-grid snap-grid--${axis}`;
+			if (axis === 'x') {
+				node.style.left = `${projected.x * displayScale}px`;
+			} else {
+				node.style.top = `${projected.y * displayScale}px`;
+			}
+			fragment.append(node);
+		}
+	}
+	el.overlay.prepend(fragment);
+}
+
+function renderSnapGuides(guides) {
+	clearSnapGuides();
+	const displayScale = el.frame.clientWidth / (el.frame.naturalWidth || 1);
+	for (const guide of guides) {
+		const projected = consoleToFrame(
+			{ x: guide.axis === 'x' ? guide.value : 0, y: guide.axis === 'y' ? guide.value : 0, w: 0, h: 0 },
+			model.screen, model.physical,
+		);
+		const node = document.createElement('div');
+		node.className = `snap-guide snap-guide--${guide.axis}`;
+		node.dataset.target = guide.target;
+		if (guide.axis === 'x') {
+			node.style.left = `${projected.x * displayScale}px`;
+		} else {
+			node.style.top = `${projected.y * displayScale}px`;
+		}
+		el.overlay.append(node);
+	}
+}
+
 function beginDrag(ev, item) {
 	ev.preventDefault();
 
@@ -713,12 +973,25 @@ function beginDrag(ev, item) {
 	const originX = Number(item.pos_x) || 0;
 	const originY = Number(item.pos_y) || 0;
 	const rect = { ...item.rect };
+	// Where the engine's alignment puts this element before its offset, in whole
+	// console pixels. Fixed for the gesture: the anchor cannot move under a drag.
+	const baseX = alignmentBase(rect.x, item.pos_x);
+	const baseY = alignmentBase(rect.y, item.pos_y);
+	const excluded = descendantNames(item.name, new Set([item.name]));
+	const magnetTargets = model.placedElements
+		.filter((target) => !excluded.has(target.name))
+		.map((target) => ({ name: target.name, rect: { ...target.rect } }));
+	// One rectangle exposes all four screen edges and both centre lines through
+	// the same start/centre/end matching and guide path as normal elements.
+	const screenTarget = screenMagnetTarget(model.screen);
+	if (screenTarget) magnetTargets.push(screenTarget);
 	// Claim the overlay before changing the selection. Selecting re-renders, and a
 	// re-render calls replaceChildren() -- which would leave every placeBox()
 	// below writing to a node that is no longer in the document, so the drag would
 	// look frozen until release. Style the live node instead; the full render with
 	// handles arrives when the gesture ends.
 	const gesture = beginGesture();
+	updateDragAssistHint(ev.shiftKey);
 	model.set({ selected: item.name });
 	for (const other of el.overlay.querySelectorAll('.box[data-selected="true"]')) {
 		other.dataset.selected = 'false';
@@ -728,15 +1001,49 @@ function beginDrag(ev, item) {
 	let last = null;
 
 	const move = (e) => {
+		updateDragAssistHint(e.shiftKey);
 		const { dx, dy } = displayDeltaToConsole(
 			e.clientX - startX, e.clientY - startY,
 			model.screen, model.physical, el.frame.clientWidth,
 		);
 		// Quantize to what the engine will actually store, so the preview never
-		// promises sub-pixel precision the engine discards.
-		const nx = quantize(originX + dx);
-		const ny = quantize(originY + dy);
-		placeBox(box, { ...rect, x: rect.x + (nx - originX), y: rect.y + (ny - originY) });
+		// promises sub-pixel precision the engine discards. Magnet then makes the
+		// resulting engine rect meet another rect exactly.
+		const bypass = e.shiftKey;
+		let nx = quantize(originX + dx);
+		let ny = quantize(originY + dy);
+		if (!bypass && dragAssist.grid) {
+			// Snap the element's POSITION onto the screen lattice, then solve back
+			// for the offset that puts it there. Snapping the offset instead gives
+			// every element its own lattice, offset by wherever its anchor sits, so
+			// two elements on the same grid setting never line up with each other --
+			// which is the one thing a grid is for. The base is whole, so the offset
+			// this produces is whole too and the engine stores it exactly.
+			nx = snapToGrid(baseX + nx, dragAssist.step) - baseX;
+			ny = snapToGrid(baseY + ny, dragAssist.step) - baseY;
+		}
+		// Where the engine will put it: base plus a whole offset. Computing this as
+		// `rect + (nx - originX)` instead carried frac(pos_x) into the preview --
+		// rect is the engine's already-truncated int while originX is the raw float
+		// cvar -- so the box hovered up to a pixel short of the line it had snapped
+		// to for the whole gesture and jumped onto it on release. The magnet reads
+		// this rect too, so its guide missed by the same fraction.
+		let nextRect = { ...rect, x: baseX + nx, y: baseY + ny };
+		let guides = [];
+		if (!bypass && dragAssist.magnet) {
+			const threshold = displayDeltaToConsole(
+				dragAssist.thresholdCss, dragAssist.thresholdCss,
+				model.screen, model.physical, el.frame.clientWidth,
+			);
+			const magnetized = magnetizeRect(nextRect, magnetTargets,
+				{ x: Math.abs(threshold.dx), y: Math.abs(threshold.dy) });
+			nx = quantize(nx + magnetized.delta.x);
+			ny = quantize(ny + magnetized.delta.y);
+			nextRect = { ...rect, x: baseX + nx, y: baseY + ny };
+			guides = magnetized.guides;
+		}
+		renderSnapGuides(guides);
+		placeBox(box, nextRect);
 
 		const key = `${nx},${ny}`;
 		if (key === last) {
@@ -752,6 +1059,8 @@ function beginDrag(ev, item) {
 	const up = () => {
 		window.removeEventListener('pointermove', move);
 		window.removeEventListener('pointerup', up);
+		clearSnapGuides();
+		clearDragAssistHint();
 		gesture.end();
 	};
 	window.addEventListener('pointermove', move);
@@ -770,7 +1079,8 @@ function renderInspector() {
 	// The inspector is full of inputs the user is mid-edit in. Rebuilding it on a
 	// frame tick loses focus and caret position for no benefit.
 	if (!stale('inspector', model.elementFingerprint(model.selected), '|', model.selected,
-		'|', model.status, '|', model.palette.length, '|', [...pending].join(','))) {
+		'|', model.status, '|', model.palette.length, '|', [...pending].join(','),
+		'|', model.placementError?.element ?? '', '|', model.placementError?.reason ?? '')) {
 		return;
 	}
 	const item = model.selectedElement;
@@ -823,7 +1133,35 @@ function renderInspector() {
 	const direction = model.directionControl(item);
 	const { placement, rest } = Model.partitionCvars(item, [direction?.param]);
 	if (placement.length) {
-		el.inspector.append(group('Placement', placement, item));
+		const primary = placement.filter((entry) =>
+			['place', 'align_x', 'align_y', 'order'].includes(entry.suffix));
+		const offsets = placement.filter((entry) => ['pos_x', 'pos_y'].includes(entry.suffix));
+		const advanced = placement.filter((entry) => entry.suffix === 'frame');
+		const workflow = group('Anchor & alignment', primary, item, {
+			className: 'placement-workflow',
+			labels: { place: 'Anchor', align_x: 'Horizontal', align_y: 'Vertical', order: 'Order' },
+		});
+		const explanation = document.createElement('p');
+		explanation.className = 'font-state placement-workflow__hint';
+		explanation.textContent = item.parent
+			? `Anchored to ${item.parent}. Dragging or editing below changes the fine-tune offset; moving ${item.parent} moves this element too.`
+			: 'Anchored to an engine screen region. Pick another element to make this relationship follow it.';
+		workflow.append(explanation);
+		if (model.placementError?.element === item.name) {
+			workflow.append(notice('Anchor refused', model.placementError.reason));
+		}
+		el.inspector.append(workflow);
+		if (offsets.length) {
+			el.inspector.append(group(item.parent ? 'Fine-tune offsets' : 'Raw coordinates', offsets, item, {
+				className: 'placement-offsets',
+				labels: item.parent
+					? { pos_x: 'Horizontal', pos_y: 'Vertical' }
+					: { pos_x: 'X coordinate', pos_y: 'Y coordinate' },
+			}));
+		}
+		if (advanced.length) {
+			el.inspector.append(group('Anchor frame', advanced, item));
+		}
 	}
 	if (direction) {
 		el.inspector.append(directionGroup(direction, item));
@@ -896,9 +1234,9 @@ function metrics(item) {
 	return dl;
 }
 
-function group(title, entries, item) {
+function group(title, entries, item, { className = '', labels = {} } = {}) {
 	const section = document.createElement('section');
-	section.className = 'group';
+	section.className = `group${className ? ` ${className}` : ''}`;
 	const h = document.createElement('h3');
 	h.className = 'group__title';
 	h.textContent = title;
@@ -910,7 +1248,7 @@ function group(title, entries, item) {
 		const id = `f-${item.name}-${entry.suffix}`;
 		const label = document.createElement('label');
 		label.htmlFor = id;
-		label.textContent = entry.suffix;
+		label.textContent = labels[entry.suffix] ?? entry.suffix;
 		label.title = entry.name;
 
 		let input;
@@ -928,10 +1266,14 @@ function group(title, entries, item) {
 			input.value = current;
 		} else if (entry.suffix === 'place') {
 			// Assigning an element to a group IS setting this cvar, so it must be a
-			// choice from what exists rather than a remembered string.
+			// choice from what exists rather than a remembered string. Cycle-forming
+			// values remain visible but disabled with their reason.
 			input = document.createElement('select');
 			for (const opt of model.placeOptions(item.name)) {
-				input.append(new Option(opt.label, opt.value));
+				const option = new Option(opt.label, opt.value);
+				option.disabled = opt.disabled;
+				if (opt.reason) option.title = opt.reason;
+				input.append(option);
 			}
 			const current = pending.get(entry.name) ?? entry.value;
 			if (![...input.options].some((o) => o.value === current)) {
@@ -957,7 +1299,9 @@ function group(title, entries, item) {
 			label.title = `${entry.name} — ${inert}`;
 			input.title = inert;
 		}
-		input.addEventListener('change', () => apply(entry.name, input.value.trim()));
+		input.addEventListener('change', () => entry.suffix === 'place'
+			? applyPlacement(item, input.value.trim())
+			: apply(entry.name, input.value.trim()));
 		input.addEventListener('keydown', (ev) => {
 			if (ev.key === 'Enter') { input.blur(); }
 		});
@@ -1495,14 +1839,15 @@ function acceptDrop(node, place, verb) {
 		delete node.dataset.over;
 		delete el.groupPanel.dataset.dropping;
 		const name = ev.dataTransfer.getData('text/plain');
-		// An element placed on itself is rejected by HUD_FindPlace (`par != hud`)
-		// and silently falls back to the screen, so refuse it here where we can say
-		// nothing happened rather than let it look like a move that did nothing.
-		if (!name || place === name || place === `@${name}`) {
+		if (!name) {
 			return;
 		}
-		model.set({ selected: name });
-		apply(`hud_${name}_place`, place);
+		const item = model.element(name);
+		const reason = item ? model.placementRefusal(name, place) : 'The dragged element is no longer registered.';
+		model.set({ selected: name, placementError: reason ? { element: name, reason } : null });
+		if (!reason) {
+			applyPlacement(item, place);
+		}
 	});
 	node.title = node.title ? `${node.title}\n${verb} by dragging it here.` : `${verb} by dragging it here.`;
 }
@@ -1907,9 +2252,47 @@ el.filter.addEventListener('input', () => model.set({ filter: el.filter.value })
 el.showHidden.addEventListener('change', () => model.set({ showHidden: el.showHidden.checked }));
 el.showSpectator.addEventListener('change', () => model.set({ showSpectator: el.showSpectator.checked }));
 el.chrome.addEventListener('change', () => model.set({ chromeVisible: el.chrome.checked }));
+el.uiScale.addEventListener('change', () => applyUiScale(el.uiScale.value, { persist: true, wake: true }));
+el.snapGrid.addEventListener('change', () => {
+	dragAssist.grid = el.snapGrid.checked;
+	el.snapStep.disabled = !dragAssist.grid;
+	renderGrid();
+});
+el.snapMagnet.addEventListener('change', () => { dragAssist.magnet = el.snapMagnet.checked; });
+const updateSnapStep = () => {
+	const value = Number(el.snapStep.value);
+	if (Number.isFinite(value) && value >= 1) {
+		const next = Math.min(64, Math.round(value));
+		// Only on a real change. This does NOT stop the per-keystroke rebuild: type
+		// "16" into an empty field and the "1" is a real change, so a step-1 grid
+		// is drawn and replaced on the "6". That is kept on purpose -- the step the
+		// drag uses is updated on the same keystroke, so the intermediate grid is
+		// what a drag would actually do at that instant, and suppressing it would
+		// put the picture and the behaviour out of step.
+		// With the field empty, Number('') is 0 and fails the >= 1 guard, so the
+		// step is left alone and the drawn grid still matches it.
+		if (next !== dragAssist.step) {
+			dragAssist.step = next;
+			renderGrid();
+		}
+	}
+};
+el.snapStep.addEventListener('input', updateSnapStep);
+el.snapStep.addEventListener('change', () => {
+	updateSnapStep();
+	el.snapStep.value = String(dragAssist.step);
+});
+el.snapStep.disabled = true;
 el.saveOpen.addEventListener('click', () => openSave());
 el.frame.addEventListener('load', renderOverlay);
-window.addEventListener('resize', renderOverlay);
+window.addEventListener('resize', () => {
+	renderOverlay();
+	// renderOverlay returns early mid-gesture, but placeBox and renderSnapGuides
+	// both recompute from the live frame width on every pointermove. Without this
+	// the grid is the one drawn thing on the stage that freezes while the box it
+	// describes keeps moving.
+	renderGrid();
+});
 
 // Click empty stage to deselect; click a rendered element to select it, which
 // keeps the canvas behaving the way the tree does.

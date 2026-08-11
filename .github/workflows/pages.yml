@@ -163,6 +163,9 @@ jobs:
         working-directory: source
         run: npm ci
 
+      - name: Install ffmpeg (required by changedrop_capture video validation)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
       - name: Tier 1 (core units, C placement tests, public-dist guard)
         working-directory: source
         run: npm run test:tier1

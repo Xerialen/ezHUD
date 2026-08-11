@@ -27,6 +27,7 @@ SOURCES = [
     "core/geometry.js",
     "core/log.js",
     "core/model.js",
+    "core/snapping.js",
     "view/app.js",
     "view/debug.js",
 ]

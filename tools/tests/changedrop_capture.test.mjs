@@ -1,0 +1,559 @@
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { hostname, tmpdir } from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const fixtureDir = path.join(here, 'fixtures', 'changedrop');
+const repo = path.resolve(here, '../..');
+const execFileAsync = promisify(execFile);
+
+let capture;
+let loadError;
+try {
+	capture = await import('../changedrop/capture.mjs');
+} catch (error) {
+	loadError = error;
+}
+
+const fixture = async (name) => JSON.parse(await readFile(path.join(fixtureDir, name), 'utf8'));
+
+function schemaErrors(value, schema, at = '$') {
+	const errors = [];
+	const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
+	const actualType = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+	const typeMatches = types.includes(actualType) || (types.includes('integer') && Number.isInteger(value));
+	if (types.length && !typeMatches) return [`${at}: expected ${types.join('|')}, got ${actualType}`];
+	if ('const' in schema && value !== schema.const) errors.push(`${at}: expected constant ${schema.const}`);
+	if (schema.enum && !schema.enum.includes(value)) errors.push(`${at}: value is outside enum`);
+	if (typeof value === 'number') {
+		if (schema.exclusiveMinimum != null && value <= schema.exclusiveMinimum) errors.push(`${at}: number is too small`);
+		if (schema.minimum != null && value < schema.minimum) errors.push(`${at}: number is too small`);
+		if (schema.maximum != null && value > schema.maximum) errors.push(`${at}: number is too large`);
+	}
+	if (typeof value === 'string') {
+		if (schema.minLength != null && value.length < schema.minLength) errors.push(`${at}: string is too short`);
+		if (schema.pattern && !(new RegExp(schema.pattern)).test(value)) errors.push(`${at}: string misses pattern`);
+	}
+	if (Array.isArray(value)) {
+		if (schema.minItems != null && value.length < schema.minItems) errors.push(`${at}: too few items`);
+		if (schema.maxItems != null && value.length > schema.maxItems) errors.push(`${at}: too many items`);
+		if (schema.items) value.forEach((entry, index) => errors.push(...schemaErrors(entry, schema.items, `${at}[${index}]`)));
+	}
+	if (value && typeof value === 'object' && !Array.isArray(value)) {
+		for (const required of schema.required ?? []) {
+			if (!(required in value)) errors.push(`${at}: missing ${required}`);
+		}
+		for (const [key, entry] of Object.entries(value)) {
+			if (schema.properties?.[key]) errors.push(...schemaErrors(entry, schema.properties[key], `${at}.${key}`));
+			else if (schema.additionalProperties === false) errors.push(`${at}: unexpected ${key}`);
+		}
+	}
+	return errors;
+}
+
+function stringsIn(value) {
+	if (typeof value === 'string') return [value];
+	if (Array.isArray(value)) return value.flatMap(stringsIn);
+	if (value && typeof value === 'object') return Object.values(value).flatMap(stringsIn);
+	return [];
+}
+
+const recording = (duration_seconds = 4.1, bytes = 512, container_duration_seconds = duration_seconds + 0.92) => ({
+	basename: 'walkthrough.webm',
+	bytes,
+	duration_seconds,
+	container_duration_seconds,
+});
+
+test('review blocker: capture receipts measured content and finalized container durations separately', async (t) => {
+	assert.ifError(loadError);
+	const directory = await mkdtemp(path.join(tmpdir(), 'changedrop-container-duration-'));
+	t.after(() => rm(directory, { recursive: true, force: true }));
+	await chmod(directory, 0o700);
+	const file = path.join(directory, 'walkthrough.webm');
+	await writeFile(file, Buffer.from('synthetic-webm-fixture'), { mode: 0o600 });
+	assert.deepEqual(await capture.recordingMetadata(file, 22.543, 23.48), {
+		basename: 'walkthrough.webm',
+		bytes: 22,
+		duration_seconds: 22.543,
+		container_duration_seconds: 23.48,
+	});
+	const schema = JSON.parse(await readFile(
+		path.join(repo, 'tools', 'changedrop', 'schemas', 'changedrop-timings.v1.json'), 'utf8'));
+	assert.ok(schema.properties.recording.required.includes('container_duration_seconds'));
+	await assert.rejects(capture.recordingMetadata(file, 22.543, 22.0),
+		/container duration.*content duration|container.*shorter.*content/i);
+});
+
+test('case 1: recording metadata requires a real non-empty file and positive measured duration', async (t) => {
+	assert.ifError(loadError);
+	assert.equal(typeof capture.recordingMetadata, 'function');
+	const directory = await mkdtemp(path.join(tmpdir(), 'changedrop-c1-'));
+	t.after(() => rm(directory, { recursive: true, force: true }));
+	await chmod(directory, 0o700);
+	const file = path.join(directory, 'walkthrough.webm');
+	await writeFile(file, Buffer.from('synthetic-webm-fixture'));
+	assert.deepEqual(await capture.recordingMetadata(file, 1.25, 2.17), {
+		basename: 'walkthrough.webm',
+		bytes: 22,
+		duration_seconds: 1.25,
+		container_duration_seconds: 2.17,
+	});
+	await writeFile(file, Buffer.alloc(0));
+	await assert.rejects(capture.recordingMetadata(file, 1.25, 2.17), /recording.*non-empty|non-empty.*recording/i);
+	await writeFile(file, Buffer.from('x'));
+	await assert.rejects(capture.recordingMetadata(file, 0, 1), /duration.*positive|positive.*duration/i);
+});
+
+test('case 2: timings contain exactly one positive, strictly monotonic entry per script segment', async () => {
+	assert.ifError(loadError);
+	const script = await fixture('capture-script.json');
+	const observations = await fixture('capture-observations-a.json');
+	const receipt = capture.buildTimingReceipt({ script, recording: recording(), observations });
+	assert.equal(receipt.schema_version, 'changedrop-timings/1');
+	assert.deepEqual(receipt.segments.map((entry) => entry.id), script.segments.map((entry) => entry.id));
+	assert.equal(receipt.segments.length, script.segments.length);
+	assert.deepEqual(receipt.setup_actions,
+		script.setup.map(({ instruction: _instruction, ...action }) => action));
+	assert.deepEqual(receipt.segments[1].actions,
+		script.segments[1].walkthrough.map(({ instruction: _instruction, ...action }) => action));
+	for (const [index, entry] of receipt.segments.entries()) {
+		assert.ok(entry.duration_seconds > 0);
+		if (index) assert.ok(entry.start_seconds > receipt.segments[index - 1].start_seconds);
+	}
+	const duplicated = structuredClone(observations);
+	duplicated[1].id = duplicated[0].id;
+	assert.throws(() => capture.buildTimingReceipt({ script, recording: recording(), observations: duplicated }),
+		/segment.*order|exactly one|intro.*snap-magnet/i);
+	const zero = structuredClone(observations);
+	zero[1].duration_seconds = 0;
+	assert.throws(() => capture.buildTimingReceipt({ script, recording: recording(), observations: zero }),
+		/duration.*positive|positive.*duration/i);
+});
+
+test('case 3: every highlight timestamp and focused ring receipt lies inside its segment', async () => {
+	assert.ifError(loadError);
+	const script = await fixture('capture-script.json');
+	const observations = await fixture('capture-observations-a.json');
+	const receipt = capture.buildTimingReceipt({ script, recording: recording(), observations });
+	const highlighted = receipt.segments.find((entry) => entry.id === 'snap-magnet');
+	assert.equal(highlighted.highlights.length, 1);
+	const highlight = highlighted.highlights[0];
+	assert.ok(highlight.timestamp_seconds >= highlighted.start_seconds);
+	assert.ok(highlight.timestamp_seconds <= highlighted.start_seconds + highlighted.duration_seconds);
+	assert.match(highlight.basename, /^stills\/[a-z0-9-]+-\d+\.png$/);
+	assert.match(highlight.source_basename, /^stills\/sources\/[a-z0-9-]+-\d+\.png$/);
+
+	const late = structuredClone(observations);
+	late[1].highlights[0].timestamp_seconds = late[1].start_seconds + late[1].duration_seconds + 0.01;
+	assert.throws(() => capture.buildTimingReceipt({ script, recording: recording(), observations: late }),
+		/highlight.*inside|outside.*segment/i);
+});
+
+test('case 4: repeat runs compare the complete action sequence while allowing timing drift', async () => {
+	assert.ifError(loadError);
+	const script = await fixture('capture-script.json');
+	const first = capture.buildTimingReceipt({
+		script,
+		recording: recording(4.1, 512),
+		observations: await fixture('capture-observations-a.json'),
+	});
+	const second = capture.buildTimingReceipt({
+		script,
+		recording: recording(4.3, 530),
+		observations: await fixture('capture-observations-b.json'),
+	});
+	assert.equal(capture.assertRepeatableStructure(first, second), true);
+	assert.notDeepEqual(first.segments.map((entry) => [entry.start_seconds, entry.duration_seconds]),
+		second.segments.map((entry) => [entry.start_seconds, entry.duration_seconds]));
+
+	const changed = structuredClone(second);
+	changed.segments[1].actions[0].width += 1;
+	assert.throws(() => capture.assertRepeatableStructure(first, changed), /action sequence.*snap-magnet|snap-magnet.*action sequence/i);
+	const outsideTolerance = structuredClone(second);
+	outsideTolerance.segments[1].duration_seconds = first.segments[1].duration_seconds + 2.01;
+	assert.throws(() => capture.assertRepeatableStructure(first, outsideTolerance), /duration.*snap-magnet.*tolerance/i);
+});
+
+test('case 5: drag holds its modifier through mouse down, every visible move, and mouse up', async () => {
+	assert.ifError(loadError);
+	assert.equal(typeof capture.executeDrag, 'function');
+	const events = [];
+	const held = new Set();
+	let dragging = false;
+	let dragStart;
+	let pointer;
+	let sourceBox = { x: 300, y: 200, width: 80, height: 40 };
+	const boxes = new Map([
+		['#left-corner', { x: 40, y: 60, width: 20, height: 20 }],
+	]);
+	const page = {
+		locator(selector) {
+			return {
+				waitFor: async () => {},
+				boundingBox: async () => selector === '.box[data-name="gameclock"]' ? { ...sourceBox } : boxes.get(selector) ?? null,
+			};
+		},
+		keyboard: {
+			down: async (modifier) => { held.add(modifier); events.push(['key-down', modifier]); },
+			up: async (modifier) => { events.push(['key-up', modifier]); held.delete(modifier); },
+		},
+		mouse: {
+			move: async (x, y) => {
+				pointer = { x, y };
+				if (dragging) events.push(['move', x, y, held.has('Shift')]);
+			},
+			down: async () => {
+				dragging = true;
+				dragStart = { ...pointer };
+				events.push(['mouse-down', held.has('Shift')]);
+			},
+			up: async () => {
+				events.push(['mouse-up', held.has('Shift')]);
+				sourceBox = {
+					...sourceBox,
+					x: sourceBox.x + pointer.x - dragStart.x,
+					y: sourceBox.y + pointer.y - dragStart.y,
+				};
+				dragging = false;
+			},
+		},
+		waitForTimeout: async () => {},
+	};
+
+	await capture.executeDrag(page, {
+		selector: '.box[data-name="gameclock"]',
+		target: { selector: '#left-corner' },
+		modifier: 'Shift',
+	}, 1_000);
+
+	const dragEvents = events.filter(([name]) => name === 'mouse-down' || name === 'move' || name === 'mouse-up');
+	assert.ok(dragEvents.filter(([name]) => name === 'move').length > 1, 'drag must contain visible intermediate moves');
+	assert.ok(dragEvents.every((event) => event.at(-1) === true), 'Shift must be down for the complete drag gesture');
+	assert.ok(events.findIndex(([name]) => name === 'key-down') < events.findIndex(([name]) => name === 'mouse-down'));
+	assert.ok(events.findIndex(([name]) => name === 'key-up') > events.findIndex(([name]) => name === 'mouse-up'));
+	assert.equal(held.size, 0);
+
+	events.length = 0;
+	await capture.executeDrag(page, {
+		selector: '.box[data-name="gameclock"]',
+		target: { x: 80, y: 100 },
+	}, 1_000);
+	const coordinateMoves = events.filter(([name]) => name === 'move');
+	assert.deepEqual(coordinateMoves.at(-1), ['move', 80, 100, false]);
+	assert.equal(events.some(([name]) => name.startsWith('key-')), false, 'modifier is optional');
+});
+
+test('case 5b: drag rejects a gesture that leaves the source at the same position', async () => {
+	assert.ifError(loadError);
+	const box = { x: 300, y: 200, width: 80, height: 40 };
+	const page = {
+		locator: () => ({ waitFor: async () => {}, boundingBox: async () => ({ ...box }) }),
+		keyboard: { down: async () => {}, up: async () => {} },
+		mouse: { move: async () => {}, down: async () => {}, up: async () => {} },
+		waitForTimeout: async () => {},
+	};
+	await assert.rejects(capture.executeDrag(page, {
+		selector: '.box[data-name="gameclock"]',
+		target: { x: 80, y: 100 },
+		modifier: 'Shift',
+	}, 1_000), /drag.*did not move|did not move.*drag/i);
+});
+
+test('case 6: drag validates selector and coordinate targets and is present in all script schemas', async () => {
+	assert.ifError(loadError);
+	const script = await fixture('capture-script.json');
+	const drag = {
+		instruction: 'Drag the clock freely.',
+		action: 'drag',
+		selector: '.box[data-name="gameclock"]',
+		target: { x: 80, y: 100 },
+		modifier: 'Shift',
+	};
+	script.segments[1].walkthrough.splice(1, 0, drag);
+	assert.equal(capture.validateCaptureScript(script), script);
+	const receipt = capture.buildTimingReceipt({
+		script,
+		recording: recording(),
+		observations: await fixture('capture-observations-a.json'),
+	});
+	assert.deepEqual(receipt.segments[1].actions[1], {
+		action: 'drag', selector: '.box[data-name="gameclock"]', target: { x: 80, y: 100 }, modifier: 'Shift',
+	});
+	const badModifier = structuredClone(script);
+	badModifier.segments[1].walkthrough[1].modifier = 'CapsLock';
+	assert.throws(() => capture.validateCaptureScript(badModifier), /drag modifier.*Shift/i);
+	const badCoordinate = structuredClone(script);
+	badCoordinate.segments[1].walkthrough[1].target.x = -1;
+	assert.throws(() => capture.validateCaptureScript(badCoordinate), /target x.*at least 0/i);
+
+	for (const name of ['changedrop-script.v1.json', 'changedrop-script-authoring.v1.json', 'changedrop-timings.v1.json']) {
+		const schema = JSON.parse(await readFile(path.join(repo, 'tools', 'changedrop', 'schemas', name), 'utf8'));
+		assert.match(JSON.stringify(schema), /"action":\{"const":"drag"\}/, `${name} must declare drag`);
+	}
+});
+
+test('supporting contract: closed safe DSL, bounded runtime, schema/privacy, npm wiring, and no browser in tier 1', async () => {
+	assert.ifError(loadError);
+	assert.deepEqual([...capture.ACTIONS], ['wait-for', 'resize', 'click', 'hold', 'highlight', 'drag']);
+	assert.equal(capture.basePathFromIndex('<script type="importmap">{"imports":{"/ezHUD/core/bridge.js":"/ezHUD/core/fte-adapter.js"}}</script>'), '/ezHUD/');
+	assert.equal(capture.basePathFromIndex('<script type="importmap">{"imports":{"/core/bridge.js":"/core/fte-adapter.js"}}</script>'), '/');
+	assert.equal(capture.MAX_HOLD_MS, 5_000);
+	assert.equal(capture.MAX_CAPTURE_MS, 180_000);
+	assert.equal(capture.REPEAT_DURATION_TOLERANCE_SECONDS, 2.0);
+	const script = await fixture('capture-script.json');
+	assert.equal(capture.validateCaptureScript(script), script);
+	for (const forbidden of ['unknown', 'evaluate', 'run-script', 'arbitrary-js']) {
+		const bad = structuredClone(script);
+		bad.segments[0].walkthrough[0].action = forbidden;
+		assert.throws(() => capture.validateCaptureScript(bad), new RegExp(`unknown.*${forbidden}|${forbidden}.*not allowed`, 'i'));
+	}
+	for (const selector of ['body #snap-toggle', '.snap-toggle', '[role="button"]', '#x:hover']) {
+		const bad = structuredClone(script);
+		bad.segments[1].walkthrough[1].selector = selector;
+		assert.throws(() => capture.validateCaptureScript(bad), /selector.*id-style|data-changedrop|selector.*invalid/i);
+	}
+	const tooLong = structuredClone(script);
+	tooLong.segments[0].walkthrough[0].duration_ms = capture.MAX_HOLD_MS + 1;
+	assert.throws(() => capture.validateCaptureScript(tooLong), /hold.*5000|duration.*maximum/i);
+
+	const source = await readFile(path.join(repo, 'tools', 'changedrop', 'capture.mjs'), 'utf8');
+	assert.doesNotMatch(source, /\.evaluate\s*\(/);
+	assert.match(source, /spawn\('ffprobe'/);
+	const sourceCapture = source.indexOf('const sourceBytes = await page.screenshot');
+	const liveRing = source.indexOf('await page.addStyleTag({ content: liveRingCss');
+	assert.ok(sourceCapture >= 0 && liveRing >= 0 && sourceCapture < liveRing,
+		'focused source must be captured before the live ring is drawn');
+	assert.doesNotMatch(source, /window-follow|pause-resume|snap-magnet/);
+	assert.match(source, /three minutes|180 seconds/i);
+	assert.match(source, /five seconds|5000 ms/i);
+	const packageJson = JSON.parse(await readFile(path.join(repo, 'package.json'), 'utf8'));
+	assert.equal(packageJson.scripts?.['changedrop:capture'], 'node tools/changedrop/capture.mjs');
+
+	const schema = JSON.parse(await readFile(
+		path.join(repo, 'tools', 'changedrop', 'schemas', 'changedrop-timings.v1.json'), 'utf8'));
+	assert.equal(schema.additionalProperties, false);
+	assert.equal(schema.properties.segments.items.additionalProperties, false);
+	const receipt = capture.buildTimingReceipt({
+		script,
+		recording: recording(),
+		observations: await fixture('capture-observations-a.json'),
+	});
+	assert.deepEqual(schemaErrors(receipt, schema), []);
+	for (const value of stringsIn(receipt)) {
+		assert.equal(path.isAbsolute(value), false, `absolute path escaped into timings: ${JSON.stringify(value)}`);
+		assert.doesNotMatch(value, /\/home\/|\/Users\/|\$USER\b|file:\/\//i);
+		if (hostname()) assert.equal(value.includes(hostname()), false, 'hostname escaped into timings');
+	}
+
+	const env = { ...process.env };
+	delete env.EZHUD_CHANGEDROP_ROOT;
+	await assert.rejects(execFileAsync(process.execPath, [
+		path.join(repo, 'tools', 'changedrop', 'capture.mjs'),
+		'--script', 'synthetic/run/script.json',
+		'--dist', 'dist',
+		'--out', 'synthetic/run/capture',
+	], { cwd: repo, env }), (error) => {
+		assert.equal(error.code, 1);
+		assert.match(error.stderr, /EZHUD_CHANGEDROP_ROOT/);
+		return true;
+	});
+});
+
+test('review blocker: recording surface matches the CSS viewport pixel-for-pixel', async () => {
+	assert.ifError(loadError);
+	const vp = capture.CAPTURE_VIEWPORT;
+	assert.ok(vp && typeof vp.width === 'number' && typeof vp.height === 'number',
+		'CAPTURE_VIEWPORT must be exported with numeric width and height');
+	assert.ok(vp.width >= 1280 && vp.width <= 3840,
+		`CAPTURE_VIEWPORT width ${vp.width} is outside the 1280-3840 range`);
+	assert.ok(vp.height >= 720 && vp.height <= 2160,
+		`CAPTURE_VIEWPORT height ${vp.height} is outside the 720-2160 range`);
+	// Both viewport and recordVideo.size must spread the same constant so they
+	// can never silently diverge. A mismatch caused the 75 % grey-padding defect.
+	const source = await readFile(path.join(repo, 'tools', 'changedrop', 'capture.mjs'), 'utf8');
+	const viewportLine = source.match(/viewport:\s*\{\s*\.\.\.CAPTURE_VIEWPORT\s*\}/);
+	assert.ok(viewportLine, 'context viewport must spread CAPTURE_VIEWPORT');
+	const recordingLine = source.match(/recordVideo:\s*\{[^}]*size:\s*\{\s*\.\.\.CAPTURE_VIEWPORT\s*\}/);
+	assert.ok(recordingLine, 'recordVideo.size must spread the same CAPTURE_VIEWPORT');
+});
+
+test('review blocker: delivered frame must be filled — no flat-grey quadrants', async (t) => {
+	assert.ifError(loadError);
+	assert.equal(typeof capture.assertFrameFilled, 'function');
+
+	const w = 1400;
+	const h = 788;
+	const midY = Math.floor(h / 2);
+	const midX = Math.floor(w / 2);
+
+	// Helper: fill an entire frame with one colour.
+	const solidFrame = ([r, g, b]) => {
+		const buf = Buffer.alloc(w * h * 3);
+		for (let i = 0; i < w * h; i++) {
+			buf[i * 3] = r;
+			buf[i * 3 + 1] = g;
+			buf[i * 3 + 2] = b;
+		}
+		return buf;
+	};
+
+	// A four-colour frame with distinct non-grey quadrants must pass.
+	const fourColor = Buffer.alloc(w * h * 3);
+	const darkBlue = [10, 20, 80];
+	const darkGreen = [10, 80, 20];
+	const darkRed = [80, 10, 20];
+	const gold = [200, 160, 40];
+	for (let y = 0; y < h; y++) {
+		const rowBase = y * w * 3;
+		const leftColor = y < midY ? darkBlue : darkRed;
+		const rightColor = y < midY ? darkGreen : gold;
+		for (let x = 0; x < w; x++) {
+			const idx = rowBase + x * 3;
+			const [r, g, b] = x < midX ? leftColor : rightColor;
+			fourColor[idx] = r;
+			fourColor[idx + 1] = g;
+			fourColor[idx + 2] = b;
+		}
+	}
+	capture.assertFrameFilled(fourColor, w, h);
+
+	// A flat-grey frame (all quadrants at 128, mean 128, σ = 0) must be rejected.
+	const flatGrey = Buffer.alloc(w * h * 3, 128);
+	assert.throws(() => capture.assertFrameFilled(flatGrey, w, h),
+		/flat grey|unfilled padding/i);
+
+	// A frame with one flat-grey quadrant must be rejected.
+	const partialPad = solidFrame(darkBlue);
+	// Overwrite bottom-right quadrant with flat grey.
+	for (let y = midY; y < h; y++) {
+		const rowBase = y * w * 3;
+		for (let x = midX; x < w; x++) {
+			const idx = rowBase + x * 3;
+			partialPad[idx] = 128;
+			partialPad[idx + 1] = 128;
+			partialPad[idx + 2] = 128;
+		}
+	}
+	assert.throws(() => capture.assertFrameFilled(partialPad, w, h),
+		/flat grey|unfilled padding/i);
+
+	// Checkerboard: 40 and 216, mean ≈ 128, σ ≈ 88. Must PASS — high variation
+	// proves real content even though mean lands in the grey band.
+	const checker = Buffer.alloc(w * h * 3);
+	for (let y = 0; y < h; y++) {
+		const rowBase = y * w * 3;
+		for (let x = 0; x < w; x++) {
+			const idx = rowBase + x * 3;
+			const v = ((x + y) & 1) ? 216 : 40;
+			checker[idx] = v;
+			checker[idx + 1] = v;
+			checker[idx + 2] = v;
+		}
+	}
+	capture.assertFrameFilled(checker, w, h);
+
+	// A dark panel whose mean happens to land near 128 (e.g. RGB 100,100,184 →
+	// luminance 128) but has real variation must pass.
+	const variedMidGrey = Buffer.alloc(w * h * 3);
+	for (let y = 0; y < h; y++) {
+		const rowBase = y * w * 3;
+		for (let x = 0; x < w; x++) {
+			const idx = rowBase + x * 3;
+			// Base of 100 gives luminance 100, plus a column gradient of ±30.
+			const offset = Math.round(30 * Math.sin((x / w) * Math.PI * 4));
+			const v = 100 + offset;
+			variedMidGrey[idx] = v;
+			variedMidGrey[idx + 1] = v;
+			variedMidGrey[idx + 2] = v;
+		}
+	}
+	capture.assertFrameFilled(variedMidGrey, w, h);
+
+	// Buffer too small must throw.
+	assert.throws(() => capture.assertFrameFilled(Buffer.alloc(10), 1400, 788));
+
+	// Non-Buffer must throw.
+	assert.throws(() => capture.assertFrameFilled('not-a-buffer', 1400, 788));
+});
+
+test('review blocker: validateRecordingFrame catches padding on real generated videos', async (t) => {
+	assert.ifError(loadError);
+	if (typeof capture.validateRecordingFrame !== 'function') {
+		t.diagnostic('validateRecordingFrame not exported — skipping integration test');
+		return;
+	}
+
+	const { spawn } = await import('node:child_process');
+	const { mkdtemp, rm } = await import('node:fs/promises');
+	const { tmpdir } = await import('node:os');
+	const path = await import('node:path');
+
+	const dir = await mkdtemp(path.join(tmpdir(), 'changedrop-vrf-'));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+
+	const generate = (name, filter) => new Promise((resolve, reject) => {
+		const out = path.join(dir, name);
+		const child = spawn('ffmpeg', [
+			'-v', 'error',
+			'-f', 'lavfi',
+			'-i', filter,
+			'-pix_fmt', 'yuv420p',
+			'-t', '6',
+			'-y', out,
+		], { stdio: ['ignore', 'pipe', 'pipe'] });
+		const chunks = [];
+		child.stderr.on('data', (chunk) => chunks.push(chunk));
+		child.once('error', reject);
+		child.once('close', (code) => {
+			if (code !== 0) {
+				const msg = Buffer.concat(chunks).toString('utf8').trim();
+				return reject(new Error(`ffmpeg failed generating ${name}: ${msg}`));
+			}
+			resolve(out);
+		});
+	});
+
+	// 1. Normal content: testsrc with varied colours — must pass.
+	const goodVideo = await generate('good.webm', 'testsrc=size=320x240:rate=25:duration=6');
+	await capture.validateRecordingFrame(goodVideo, { width: 320, height: 240 });
+
+	// 2. Flat grey padding: every pixel is 0x808080 — must be rejected.
+	const greyVideo = await generate('grey.webm', 'color=color=0x808080:size=320x240:rate=25:duration=6');
+	await assert.rejects(
+		capture.validateRecordingFrame(greyVideo, { width: 320, height: 240 }),
+		/flat grey|unfilled padding/i,
+	);
+
+	// 3. Short recording: 1 second forces the -ss 2 fallback to first frame — must pass.
+	const shortParams = 'testsrc=size=320x240:rate=25:duration=1';
+	const shortVideo = await new Promise((resolve, reject) => {
+		const out = path.join(dir, 'short.webm');
+		const child = spawn('ffmpeg', [
+			'-v', 'error', '-f', 'lavfi', '-i', shortParams,
+			'-pix_fmt', 'yuv420p', '-t', '1', '-y', out,
+		], { stdio: ['ignore', 'pipe', 'pipe'] });
+		const chunks = [];
+		child.stderr.on('data', (chunk) => chunks.push(chunk));
+		child.once('error', reject);
+		child.once('close', (code) => {
+			if (code !== 0) {
+				const msg = Buffer.concat(chunks).toString('utf8').trim();
+				return reject(new Error(`ffmpeg failed generating short.webm: ${msg}`));
+			}
+			resolve(out);
+		});
+	});
+	await capture.validateRecordingFrame(shortVideo, { width: 320, height: 240 });
+
+	// 4. Wrong dimensions must be rejected (before any frame extraction).
+	await assert.rejects(
+		capture.validateRecordingFrame(goodVideo, { width: 640, height: 480 }),
+		/dimensions.*match|do not match/i,
+	);
+});

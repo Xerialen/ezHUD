@@ -51,7 +51,8 @@ async function resize(width, height) {
 		});
 		stable = signature === previous ? stable + 1 : 0;
 		previous = signature;
-		if (value.viewport.width === width && value.viewport.height === height && stable >= 2) {
+		if (value.viewport.width === width && value.viewport.height === height
+			&& value.editor_ready && stable >= 2) {
 			return value;
 		}
 	}

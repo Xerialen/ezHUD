@@ -1,0 +1,6 @@
+{
+  "schema_version": "changedrop-value-summary/1",
+  "decision": "skip",
+  "skip_reason": "Refactors deterministic fixture names only.",
+  "features": []
+}

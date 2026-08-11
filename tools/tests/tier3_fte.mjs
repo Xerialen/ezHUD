@@ -105,7 +105,7 @@ const FIXTURE = {
 		}),
 		element('armor', {
 			pos_x: '16', pos_y: '60',
-			rect: { x: 16, y: 60, w: 64, h: 24 },
+			rect: { x: 16, y: 60, w: 48, h: 24 },
 			cvars: { hud_armor_scale: '1' },
 		}),
 		// Percentage-sized, which model.sizeControl() answers 'relative' for: no
@@ -250,6 +250,18 @@ try {
 		el.width = canvas[0];
 		el.height = canvas[1];
 
+		// FTE's real resize glue owns this in tier 4F: it follows the canvas CSS
+		// box, multiplies by devicePixelRatio, then exports the new video size in
+		// state.screen. Mirror only that boundary here so the editor-scale case can
+		// prove a chrome-only layout change still propagates through engine state.
+		window.addEventListener('resize', () => requestAnimationFrame(() => {
+			const rect = el.getBoundingClientRect();
+			el.width = Math.max(1, Math.round(rect.width * window.devicePixelRatio));
+			el.height = Math.max(1, Math.round(rect.height * window.devicePixelRatio));
+			fake.state.screen = { ...fake.state.screen,
+				vid_width: el.width, vid_height: el.height };
+		}));
+
 		// These live on hud_t rather than in the params array (hud.c), which is
 		// why they are named here instead of being found in `cvars`.
 		const PLACEMENT = new Set(['place', 'align_x', 'align_y', 'order', 'frame']);
@@ -275,6 +287,45 @@ try {
 		// command; the fake engine needs the same behaviour to keep this suite
 		// honest about the fix.
 		const resetDefaults = new Map(fake.state.elements.map((e) => [e.name, structuredClone(e)]));
+		const regions = new Set(['screen', 'top', 'view', 'sbar', 'ibar', 'hbar', 'sfree', 'ifree', 'hfree']);
+		const parentFromPlace = (value) => {
+			const name = String(value ?? '').replace(/^@/, '');
+			return regions.has(name) ? null : fake.state.elements.find((e) => e.name === name)?.name ?? null;
+		};
+		const aligned = (start, size, content, align, offset) => {
+			let base;
+			switch (align) {
+			case 'center': base = start + Math.trunc((size - content) / 2); break;
+			case 'right': case 'bottom': base = start + size - content; break;
+			case 'before': base = start - content; break;
+			case 'after': base = start + size; break;
+			default: base = start; break;
+			}
+			// libhud_place.c:149 is `int x; x += props->pos_x` against a float cvar,
+			// and hud_web_state.c:218 emits the rect as %d. Truncating here is what
+			// makes a fractional pos_x behave in the fake the way it does in the
+			// engine; without it nothing downstream can tell the two apart.
+			return Math.trunc(base + offset);
+		};
+		// Minimal fake of the engine-owned placement boundary: enough to fold the
+		// fixture's screen/element anchors and recursively move children. Product
+		// code still consumes only rects exported by this side of the wire.
+		function reflow(element, seen = new Set()) {
+			if (!element?.rect || seen.has(element.name)) return;
+			seen.add(element.name);
+			const parent = element.parent ? fake.state.elements.find((e) => e.name === element.parent) : null;
+			const area = parent?.rect ?? {
+				x: 0, y: 0,
+				w: fake.state.screen.vid_width, h: fake.state.screen.vid_height,
+			};
+			element.rect.x = aligned(area.x, area.w, element.rect.w,
+				String(element.align_x).toLowerCase(), Number(element.pos_x) || 0);
+			element.rect.y = aligned(area.y, area.h, element.rect.h,
+				String(element.align_y).toLowerCase(), Number(element.pos_y) || 0);
+			for (const child of fake.state.elements.filter((e) => e.parent === element.name)) {
+				reflow(child, seen);
+			}
+		}
 
 		// What the engine would do with the line, not what it was told: a cvar
 		// the plugin never registered is set in the engine but absent from the
@@ -286,13 +337,32 @@ try {
 				fake.state.demo.cl_demospeed = demoSpeed[1] === '0' ? '0' : '1';
 				return;
 			}
+			const playDemo = /^playdemo\s+demos\/([a-z0-9_.-]+\.mvd)$/i.exec(line.trim());
+			if (playDemo) {
+				// The wasm engine owns both signals selectDemo() waits on: playdemo
+				// resets the consumed-packet cursor and Sys_SetWindowTitle includes
+				// cls.lastdemoname (client/cl_main.c). Mirror those boundaries, not
+				// any page-side knowledge of which picker option was selected.
+				fake.demoCursor = 0;
+				fake.state.demo.position = '0:00';
+				document.title = `FTEQW: ${playDemo[1]}`;
+				return;
+			}
+			const demoJump = /^demo_jump\s+(\d+):(\d{2})$/i.exec(line.trim());
+			if (demoJump && Number(demoJump[2]) < 60) {
+				// Engine-side readback for the fake lane: the command, not the
+				// button, owns both the consumed-packet cursor and reported point.
+				fake.demoCursor = (Number(demoJump[1]) * 60 + Number(demoJump[2])) * 10;
+				fake.state.demo.position = `${Number(demoJump[1])}:${demoJump[2]}`;
+				return;
+			}
 			if (line.trim().toLowerCase() === 'hud_reset_layout') {
 				for (const element of fake.state.elements) {
 					const base = resetDefaults.get(element.name);
 					if (!base) {
 						continue;
 					}
-					for (const field of ['place', 'align_x', 'align_y', 'pos_x', 'pos_y']) {
+					for (const field of ['place', 'parent', 'align_x', 'align_y', 'pos_x', 'pos_y']) {
 						element[field] = base[field];
 					}
 					element.shown = base.shown;
@@ -319,14 +389,8 @@ try {
 			}
 			const { element, suffix } = hit;
 			if (suffix === 'pos_x' || suffix === 'pos_y') {
-				// The engine re-lays-out from the new position; every fixture
-				// element is left/top aligned, so that is the rect plus the delta.
-				const axis = suffix === 'pos_x' ? 'x' : 'y';
-				const delta = Number(value) - (Number(element[suffix]) || 0);
 				element[suffix] = value;
-				if (element.rect) {
-					element.rect[axis] += delta;
-				}
+				reflow(element);
 				return;
 			}
 			if (suffix === 'show') {
@@ -335,6 +399,12 @@ try {
 			}
 			if (PLACEMENT.has(suffix)) {
 				element[suffix] = value;
+				if (suffix === 'place') {
+					element.parent = parentFromPlace(value);
+				}
+				if (suffix === 'place' || suffix === 'align_x' || suffix === 'align_y') {
+					reflow(element);
+				}
 				return;
 			}
 			if (Object.prototype.hasOwnProperty.call(element.cvars, cvar)) {
@@ -781,7 +851,126 @@ try {
 
 	console.log('  11 reload guard: engine key and beforeunload listeners released');
 
-	// ---- 12. reset positions -------------------------------------------------
+	// ---- 12. alignment-first editing (#32) ----------------------------------
+	// Start from authored controls, then judge only the fake engine's exported
+	// parent/cvars/rects. DOM geometry is used solely for the drag gesture and for
+	// the relationship line's presence, never as placement truth.
+	await page.locator('.tree__row[data-name="armor"]').click();
+	assert(await page.locator('#inspector .placement-workflow').count() === 1,
+		'the inspector has no first-class anchor/alignment workflow');
+	const setPlacementField = async (id, value) => {
+		const control = page.locator(`#${id}`);
+		await control.waitFor();
+		if (await control.evaluate((node) => node.tagName === 'SELECT')) {
+			await control.selectOption(String(value));
+		} else {
+			await control.fill(String(value));
+			await control.press('Enter');
+		}
+	};
+	await setPlacementField('f-armor-place', '@health');
+	await setPlacementField('f-armor-align_x', 'left');
+	await setPlacementField('f-armor-align_y', 'top');
+	await setPlacementField('f-armor-pos_x', '0');
+	await setPlacementField('f-armor-pos_y', '0');
+	await setPlacementField('f-armor-order', '7');
+	await page.waitForFunction(() => {
+		const armor = window.__fake.state.elements.find((e) => e.name === 'armor');
+		const health = window.__fake.state.elements.find((e) => e.name === 'health');
+		return armor.parent === 'health' && armor.order === '7'
+			&& armor.rect.x === health.rect.x && armor.rect.y === health.rect.y;
+	});
+	await page.waitForSelector('#overlay .anchor-link[data-child="armor"][data-anchor="health"]');
+
+	// One parent drag moves both engine rects by the same delta.
+	const beforeGroupDrag = await engineState();
+	await page.locator('.tree__row[data-name="health"]').click();
+	const parentBox = page.locator('#overlay .box[data-selected="true"]');
+	const parentBounds = await parentBox.boundingBox();
+	assert(parentBounds, 'anchored parent has no draggable overlay box');
+	await page.mouse.move(parentBounds.x + parentBounds.width / 2, parentBounds.y + parentBounds.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(parentBounds.x + parentBounds.width / 2 + 32,
+		parentBounds.y + parentBounds.height / 2, { steps: 4 });
+	await page.mouse.up();
+	await page.waitForFunction((previous) => window.__fake.state.elements
+		.find((e) => e.name === 'health').pos_x !== previous,
+		named(beforeGroupDrag, 'health').pos_x);
+	const afterGroupDrag = await engineState();
+	const parentDx = named(afterGroupDrag, 'health').rect.x - named(beforeGroupDrag, 'health').rect.x;
+	const childDx = named(afterGroupDrag, 'armor').rect.x - named(beforeGroupDrag, 'armor').rect.x;
+	assert(parentDx !== 0 && childDx === parentDx,
+		`parent/child engine rects did not move together: ${parentDx} vs ${childDx}`);
+
+	// Three alignments and a fine-tune offset are exact against engine rects.
+	await page.locator('.tree__row[data-name="armor"]').click();
+	for (const alignment of ['left', 'center', 'right']) {
+		await setPlacementField('f-armor-align_x', alignment);
+		await page.waitForFunction((wanted) => window.__fake.state.elements
+			.find((e) => e.name === 'armor').align_x === wanted, alignment);
+		const state = await engineState();
+		const parent = named(state, 'health').rect;
+		const child = named(state, 'armor').rect;
+		const expected = alignment === 'left' ? parent.x
+			: alignment === 'center' ? parent.x + Math.trunc((parent.w - child.w) / 2)
+				: parent.x + parent.w - child.w;
+		assert(child.x === expected,
+			`${alignment} engine alignment expected x=${expected}, got ${child.x}`);
+	}
+	await setPlacementField('f-armor-pos_x', '7');
+	await setPlacementField('f-armor-pos_y', '9');
+	await page.waitForFunction(() => window.__fake.state.elements
+		.find((e) => e.name === 'armor').pos_y === '9');
+	{
+		const state = await engineState();
+		const parent = named(state, 'health').rect;
+		const child = named(state, 'armor').rect;
+		assert(child.x === parent.x + parent.w - child.w + 7 && child.y === parent.y + 9,
+			`fine-tune offsets did not land on top of the anchor: ${JSON.stringify({ parent, child })}`);
+	}
+
+	// The relationship visualization follows a changed anchor.
+	await setPlacementField('f-armor-place', '@radar');
+	await page.waitForSelector('#overlay .anchor-link[data-child="armor"][data-anchor="radar"]');
+	await setPlacementField('f-armor-place', '@health');
+	await page.waitForSelector('#overlay .anchor-link[data-child="armor"][data-anchor="health"]');
+
+	// A parent cannot be anchored to its own descendant. The option remains
+	// visible so the refusal explains itself instead of silently disappearing.
+	await page.locator('.tree__row[data-name="health"]').click();
+	const cycleOption = page.locator('#f-health-place option[value="@armor"]');
+	assert(await cycleOption.isDisabled(), 'the descendant anchor option is not disabled');
+	assert(/unavailable.*cycle/i.test(await cycleOption.textContent()),
+		'the disabled cycle option does not state why it was refused');
+
+	// Export the relationship, disturb it, then feed those exact bytes through
+	// the shipping import path. Parent readback, not a frozen rect, is the pass.
+	const anchoredCfg = await page.evaluate(async () =>
+		(await import('/core/bridge.js')).currentBridge().exportFullCfg());
+	assert(anchoredCfg.split('\n').includes('hud_armor_place "@health"'),
+		'the full export omitted the anchor relationship');
+	assert(anchoredCfg.split('\n').includes('hud_armor_align_x "right"')
+		&& anchoredCfg.split('\n').includes('hud_armor_pos_x "7"')
+		&& anchoredCfg.split('\n').includes('hud_armor_pos_y "9"'),
+		'the full export omitted alignment or fine-tune offsets');
+	await page.evaluate(async () => {
+		const bridge = (await import('/core/bridge.js')).currentBridge();
+		await bridge.setCvar('hud_armor_place', 'screen');
+		await bridge.send('hud_recalculate');
+	});
+	await page.waitForFunction(() => window.__fake.state.elements
+		.find((e) => e.name === 'armor').parent === null);
+	await page.evaluate((text) => {
+		const transfer = new DataTransfer();
+		transfer.items.add(new File([text], 'anchored-roundtrip.cfg', { type: 'text/plain' }));
+		document.getElementById('fte-drop').dispatchEvent(
+			new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+	}, anchoredCfg);
+	await page.waitForFunction(() => window.__fake.state.elements
+		.find((e) => e.name === 'armor').parent === 'health');
+	console.log('  12 alignment-first: anchor/group move, 3 alignments, offsets, relationship line, cycle refusal, round trip');
+
+	// ---- 13. reset positions -------------------------------------------------
 	// The tracker cvar-wiring fix (fix/tracker-cvar-wiring): plugins/ezhud/hud.c
 	// gained HUD_ResetLayout_f, ported from ezQuake's engine-integration.diff, so
 	// the FTE-web preview's "Reset positions..." button (which has always sent
@@ -811,9 +1000,549 @@ try {
 	assert(healthAfterReset.pos_x === '16' && healthAfterReset.pos_y === '24',
 		`reset did not restore health's registered pos_x/pos_y, got ${JSON.stringify(healthAfterReset)}`);
 
-	console.log('  12 reset positions: hud_reset_layout reverts a moved element to its registered default');
+	console.log('  13 reset positions: hud_reset_layout reverts a moved element to its registered default');
 
-	// ---- 13. volume ----------------------------------------------------------
+	// ---- 14. snap grid + magnet alignment (#24) -----------------------------
+	const gridToggle = page.locator('#snap-grid');
+	const magnetToggle = page.locator('#snap-magnet');
+	const gridStep = page.locator('#snap-step');
+	await gridToggle.waitFor();
+	assert(!(await gridToggle.isChecked()) && !(await magnetToggle.isChecked()),
+		'drag assistance must start visibly off rather than silently changing old drags');
+	const setEnginePlacement = async (name, x, y) => {
+		await page.evaluate(async ([element, px, py]) => {
+			const bridge = (await import('/core/bridge.js')).currentBridge();
+			await bridge.setCvar(`hud_${element}_pos_x`, px);
+			await bridge.setCvar(`hud_${element}_pos_y`, py);
+		}, [name, x, y]);
+		await page.waitForFunction(([element, px, py]) => {
+			const current = window.__fake.state.elements.find((e) => e.name === element);
+			return current.pos_x === String(px) && current.pos_y === String(py);
+		}, [name, x, y]);
+		await page.waitForFunction((element) => {
+			const current = window.__fake.state.elements.find((e) => e.name === element);
+			return document.querySelector(`.tree__row[data-name="${element}"] .tree__meta`)?.textContent
+				=== `${current.rect.x},${current.rect.y}`;
+		}, name);
+	};
+	const dragHealth = async (dx, dy, { modifier = null, beforeUp = null } = {}) => {
+		await page.locator('.tree__row[data-name="health"]').click();
+		const selectedHealth = page.locator('#overlay .box[data-selected="true"]');
+		const rect = await selectedHealth.boundingBox();
+		assert(rect, 'health has no draggable box for snap/magnet cases');
+		if (modifier) await page.keyboard.down(modifier);
+		try {
+			await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+			await page.mouse.down();
+			await page.mouse.move(rect.x + rect.width / 2 + dx, rect.y + rect.height / 2 + dy,
+				{ steps: 4 });
+			if (beforeUp) await beforeUp();
+			await page.mouse.up();
+		} finally {
+			if (modifier) await page.keyboard.up(modifier);
+		}
+		return named(await engineState(), 'health');
+	};
+
+	// The field's value attribute and dragAssist.step are read independently, so
+	// they can drift apart silently: the box would say one number while a drag
+	// used another. Pin them to each other at boot, before anything is typed.
+	assert(await gridStep.inputValue() === '32',
+		`the Step field boots at ${await gridStep.inputValue()}, not the documented default`);
+	const gridLineCount = () => page.locator('#overlay .snap-grid').count();
+	assert(await gridLineCount() === 0,
+		'grid lines were drawn before the Grid toggle was ever switched on');
+
+	await gridToggle.click();
+	// #102: the toggle is called Grid and used to draw nothing. Assert the lines
+	// exist AND that they predict where a drag lands — a grid drawn anywhere but
+	// on the snap positions is a promise the editor breaks on every drag, and it
+	// would pass a count-only check.
+	const lines8 = await gridLineCount();
+	assert(lines8 > 0, 'Grid is on and no grid lines are drawn');
+	await setEnginePlacement('health', 13, 24);
+	let snapped = await dragHealth(19, 0);
+	// The POSITION lands on the lattice, not the offset. For a screen-placed,
+	// left-aligned element the two are the same number, which is why asserting
+	// the offset here used to look like it covered the contract; it did not, and
+	// the armor case below is the one that tells them apart.
+	assert(snapped.rect.x % 8 === 0,
+		`8px grid produced rect.x=${snapped.rect.x} (pos_x=${snapped.pos_x})`);
+	// The promise a drawn grid makes is "aim at a line and you land on it". Not
+	// every snap position carries a line — under the legibility floor the cadence
+	// is a multiple of the step — so asserting the reverse would fail by design
+	// and tempt the next person to weaken it. Aim at a real line instead.
+	const lineOffsets = async (axis) => {
+		const out = [];
+		for (const line of await page.locator(`#overlay .snap-grid--${axis}`).all()) {
+			const box = await line.boundingBox();
+			if (box) out.push(axis === 'x' ? box.x : box.y);
+		}
+		assert(out.length > 1, `fewer than two ${axis} grid lines to measure`);
+		return out.sort((a, b) => a - b);
+	};
+	const aimAtALine = async (drag, label) => {
+		const before = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+		const wanted = before.x + 40;
+		const target = (await lineOffsets('x'))
+			.reduce((best, x) => (Math.abs(x - wanted) < Math.abs(best - wanted) ? x : best), Infinity);
+		await drag(target - before.x, 0);
+		const landed = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+		assert(Math.abs(landed.x - target) <= 1,
+			`${label}: aimed at the grid line drawn at x=${target.toFixed(2)} and it landed at ${landed.x.toFixed(2)}`);
+	};
+	// Boot default untouched: the drawn spacing must be the field's own number
+	// through the transform, not some other step the code kept to itself.
+	const bootFrame = await page.locator('#frame').boundingBox();
+	const bootConsole = await page.evaluate(() => window.__fake.state.screen.vid_width);
+	const bootLines = await lineOffsets('x');
+	const bootConsoleSpacing = (bootLines[1] - bootLines[0]) / (bootFrame.width / bootConsole);
+	assert(Math.abs(bootConsoleSpacing - 32) < 0.05,
+		`Step reads 32 but the grid is drawn every ${bootConsoleSpacing.toFixed(2)} console px`);
+	await gridStep.fill('8');
+	await gridStep.press('Enter');
+	const spacing8 = (await lineOffsets('x'))[1] - (await lineOffsets('x'))[0];
+	// The horizontal and vertical console ratios are separate (scaleFactors), and
+	// only the y path exercises ky. Pin both against the frame's own size so a
+	// ky->kx slip cannot hide behind a console that matches its canvas aspect.
+	const frameBox = await page.locator('#frame').boundingBox();
+	const consoleSize = await page.evaluate(() => [
+		window.__fake.state.screen.vid_width, window.__fake.state.screen.vid_height]);
+	const ySpacing = (await lineOffsets('y'))[1] - (await lineOffsets('y'))[0];
+	const xSpacing = spacing8;
+	const cadence = Math.round(xSpacing / (frameBox.width / consoleSize[0]));
+	assert(Math.abs(ySpacing - cadence * (frameBox.height / consoleSize[1])) < 0.5,
+		`y lines are ${ySpacing.toFixed(2)}px apart, but a cadence of ${cadence} console px is ${(cadence * (frameBox.height / consoleSize[1])).toFixed(2)}px on this frame`);
+	await aimAtALine(dragHealth, 'screen-placed, left-aligned');
+
+	// health is screen-placed and left-aligned, so its base is 0 mod the step and
+	// a grid drawn at plain multiples of the step passes the check above. The
+	// drag snaps pos_x, and the edge lands on base + k*step, so give an element a
+	// base that is NOT on the step lattice and aim at a line again. This is the
+	// case the first version of this feature got wrong.
+	// An odd width so centring cannot land on the step lattice by accident. The
+	// fake only reflows when a placement cvar comes through the bridge, so widen
+	// first and let the align_x change below recompute the rect.
+	await page.evaluate(() => {
+		window.__fake.state.elements.find((e) => e.name === 'armor').rect.w = 41;
+	});
+	await page.locator('.tree__row[data-name="armor"]').click();
+	await setPlacementField('f-armor-align_x', 'center');
+	await page.waitForFunction(() => {
+		const armor = window.__fake.state.elements.find((e) => e.name === 'armor');
+		// trunc((640 - 41) / 2) === 299, which is 3 mod 8.
+		return armor.rect.x - Number(armor.pos_x) === 299;
+	});
+	const dragArmor = async (dx, dy) => {
+		await page.locator('.tree__row[data-name="armor"]').click();
+		const rect = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+		await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(rect.x + rect.width / 2 + dx, rect.y + rect.height / 2 + dy, { steps: 4 });
+		await page.mouse.up();
+		return named(await engineState(), 'armor');
+	};
+	await page.locator('.tree__row[data-name="armor"]').click();
+	await aimAtALine(dragArmor, 'centred element, base 3 mod 8');
+	// The claim the fixed grid rests on: a centred element whose base is 3 mod 8
+	// still lands ON the lattice, so it can line up with health. If the drag
+	// snapped the offset instead, this rect would be 3 mod 8 forever.
+	const armorLanded = named(await engineState(), 'armor');
+	assert(armorLanded.rect.x % 8 === 0,
+		`a centred element landed at rect.x=${armorLanded.rect.x}, off the shared lattice`);
+
+	// The common flow: tick Grid, then grab an element that is NOT already
+	// selected. beginGesture() sets `dragging` before the selection changes, so
+	// renderOverlay returns early and the grid would keep the previous element's
+	// lattice for the whole gesture -- drawn lines that predict nothing, on the
+	// path a user takes first.
+	await page.locator('.tree__row[data-name="health"]').click();
+	const armorBox = await page.locator('#overlay .box[data-name="armor"]').boundingBox();
+	await page.mouse.move(armorBox.x + armorBox.width / 2, armorBox.y + armorBox.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(armorBox.x + armorBox.width / 2 + 4, armorBox.y + armorBox.height / 2,
+		{ steps: 2 });
+	const midDrag = await lineOffsets('x');
+	const midBox = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+	await page.mouse.up();
+	assert(await page.locator('#inspector .inspect__name').textContent() === 'armor',
+		'grabbing armor did not select it, so this case proves nothing');
+	const nearestMid = midDrag.reduce(
+		(best, x) => (Math.abs(x - midBox.x) < Math.abs(best - midBox.x) ? x : best), Infinity);
+	assert(Math.abs(nearestMid - midBox.x) <= 1,
+		`mid-drag the grid describes another element: the dragged box sits at ${midBox.x.toFixed(2)} and the nearest drawn line is ${nearestMid.toFixed(2)}`);
+
+	// A fractional pos_x, which is what the engine actually reports: the cvar is a
+	// float and only the rect is whole. A base taken as `rect - pos` instead of
+	// undoing the engine's truncation puts every line on a coordinate no element
+	// can occupy, and every earlier fixture value here was a whole number, so
+	// nothing could see it.
+	await page.evaluate(async () => {
+		const bridge = (await import('/core/bridge.js')).currentBridge();
+		await bridge.setCvar('hud_armor_pos_x', 12.6);
+	});
+	// Fence on the EDITOR's own state, not the fake's. Waiting on window.__fake
+	// only proves the engine side moved; the editor is a poll behind, and a drag
+	// started there reads the previous pos_x -- which quietly made this whole
+	// case measure nothing.
+	await page.waitForFunction(() => {
+		const armor = window.__fake.state.elements.find((e) => e.name === 'armor');
+		if (Math.abs(Number(armor.pos_x) - 12.6) > 1e-9) return false;
+		const meta = document.querySelector('.tree__row[data-name="armor"] .tree__meta');
+		return meta?.textContent === `${armor.rect.x},${armor.rect.y}`;
+	});
+	// MID-DRAG, with that fractional pos_x still in place. Every instrument in
+	// this feature until now read the box after pointerup, which is the one
+	// moment the preview and the engine agree: refresh() has re-rendered from
+	// engine state by then. A preview built from `rect + (nx - originX)` mixes
+	// the truncated rect with the raw float cvar and hovers frac(pos) short of
+	// the line for the whole gesture, then jumps onto it on release.
+	await page.locator('.tree__row[data-name="armor"]').click();
+	const preBox = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+	await page.mouse.move(preBox.x + preBox.width / 2, preBox.y + preBox.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(preBox.x + preBox.width / 2 + 37, preBox.y + preBox.height / 2,
+		{ steps: 6 });
+	const heldBox = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+	await page.mouse.up();
+	// Not "is it on a line": the cadence is coarsened above the step, so a snap
+	// position legitimately falls between two drawn lines. The claim is that the
+	// preview is where the ENGINE will put it, and the tell is that the box does
+	// not move when the pointer is released and the real state comes back.
+	const restBox = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+	assert(Math.abs(restBox.x - heldBox.x) <= 0.1,
+		`the box jumped ${Math.abs(restBox.x - heldBox.x).toFixed(3)}px on release: the preview was not where the engine put it`);
+
+	await page.locator('.tree__row[data-name="armor"]').click();
+	// Every line must sit on a whole console pixel. A base taken as `rect - pos`
+	// carries the fraction the engine discarded, so the lines land between the
+	// positions an element can occupy -- which no drag can ever reach.
+	const frameForFraction = await page.locator('#frame').boundingBox();
+	const consoleForFraction = await page.evaluate(
+		() => window.__fake.state.screen.vid_width);
+	const perConsolePx = frameForFraction.width / consoleForFraction;
+	for (const lineX of await lineOffsets('x')) {
+		const consoleX = (lineX - frameForFraction.x) / perConsolePx;
+		assert(Math.abs(consoleX - Math.round(consoleX)) < 0.02,
+			`with pos_x=12.6 a grid line sits at console x=${consoleX.toFixed(3)}, which no element can occupy`);
+	}
+
+	await page.locator('.tree__row[data-name="health"]').click();
+
+	await gridStep.fill('5');
+	await gridStep.press('Enter');
+	// Per axis, not a summed count: two different grids can share a total. At one
+	// stage width step 8 gives 41 x + 13 y and step 5 gives 33 x + 21 y — both 54.
+	const spacing5 = (await lineOffsets('x'))[1] - (await lineOffsets('x'))[0];
+	assert(Math.abs(spacing5 - spacing8) > 0.5,
+		`changing the step from 8 to 5 left the drawn x spacing at ${spacing5.toFixed(2)}px`);
+	await setEnginePlacement('health', 13, 24);
+	snapped = await dragHealth(19, 0);
+	assert(snapped.rect.x % 5 === 0,
+		`5px grid produced rect.x=${snapped.rect.x} (pos_x=${snapped.pos_x})`);
+
+	await gridToggle.click();
+	assert(await gridLineCount() === 0,
+		'grid lines survived the Grid toggle being switched off');
+
+	// Screen edges as magnet targets. A HUD hangs off the bottom and right edges,
+	// and the grid cannot reach them: the console extent is not a whole number of
+	// steps, so the last line always stops short. Snapping to the edge is what
+	// makes the corner reachable -- without it the one place a HUD actually sits
+	// is the one place drag assistance does not help.
+	await magnetToggle.click();
+	const screenSize = await page.evaluate(() => [
+		window.__fake.state.screen.vid_width, window.__fake.state.screen.vid_height]);
+	await setEnginePlacement('health', 40, screenSize[1] - 24 - 5);
+	// The guide only exists while the button is down -- it is cleared on release,
+	// so counting after the drag would find nothing and prove nothing.
+	let heldEdgeGuides = -1;
+	const nearBottom = await dragHealth(0, 6, {
+		beforeUp: async () => {
+			heldEdgeGuides = await page.locator('#overlay .snap-guide[data-target="screen"]').count();
+		},
+	});
+	assert(nearBottom.rect.y + nearBottom.rect.h === screenSize[1],
+		`dragged to the bottom edge and landed at ${nearBottom.rect.y + nearBottom.rect.h}, screen is ${screenSize[1]}`);
+	assert(heldEdgeGuides === 1,
+		`the screen edge was caught but ${heldEdgeGuides} guides named it -- a snap nobody can see is indistinguishable from a slip`);
+	await magnetToggle.click();
+	await setEnginePlacement('health', 13, 24);
+	const liveHint = page.locator('#drag-assist-live');
+	assert(await liveHint.isHidden(),
+		'drag-assistance stage hint was visible before a drag');
+	const free = await dragHealth(5, 0, {
+		beforeUp: async () => assert(await liveHint.isHidden(),
+			'drag-assistance stage hint appeared while both helpers were off'),
+	});
+	assert(Number(free.pos_x) % 5 !== 0,
+		`grid-off drag still quantized pos_x=${free.pos_x} to step 5`);
+
+	await magnetToggle.click();
+	await setEnginePlacement('health', 16, 30);
+	let magnetTarget = null;
+	const magnetized = await dragHealth(1, 1, {
+		beforeUp: async () => {
+			const guide = page.locator('#overlay .snap-guide--y');
+			await guide.waitFor();
+			magnetTarget = await guide.getAttribute('data-target');
+		},
+	});
+	const magnetState = await engineState();
+	const targetRect = named(magnetState, magnetTarget)?.rect;
+	const sourceY = [magnetized.rect.y, magnetized.rect.y + magnetized.rect.h / 2,
+		magnetized.rect.y + magnetized.rect.h];
+	const targetY = targetRect
+		? [targetRect.y, targetRect.y + targetRect.h / 2, targetRect.y + targetRect.h]
+		: [];
+	assert(sourceY.some((value) => targetY.includes(value)),
+		`magnet guide named ${magnetTarget} but no health edge/centre exactly aligned: `
+		+ `${JSON.stringify({ sourceY, targetY })}`);
+
+	await magnetToggle.click();
+	await setEnginePlacement('health', 16, 30);
+	const freeNearEdge = await dragHealth(1, 1);
+	assert(freeNearEdge.rect.y + freeNearEdge.rect.h !== named(await engineState(), 'armor').rect.y,
+		'magnet-off drag still aligned the two edges');
+
+	// Modifier contract: isolate the guaranteed grid mechanism. If magnet is on,
+	// a single "snapped" result can be true for the wrong reason. The raw landing
+	// is measured from this browser's frame width and must not already be on the
+	// 8px lattice, or both modifier cases would pass without exercising the grid.
+	await gridToggle.click();
+	await gridStep.fill('8');
+	await gridStep.press('Enter');
+	const instruction = await gridToggle.evaluate((node) =>
+		node.closest('section')?.querySelector('.font-state')?.textContent?.trim() ?? '');
+	const modifierMatch = /^Hold ([A-Za-z]+) while dragging to bypass both\.$/.exec(instruction);
+	assert(modifierMatch, `drag-assistance label does not name a modifier: ${JSON.stringify(instruction)}`);
+	const documentedModifier = modifierMatch[1];
+	const bypassCssDelta = 5;
+	const bypassFrameWidth = await page.locator('#frame').evaluate((node) => node.clientWidth);
+	const rawBypassDelta = displayDeltaToConsole(
+		bypassCssDelta, 0, SCREEN, CANVAS, bypassFrameWidth,
+	).dx;
+	const rawBypassX = Math.trunc(17 + rawBypassDelta);
+	assert(rawBypassX % 8 !== 0,
+		`modifier fixture is a grid no-op: raw pos_x=${rawBypassX} is already on the 8px lattice`);
+
+	await setEnginePlacement('health', 17, 30);
+	const altResult = await dragHealth(bypassCssDelta, 0, {
+		modifier: 'Alt',
+		beforeUp: async () => {
+			assert(await liveHint.isVisible(),
+				'drag-assistance help was not visible on the stage during a live assisted drag');
+			assert(await liveHint.textContent() === `Hold ${documentedModifier} for free move`,
+				`live drag help disagrees with the documented modifier: ${JSON.stringify(await liveHint.textContent())}`);
+			assert(await liveHint.getAttribute('data-bypass') === 'false',
+				'Alt made the live help claim free movement');
+		},
+	});
+	assert(Number(altResult.pos_x) % 8 === 0 && Number(altResult.pos_x) !== rawBypassX,
+		`Alt still bypassed the live grid: raw=${rawBypassX}, landed=${altResult.pos_x}`);
+	assert(await liveHint.isHidden(),
+		'drag-assistance stage hint remained visible after pointerup');
+
+	await setEnginePlacement('health', 17, 30);
+	const bypassed = await dragHealth(bypassCssDelta, 0, {
+		modifier: documentedModifier,
+		beforeUp: async () => {
+			assert(await liveHint.isVisible(),
+				'drag-assistance help was not visible during the bypass drag');
+			assert(await liveHint.textContent() === `Free move · ${documentedModifier} held`,
+				`live drag help did not confirm free movement: ${JSON.stringify(await liveHint.textContent())}`);
+			assert(await liveHint.getAttribute('data-bypass') === 'true',
+				'live drag help did not expose the active bypass state');
+		},
+	});
+	assert(Number(bypassed.pos_x) === rawBypassX,
+		`${documentedModifier} did not bypass the live grid: expected raw ${rawBypassX}, landed=${bypassed.pos_x}`);
+	assert(await page.evaluate(() => window.getSelection()?.toString() === ''),
+		`${documentedModifier}-drag selected page text`);
+	const dragExport = await page.evaluate(async () =>
+		(await import('/core/bridge.js')).currentBridge().exportFullCfg());
+	assert(!/snap|magnet/i.test(dragExport),
+		'drag-assistance editor state leaked into the exported cfg');
+
+	await gridToggle.click();
+	await page.evaluate(async () => (await import('/core/bridge.js')).currentBridge().send('hud_reset_layout'));
+	await page.waitForFunction(() => window.__fake.state.elements
+		.find((e) => e.name === 'health').pos_x === '16');
+	console.log(`  14 drag assistance: grid steps, free drag, edge magnet + guide, ${documentedModifier} bypass, Alt snap, clean export`);
+
+	// ---- 15. editor window scaling (#25) ------------------------------------
+	// The control scales editor chrome, never HUD coordinates. Its CSS change
+	// also has to wake FTE's resize glue because changing a custom property does
+	// not itself emit a browser resize event.
+	const uiScale = page.locator('#ui-scale');
+	await uiScale.waitFor();
+	assert(await uiScale.inputValue() === '1',
+		'the editor scale did not start at the usable 100% default');
+	const layoutAt100 = await page.evaluate(() => {
+		const box = (selector) => {
+			const rect = document.querySelector(selector).getBoundingClientRect();
+			return { width: rect.width, height: rect.height };
+		};
+		return {
+			rail: box('.panel--tree'), inspect: box('.panel--inspect'),
+			stage: box('.stage'), frame: box('.stage__frame'), canvas: box('#canvas'),
+		};
+	});
+	assert(layoutAt100.rail.width >= 240 && layoutAt100.inspect.width >= 280
+		&& layoutAt100.stage.width >= 600 && layoutAt100.stage.height >= 700,
+		`1440p-class default layout is not usable: ${JSON.stringify(layoutAt100)}`);
+	near(layoutAt100.canvas.width, layoutAt100.frame.width, 'default canvas/frame width');
+	near(layoutAt100.canvas.height, layoutAt100.frame.height, 'default canvas/frame height');
+
+	const placementBeforeScale = named(await engineState(), 'health');
+	const sentBeforeScale = (await sentLines()).length;
+	const screenBeforeScale = (await engineState()).screen;
+	await uiScale.selectOption('1.25');
+	await page.waitForFunction(() => localStorage.getItem('ezhud.ui.scale') === '1.25'
+		&& getComputedStyle(document.documentElement).getPropertyValue('--ui-scale').trim() === '1.25');
+	await page.waitForFunction(([width, height]) => {
+		const screen = window.__fake.state.screen;
+		return screen.vid_width !== width || screen.vid_height !== height;
+	}, [screenBeforeScale.vid_width, screenBeforeScale.vid_height]);
+	const layoutAt125 = await page.evaluate(() => {
+		const box = (selector) => {
+			const rect = document.querySelector(selector).getBoundingClientRect();
+			return { width: rect.width, height: rect.height };
+		};
+		return {
+			rail: box('.panel--tree'), inspect: box('.panel--inspect'),
+			stage: box('.stage'), frame: box('.stage__frame'), canvas: box('#canvas'),
+		};
+	});
+	assert(layoutAt125.rail.width > layoutAt100.rail.width
+		&& layoutAt125.inspect.width > layoutAt100.inspect.width,
+		`125% did not visibly enlarge editor chrome: ${JSON.stringify({ layoutAt100, layoutAt125 })}`);
+	assert(layoutAt125.stage.width > 500 && layoutAt125.stage.height > 700,
+		`125% collapsed the usable stage: ${JSON.stringify(layoutAt125.stage)}`);
+	near(layoutAt125.canvas.width, layoutAt125.frame.width, 'scaled canvas/frame width');
+	near(layoutAt125.canvas.height, layoutAt125.frame.height, 'scaled canvas/frame height');
+	const placementAfterScale = named(await engineState(), 'health');
+	assert(placementAfterScale.pos_x === placementBeforeScale.pos_x
+		&& placementAfterScale.pos_y === placementBeforeScale.pos_y,
+		'editor scaling changed engine placement values');
+	assert((await sentLines()).length === sentBeforeScale,
+		'editor scaling sent a command to the engine');
+	const scaledState = await page.evaluate(async () =>
+		(await import('/core/bridge.js')).currentBridge().state());
+	assert(scaledState.screen.vid_width === scaledState.physical[0]
+		&& scaledState.screen.vid_height === scaledState.physical[1],
+		`state.screen did not follow the resized canvas: ${JSON.stringify({ screen: scaledState.screen, physical: scaledState.physical })}`);
+
+	// A second chrome scale must produce a second engine resize, not merely the
+	// first one after boot. Leave 125% stored so the volume case's reload proves
+	// persistence from actual storage rather than a same-document variable.
+	const screenAt125 = structuredClone((await engineState()).screen);
+	await uiScale.selectOption('1.5');
+	await page.waitForFunction(([width, height]) => {
+		const screen = window.__fake.state.screen;
+		return screen.vid_width !== width || screen.vid_height !== height;
+	}, [screenAt125.vid_width, screenAt125.vid_height]);
+	await uiScale.selectOption('1.25');
+	await page.waitForFunction(() => localStorage.getItem('ezhud.ui.scale') === '1.25');
+	console.log('  15 editor scale: 1440p minimums, visible presets, persistence seed, canvas and state propagation');
+
+	// ---- 16. deterministic Jump to points (#23) ------------------------------
+	// These are points in the bundled tb4gf match, not editor-owned timestamps.
+	// Start on the other bundled demo so the first control must select its own
+	// match and wait for the engine-owned title signal before it seeks.
+	await page.waitForFunction(() => document.querySelectorAll('[data-demo-jump]').length === 3);
+	assert(await page.locator('#fte-moments').getAttribute('aria-label') === 'Jump to',
+		'the control group is not named Jump to');
+	await page.evaluate(() => { window.__fake.refuseDemo = false; });
+	await page.selectOption('#fte-demo', 'qw/demos/hudtest_src.mvd');
+	await page.waitForFunction(() => document.title.includes('hudtest_src.mvd'));
+
+	const prewar = page.locator('[data-demo-jump="0:00"]');
+	const sentBeforeRunningJump = (await sentLines()).length;
+	await prewar.click();
+	await page.waitForFunction(() => window.__fake.state.demo.position === '0:00'
+		&& window.__fake.state.demo.cl_demospeed === '0');
+	const runningJumpLines = (await sentLines()).slice(sentBeforeRunningJump);
+	assert(JSON.stringify(runningJumpLines) === JSON.stringify([
+		'playdemo demos/tb4gf_book_vs_s.mvd',
+		'demo_setspeed 0',
+		'demo_jump 0:00',
+		'demo_jump 0:00',
+		'demo_setspeed 0',
+	]), `running Prewar sent ${JSON.stringify(runningJumpLines)}`);
+	const parkedAtPrewar = await page.evaluate(() => window.__fake.demoCursor);
+	await page.waitForTimeout(300);
+	assert(await page.evaluate(() => window.__fake.demoCursor) === parkedAtPrewar,
+		'Prewar did not stay parked after a running Jump to gesture');
+
+	// Prove each authored point pauses running playback. The exact command order
+	// also guards the required origin reset and pause-after-seek semantics.
+	for (const expected of [
+		{ target: '0:00', label: 'Prewar' },
+		{ target: '10:00', label: '10:00' },
+		{ target: '20:10', label: 'Scoreboard' },
+	]) {
+		await page.evaluate(() => window.FTEC.cbufadd('demo_setspeed 100\n'));
+		await page.waitForFunction(() => window.__fake.state.demo.cl_demospeed === '1');
+		const control = page.locator(`[data-demo-jump="${expected.target}"]`);
+		assert(await control.textContent() === expected.label,
+			`Jump to ${expected.target} has the wrong label`);
+		const sentBeforeJump = (await sentLines()).length;
+		await control.click();
+		await page.waitForFunction((count) => window.__fake.sent.length >= count + 4,
+			sentBeforeJump);
+		await page.waitForFunction((target) => window.__fake.state.demo.position === target
+			&& window.__fake.state.demo.cl_demospeed === '0', expected.target);
+		const jumpLines = (await sentLines()).slice(sentBeforeJump);
+		assert(JSON.stringify(jumpLines) === JSON.stringify([
+			'demo_setspeed 0', 'demo_jump 0:00', `demo_jump ${expected.target}`, 'demo_setspeed 0',
+		]), `${expected.label} sent ${JSON.stringify(jumpLines)}`);
+		const parkedCursor = await page.evaluate(() => window.__fake.demoCursor);
+		await page.waitForTimeout(300);
+		assert(await page.evaluate(() => window.__fake.demoCursor) === parkedCursor,
+			`${expected.label} did not stay parked after the jump`);
+	}
+
+	// The same command must reset the engine-owned cursor to the same value,
+	// rather than accumulate a relative editor-side offset.
+	const scoreboard = page.locator('[data-demo-jump="20:10"]');
+	let sentBeforeRepeat = (await sentLines()).length;
+	await scoreboard.click();
+	await page.waitForFunction((count) => window.__fake.sent.length >= count + 4,
+		sentBeforeRepeat);
+	const firstScoreboardCursor = await page.evaluate(() => window.__fake.demoCursor);
+	sentBeforeRepeat = (await sentLines()).length;
+	await scoreboard.click();
+	await page.waitForFunction((count) => window.__fake.sent.length >= count + 4,
+		sentBeforeRepeat);
+	await page.waitForTimeout(250);
+	assert(await page.evaluate(() => window.__fake.demoCursor) === firstScoreboardCursor,
+		'two Scoreboard jumps did not land on the same paused engine cursor');
+
+	// A placement gesture while the demo is paused still crosses the engine
+	// boundary and is present in the export. The Jump to controls must not own or
+	// block editor placement state.
+	await page.locator('.tree__row[data-name="health"]').click();
+	const pausedPos = page.locator('#f-health-pos_x');
+	await pausedPos.fill('33');
+	await pausedPos.press('Enter');
+	await page.waitForFunction(() => window.__fake.state.elements
+		.find((element) => element.name === 'health').pos_x === '33');
+	const pausedExport = await page.evaluate(async () =>
+		(await import('/core/bridge.js')).currentBridge().exportFullCfg());
+	assert(pausedExport.split('\n').includes('hud_health_pos_x "33"'),
+		'the paused placement edit did not reach the full export');
+	assert((await engineState()).demo.cl_demospeed === '0',
+		'the placement edit resumed demo playback');
+	await page.evaluate(async () => {
+		const bridge = (await import('/core/bridge.js')).currentBridge();
+		await bridge.setCvar('hud_health_pos_x', 16);
+		window.FTEC.cbufadd('demo_setspeed 100\n');
+	});
+	await page.waitForFunction(() => window.__fake.state.demo.cl_demospeed === '1');
+	console.log('  16 Jump to: own match selection, three paused seeks, repeatable point, paused edit + export');
+
+	// ---- 17. volume ----------------------------------------------------------
 	// The page's own sound knob (#10). The engine side is a plain cvar write, so
 	// the assertions are about the contract around it: the quiet boot default,
 	// the mute/unmute round trip, the imported line that must never apply, and
@@ -870,15 +1599,76 @@ try {
 	await page.waitForFunction(() => document.getElementById('fte-volume')?.value === '0.4');
 	assert(await page.locator('#fte-mute').getAttribute('aria-pressed') === 'false',
 		'the unmuted state did not survive the reload');
+	await page.waitForFunction(() => document.getElementById('ui-scale')?.value === '1.25');
+	assert(await page.evaluate(() => getComputedStyle(document.documentElement)
+		.getPropertyValue('--ui-scale').trim()) === '1.25',
+		'the editor scale did not survive the reload');
 
-	console.log('  13 volume: quiet boot default, mute round trip, import refusal, persistence');
+	console.log('  17 volume: quiet boot default, mute round trip, import refusal, persistence');
+
+	// A second page at DPR 2 is the monitor-move half of #25. Playwright fixes
+	// deviceScaleFactor per browser context, so exercise that layout, then change
+	// its viewport while DPR stays fixed. Neither path may degenerate the rails or
+	// stop the canvas filling its frame.
+	const dprPage = await browser.newPage({
+		viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2,
+	});
+	try {
+		// Install the same public FTE boundary before the module app starts polling,
+		// but no command folding is needed: this page only exercises monitor/layout
+		// behaviour. A real rect keeps the live 16:9 stage path active rather than
+		// the intentional 4:3 empty-state placeholder.
+		await dprPage.addInitScript((state) => {
+			window.FTEC = { cbufadd() {}, handleevent() {} };
+			const install = setInterval(() => {
+				if (!window.Module) {
+					return;
+				}
+				clearInterval(install);
+				window.Module._EZHud_StateJSON = () => 1;
+				window.Module.UTF8ToString = () => JSON.stringify(state);
+			}, 0);
+		}, structuredClone(FIXTURE));
+		await dprPage.goto(`http://127.0.0.1:${port}/index-fte.html`);
+		await dprPage.waitForSelector('#overlay .box');
+		await dprPage.waitForSelector('#ui-scale');
+		const measure = () => dprPage.evaluate(() => {
+			const box = (selector) => {
+				const rect = document.querySelector(selector).getBoundingClientRect();
+				return { width: rect.width, height: rect.height };
+			};
+			return {
+				dpr: window.devicePixelRatio,
+				rail: box('.panel--tree'), inspect: box('.panel--inspect'),
+				stage: box('.stage'), frame: box('.stage__frame'), canvas: box('#canvas'),
+			};
+		});
+		const dpr1440 = await measure();
+		assert(dpr1440.dpr === 2, `deviceScaleFactor did not produce DPR 2: ${dpr1440.dpr}`);
+		assert(dpr1440.rail.width >= 240 && dpr1440.inspect.width >= 280
+			&& dpr1440.stage.width >= 600,
+			`DPR 2 collapsed the 1440 layout: ${JSON.stringify(dpr1440)}`);
+		near(dpr1440.canvas.width, dpr1440.frame.width, 'DPR 2 canvas/frame width');
+		near(dpr1440.canvas.height, dpr1440.frame.height, 'DPR 2 canvas/frame height');
+
+		await dprPage.setViewportSize({ width: 1280, height: 800 });
+		const dpr1280 = await measure();
+		assert(dpr1280.dpr === 2, 'viewport change unexpectedly changed DPR');
+		assert(dpr1280.rail.width >= 220 && dpr1280.inspect.width >= 260
+			&& dpr1280.stage.width >= 500 && dpr1280.stage.height >= 600,
+			`fixed-DPR viewport resize collapsed the layout: ${JSON.stringify(dpr1280)}`);
+		near(dpr1280.canvas.width, dpr1280.frame.width, 'resized DPR 2 canvas/frame width');
+		near(dpr1280.canvas.height, dpr1280.frame.height, 'resized DPR 2 canvas/frame height');
+	} finally {
+		await dprPage.close();
+	}
 
 	// The whole suite ran against a page whose engine script never downloaded.
 	assert(engineScript.length && engineScript.every((status) => status === 404),
 		`ftewebglcl.js should 404 here, got ${JSON.stringify(engineScript)}`);
 	assert(crashes.length === 0, `uncaught page errors: ${crashes.join('; ')}`);
 
-	console.log('Tier 3 FTE: 13 cases passed with no wasm (ftewebglcl.js 404 throughout)');
+	console.log('Tier 3 FTE: 17 cases passed with no wasm (ftewebglcl.js 404 throughout)');
 } catch (err) {
 	// A CI-only failure is undiagnosable from a TimeoutError alone; dump what
 	// the editor actually did before dying. Temporary debug aid — cheap enough

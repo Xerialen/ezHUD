@@ -184,6 +184,36 @@ test('killfeed derivation: absence is unknown, and the three canonical combos re
 	assert.match(model.killfeedSummary, /nowhere/);
 });
 
+test('placement options refuse self/descendant cycles with a stated reason', () => {
+	const model = new Model();
+	const element = (name, parent = null) => ({
+		name, shown: true, place: parent ? `@${parent}` : 'screen', parent,
+		align_x: 'left', align_y: 'top', pos_x: '0', pos_y: '0', order: '0', frame: '0',
+		spec_required: false, needs_pov: false, rect: { x: 0, y: 0, w: 10, h: 10 }, cvars: {},
+	});
+	model.applyState({
+		protocol: 1,
+		screen: { vid_width: 320, vid_height: 200, scr_con_current: 0 },
+		physical: [1280, 720],
+		elements: [element('parent'), element('child', 'parent'), element('grandchild', 'child')],
+	});
+
+	assert.match(model.placementRefusal('parent', '@parent'), /itself/);
+	assert.match(model.placementRefusal('parent', '@child'), /cycle/);
+	assert.match(model.placementRefusal('parent', 'grandchild'), /cycle/);
+	assert.equal(model.placementRefusal('grandchild', '@parent'), null);
+	assert.equal(model.placementRefusal('parent', 'screen'), null);
+
+	const options = model.placeOptions('parent');
+	for (const value of ['parent', '@parent', 'child', '@child', 'grandchild', '@grandchild']) {
+		const option = options.find((entry) => entry.value === value);
+		assert(option, `missing placement option ${value}`);
+		assert.equal(option.disabled, true, `${value} should be disabled`);
+		assert.match(option.reason, value.includes('parent') ? /itself/ : /cycle/);
+	}
+	assert.equal(options.find((entry) => entry.value === '@grandchild').label.includes('unavailable'), true);
+});
+
 test('save derivation checks the active directory listing and safe names', () => {
 	const model = new Model();
 	model.applyConfigs({

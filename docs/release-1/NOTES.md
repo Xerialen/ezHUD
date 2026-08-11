@@ -5,13 +5,15 @@ ezHUD now follows the browser window, reports the real size of the picture, and 
 ## Features
 
 ### The game view follows your window
-Resize the browser and the live game view grows or shrinks with it while every overlay handle stays on its element. The engine now reports both the virtual console size and the true backing-store pixels, so the editing-size readout cannot drift from the picture on screen.
-
+Before: Resizing the browser could leave the game view at its boot size and overlay handles out of alignment.
+After: The live game view grows or shrinks with the browser, every overlay handle stays on its element, and the engine reports both virtual console size and true backing-store pixels.
+Value: The editing-size readout and the HUD stay aligned with the picture on screen.
 Evidence: img/window-follow-focused-annotated.png
 
 ### Pause while you line things up
-Pause and Resume now sit beside the demo selector, letting you stop on a quiet frame before adjusting the HUD. The control follows the engine's real state: pausing from the console updates its label, while a backend that cannot pause disables it with an honest reason.
-
+Before: The editor had no Pause or Resume control, so lining up the HUD meant waiting for a useful demo frame.
+After: Pause and Resume sit beside the demo selector and follow the engine's real state, including console changes and an honest disabled reason on unsupported backends.
+Value: You can stop on a quiet frame and adjust the HUD without losing the moment you wanted.
 Evidence: img/pause-resume-focused-annotated.png
 
 ## Discord payload

@@ -1,6 +1,6 @@
 // tools/qa/wasm_bridge.mjs — expose the FTE wasm engine as an HTTP bridge.
 //
-//   node tools/qa/wasm_bridge.mjs [--dist ../dist] [--port 0]
+//   node tools/qa/wasm_bridge.mjs [--dist ../dist] [--port 0] [--base-path /]
 //
 // matrix.mjs speaks the loopback bridge protocol (/state, /cmd, /log). The
 // forked FTE engine speaks page globals: Module._EZHud_StateJSON() out,
@@ -24,6 +24,10 @@ const flag = (name, fallback) => {
 	return i >= 0 ? args[i + 1] : fallback;
 };
 const distDir = path.resolve(flag('dist', path.join(process.cwd(), '..', 'dist')));
+const basePath = flag('base-path', '/');
+if (!/^\/(?:.*\/)?$/.test(basePath)) {
+	throw new Error('--base-path must start and end with /');
+}
 const token = 'wasm-qa';
 
 const TYPES = {
@@ -37,7 +41,9 @@ const TYPES = {
 const site = createServer(async (request, response) => {
 	try {
 		const url = new URL(request.url, 'http://qa.invalid');
-		const rel = url.pathname === '/' ? '/index.html' : url.pathname;
+		if (!url.pathname.startsWith(basePath)) throw new Error('outside base path');
+		const stripped = url.pathname.slice(basePath.length);
+		const rel = stripped === '' ? 'index.html' : stripped;
 		const file = path.join(distDir, path.normalize(rel).replace(/^([/\\])+/, ''));
 		if (!file.startsWith(distDir)) throw new Error('traversal');
 		await stat(file);
@@ -52,9 +58,13 @@ const siteOrigin = `http://127.0.0.1:${site.address().port}`;
 
 // ---- the engine, headless ---------------------------------------------------
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const deviceScaleFactor = Number(flag('device-scale-factor', 1));
+if (!Number.isFinite(deviceScaleFactor) || deviceScaleFactor <= 0) {
+	throw new Error('--device-scale-factor must be a positive number');
+}
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor });
 page.on('pageerror', (err) => console.error('[page]', err.message));
-await page.goto(`${siteOrigin}/index.html`, { waitUntil: 'domcontentloaded' });
+await page.goto(`${siteOrigin}${basePath}index.html`, { waitUntil: 'domcontentloaded' });
 
 // Ready means: state export present, command channel up, and at least one
 // element drawn (the editor can only place what the engine draws).
@@ -80,21 +90,102 @@ async function pageMetrics() {
 	return page.evaluate(() => {
 		const canvas = document.getElementById('canvas');
 		const rect = canvas.getBoundingClientRect();
+		const frameRect = document.getElementById('stage')?.getBoundingClientRect();
+		const stageRect = document.querySelector('.stage')?.getBoundingClientRect();
+		const railRect = document.querySelector('.panel--tree')?.getBoundingClientRect();
+		const inspectorRect = document.querySelector('.panel--inspect')?.getBoundingClientRect();
 		const m = globalThis.Module;
 		const state = JSON.parse(m.UTF8ToString(m._EZHud_StateJSON()));
 		return {
 			viewport: { width: innerWidth, height: innerHeight },
 			resize_callback: globalThis.FTEC?.evcb?.resize ?? null,
+			editor_ready: Boolean(document.getElementById('empty')?.hidden
+				&& document.querySelector('#overlay .box')),
 			canvas: {
 				width: canvas.width,
 				height: canvas.height,
 				css_width: rect.width,
 				css_height: rect.height,
+				inline_width: canvas.style.width,
+				inline_height: canvas.style.height,
+			},
+			layout: {
+				frame: frameRect ? [frameRect.width, frameRect.height] : null,
+				stage: stageRect ? [stageRect.width, stageRect.height] : null,
+				rail: railRect ? [railRect.width, railRect.height] : null,
+				inspector: inspectorRect ? [inspectorRect.width, inspectorRect.height] : null,
 			},
 			physical: state.physical,
 			screen: state.screen,
 		};
 	});
+}
+
+// Capture exactly the rectangle the engine exported. This deliberately has no
+// element-specific coordinate correction: a consumer must be able to trust
+// rect.x as drawn. `rows` limits content-sized proofs such as the tracker to
+// their first painted row instead of including reserved empty rows.
+async function pageElementPixels(name, rows = 1, suppliedRect = null, includeRaw = false) {
+	const state = await pageState();
+	const element = state.elements?.find((entry) => entry.name === name);
+	const rect = suppliedRect ?? element?.rect;
+	if (!rect || rect.w <= 0 || rect.h <= 0) {
+		throw new Error(`${name} has no non-empty exported rect`);
+	}
+	const canvasBox = await page.locator('#canvas').boundingBox();
+	if (!canvasBox) throw new Error('canvas has no browser bounds');
+	const sx = canvasBox.width / state.screen.vid_width;
+	const sy = canvasBox.height / state.screen.vid_height;
+	const viewport = page.viewportSize();
+	const x = Math.max(0, canvasBox.x + rect.x * sx);
+	const y = Math.max(0, canvasBox.y + rect.y * sy);
+	const width = Math.min(Math.max(1, rect.w * sx), viewport.width - x);
+	const rowHeight = rect.h / Math.max(1, rows);
+	const height = Math.min(Math.max(1, rowHeight * sy), viewport.height - y);
+	if (width <= 0 || height <= 0) {
+		throw new Error(`${name} exported rect lies outside the browser viewport`);
+	}
+	const browserClip = { x, y, width, height };
+	let overlay = null;
+	if (element?.rect) {
+		const overlayBox = page.locator(`#overlay .box[data-name="${name}"]`);
+		await overlayBox.waitFor({ state: 'visible', timeout: 5000 });
+		const box = await overlayBox.boundingBox();
+		overlay = box ? { x: box.x, y: box.y, width: box.width, height: box.height } : null;
+	}
+	const overlayVisibility = await page.locator('#overlay').evaluate((node) => node.style.visibility);
+	await page.locator('#overlay').evaluate((node) => { node.style.visibility = 'hidden'; });
+	let png;
+	try {
+		png = await page.screenshot({ clip: { x, y, width, height } });
+	} finally {
+		await page.locator('#overlay').evaluate((node, value) => { node.style.visibility = value; }, overlayVisibility);
+	}
+	const decoded = await page.evaluate(async ([base64, raw]) => {
+		const response = await fetch(`data:image/png;base64,${base64}`);
+		const bitmap = await createImageBitmap(await response.blob());
+		const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+		const context = canvas.getContext('2d');
+		context.drawImage(bitmap, 0, 0);
+		const pixels = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+		let a = 2166136261;
+		let b = 0;
+		for (let i = 0; i < pixels.length; i++) {
+			a = Math.imul(a ^ pixels[i], 16777619) >>> 0;
+			b = (b + Math.imul(pixels[i], i + 1)) >>> 0;
+		}
+		let rgba = null;
+		if (raw) {
+			let binary = '';
+			for (let i = 0; i < pixels.length; i += 0x8000) {
+				binary += String.fromCharCode(...pixels.subarray(i, i + 0x8000));
+			}
+			rgba = btoa(binary);
+		}
+		return { signature: `${bitmap.width}x${bitmap.height}:${a}:${b}`, width: bitmap.width,
+			height: bitmap.height, rgba };
+	}, [png.toString('base64'), includeRaw]);
+	return { ...decoded, png: png.toString('base64'), rect, screen: state.screen, browserClip, overlay };
 }
 
 async function pageCmd(line) {
@@ -125,6 +216,25 @@ const bridge = createServer(async (request, response) => {
 			// reached both the canvas backing store and EZHud_StateJSON.
 			response.writeHead(200, { 'content-type': 'application/json' });
 			response.end(JSON.stringify(await pageMetrics()));
+			return;
+		}
+		if (url.pathname === '/pixels') {
+			const rows = Number(url.searchParams.get('rows') ?? 1);
+			const name = url.searchParams.get('element') ?? '';
+			const includeRaw = url.searchParams.get('raw') === '1';
+			const rectValues = ['x', 'y', 'w', 'h'].map((key) => url.searchParams.has(key)
+				? Number(url.searchParams.get(key)) : null);
+			const hasSuppliedRect = rectValues.every(Number.isFinite);
+			const suppliedRect = hasSuppliedRect
+				? Object.fromEntries(['x', 'y', 'w', 'h'].map((key, index) => [key, rectValues[index]]))
+				: null;
+			if (!/^[a-z0-9_]+$/i.test(name) || !Number.isInteger(rows) || rows < 1
+				|| (rectValues.some((value) => value !== null) && !hasSuppliedRect)) {
+				response.writeHead(400).end('{"ok":false,"error":"invalid pixel probe"}');
+				return;
+			}
+			response.writeHead(200, { 'content-type': 'application/json' });
+			response.end(JSON.stringify(await pageElementPixels(name, rows, suppliedRect, includeRaw)));
 			return;
 		}
 		if (url.pathname === '/log') {
