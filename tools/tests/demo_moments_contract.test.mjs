@@ -33,19 +33,24 @@ test('the FTE and native bare-command allowlists agree and both admit demo_jump'
 		'bare-command allowlists drifted between the two backends');
 });
 
-test('the bundled match exposes the three reviewed deterministic moments', () => {
+test('the bundled match exposes the three reviewed Jump to points', () => {
 	const attribute = (source, name) =>
 		new RegExp(`${name}="([^"]+)"`).exec(source)?.[1] ?? null;
-	const controls = [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)]
+	const group = /<div\b([^>]*\bid="fte-moments"[^>]*)>([\s\S]*?)<\/div>/.exec(html);
+	assert(group, 'Jump to control group not found');
+	assert.equal(attribute(group[1], 'aria-label'), 'Jump to');
+	assert.match(group[2], /<span>\s*Jump to\s*<\/span>/);
+	const controls = [...group[2].matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)]
 		.filter((match) => attribute(match[1], 'data-demo-jump'))
 		.map((match) => ({
+			id: attribute(match[1], 'id'),
 			demo: attribute(match[1], 'data-demo-path'),
 			target: attribute(match[1], 'data-demo-jump'),
 			label: match[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
 		}));
 	assert.deepEqual(controls, [
-		{ demo: 'qw/demos/tb4gf_book_vs_s.mvd', target: '9:00', label: 'Full HUD' },
-		{ demo: 'qw/demos/tb4gf_book_vs_s.mvd', target: '20:10', label: 'Scoreboard' },
-		{ demo: 'qw/demos/tb4gf_book_vs_s.mvd', target: '0:10', label: 'Quiet' },
+		{ id: 'fte-moment-prewar', demo: 'qw/demos/tb4gf_book_vs_s.mvd', target: '0:00', label: 'Prewar' },
+		{ id: 'fte-moment-ten-minutes', demo: 'qw/demos/tb4gf_book_vs_s.mvd', target: '10:00', label: '10:00' },
+		{ id: 'fte-moment-scoreboard', demo: 'qw/demos/tb4gf_book_vs_s.mvd', target: '20:10', label: 'Scoreboard' },
 	]);
 });

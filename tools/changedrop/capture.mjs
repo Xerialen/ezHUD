@@ -46,8 +46,8 @@ const RING_PADDING = 6;
 const MAX_PROBE_OUTPUT_BYTES = 65_536;
 const PROBE_TIMEOUT_MS = 30_000;
 
-export const ACTIONS = Object.freeze(['wait-for', 'resize', 'click', 'hold', 'highlight']);
-export const SELECTOR_PATTERN = /^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\[data-changedrop="[a-z0-9]+(?:-[a-z0-9]+)*"\])$/;
+export const ACTIONS = Object.freeze(['wait-for', 'resize', 'click', 'hold', 'highlight', 'drag']);
+export const SELECTOR_PATTERN = /^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\[data-changedrop="[a-z0-9]+(?:-[a-z0-9]+)*"\]|\.box\[data-name="[A-Za-z_][A-Za-z0-9_]{0,63}"\])$/;
 
 // Five seconds (5000 ms) is long enough to hold a current narration beat or
 // changed control legibly, but short enough that one typo cannot stall a run.
@@ -58,6 +58,10 @@ export const MAX_HOLD_MS = 5_000;
 export const MAX_CAPTURE_MS = 180_000;
 
 const ACTION_SET = new Set(ACTIONS);
+const DRAG_MODIFIERS = new Set(['Alt', 'Control', 'Meta', 'Shift']);
+const DRAG_STEPS = 20;
+const DRAG_STEP_DELAY_MS = 16;
+const DRAG_SETTLE_ATTEMPTS = 10;
 
 function exactObject(value, expectedKeys, at) {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${at} must be an object.`);
@@ -82,8 +86,20 @@ function finiteNumber(value, at, { minimum = null, positive = false } = {}) {
 
 function validateSelector(value, at) {
 	if (typeof value !== 'string' || !SELECTOR_PATTERN.test(value)) {
-		throw new Error(`${at} selector must be id-style (#name) or [data-changedrop="kebab-name"].`);
+		throw new Error(`${at} selector must be id-style (#name), [data-changedrop="kebab-name"], or .box[data-name="element_name"].`);
 	}
+}
+
+function validateDragTarget(value, at) {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${at} must be an object.`);
+	if ('selector' in value) {
+		exactObject(value, ['selector'], at);
+		validateSelector(value.selector, at);
+		return;
+	}
+	exactObject(value, ['x', 'y'], at);
+	finiteNumber(value.x, `${at} x`, { minimum: 0 });
+	finiteNumber(value.y, `${at} y`, { minimum: 0 });
 }
 
 function validateWalkthrough(value, at, { setup = false } = {}) {
@@ -111,6 +127,16 @@ function validateWalkthrough(value, at, { setup = false } = {}) {
 		case 'click':
 			exactObject(step, ['instruction', 'action', 'selector'], label);
 			validateSelector(step.selector, label);
+			break;
+		case 'drag':
+			exactObject(step, step.modifier === undefined
+				? ['instruction', 'action', 'selector', 'target']
+				: ['instruction', 'action', 'selector', 'target', 'modifier'], label);
+			validateSelector(step.selector, label);
+			validateDragTarget(step.target, `${label} target`);
+			if (step.modifier !== undefined && !DRAG_MODIFIERS.has(step.modifier)) {
+				throw new Error(`${label} drag modifier must be Alt, Control, Meta, or Shift.`);
+			}
 			break;
 		case 'hold': {
 			const hasFloorMs = step.floor_ms !== undefined;
@@ -486,6 +512,7 @@ function machineAction(step) {
 	return {
 		...action,
 		...(action.crop ? { crop: { ...action.crop } } : {}),
+		...(action.target ? { target: { ...action.target } } : {}),
 	};
 }
 
@@ -783,6 +810,62 @@ async function bounded(operation, deadline, label) {
 	}
 }
 
+export async function executeDrag(page, step, timeout) {
+	const source = page.locator(step.selector);
+	await source.waitFor({ state: 'visible', timeout });
+	const sourceBox = await source.boundingBox();
+	if (!sourceBox) throw new Error('Drag source has no visible geometry.');
+
+	let destination;
+	if (step.target.selector !== undefined) {
+		const target = page.locator(step.target.selector);
+		await target.waitFor({ state: 'visible', timeout });
+		const targetBox = await target.boundingBox();
+		if (!targetBox) throw new Error('Drag target has no visible geometry.');
+		destination = { x: targetBox.x + targetBox.width / 2, y: targetBox.y + targetBox.height / 2 };
+	} else {
+		destination = { x: step.target.x, y: step.target.y };
+		const viewport = page.viewportSize?.();
+		if (viewport && (destination.x > viewport.width || destination.y > viewport.height)) {
+			throw new Error('Drag coordinate target lies outside the active viewport.');
+		}
+	}
+
+	const start = { x: sourceBox.x + sourceBox.width / 2, y: sourceBox.y + sourceBox.height / 2 };
+	await page.mouse.move(start.x, start.y);
+	let modifierDown = false;
+	let mouseDown = false;
+	try {
+		if (step.modifier) {
+			await page.keyboard.down(step.modifier);
+			modifierDown = true;
+		}
+		await page.mouse.down();
+		mouseDown = true;
+		for (let index = 1; index <= DRAG_STEPS; index += 1) {
+			const progress = index / DRAG_STEPS;
+			await page.mouse.move(
+				start.x + (destination.x - start.x) * progress,
+				start.y + (destination.y - start.y) * progress,
+			);
+			await page.waitForTimeout(DRAG_STEP_DELAY_MS);
+		}
+		await page.mouse.up();
+		mouseDown = false;
+	} finally {
+		if (mouseDown) await page.mouse.up().catch(() => {});
+		if (modifierDown) await page.keyboard.up(step.modifier);
+	}
+
+	for (let attempt = 0; attempt < DRAG_SETTLE_ATTEMPTS; attempt += 1) {
+		const settledBox = await source.boundingBox();
+		if (settledBox && (Math.abs(settledBox.x - sourceBox.x) > 0.5
+			|| Math.abs(settledBox.y - sourceBox.y) > 0.5)) return;
+		await page.waitForTimeout(DRAG_STEP_DELAY_MS);
+	}
+	throw new Error(`Drag source ${step.selector} did not move.`);
+}
+
 async function executeStep({
 	page,
 	annotationPage,
@@ -811,6 +894,9 @@ async function executeStep({
 		return null;
 	case 'click':
 		await bounded(page.locator(step.selector).click({ timeout }), deadline, 'click');
+		return null;
+	case 'drag':
+		await bounded(executeDrag(page, step, timeout), deadline, 'drag');
 		return null;
 	case 'hold':
 		if (step.floor_ms !== undefined) {

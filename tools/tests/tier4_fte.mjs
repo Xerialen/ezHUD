@@ -56,9 +56,9 @@ const ENGINE_WAIT = 60000;
 const UI_WAIT = 20000;
 
 const DEMO_MOMENTS = [
-	{ target: '9:00', label: 'Full HUD' },
+	{ target: '0:00', label: 'Prewar' },
+	{ target: '10:00', label: '10:00' },
 	{ target: '20:10', label: 'Scoreboard' },
-	{ target: '0:10', label: 'Quiet' },
 ];
 const DEMO_STATE_ELEMENTS = [
 	'key1', 'gun2', 'gun4', 'teamfrags', 'health', 'tracking',
@@ -269,11 +269,11 @@ const readRectContract = () => page.evaluate(async (spec) => {
 	};
 }, BRIDGE);
 
-// A compact projection of the engine-owned layout at a demo point. These
+// A compact projection of the engine-owned layout at a Jump to point. These
 // elements distinguish the three reviewed frames without depending on a page
 // clock or on tracker, whose false zero-area rect is independently tracked by
-// #87. Playback is frozen before every read, so three identical projections in
-// succession are a settled consumed-packet state rather than a timing guess.
+// #87. Three identical projections while cl_demospeed is zero establish a
+// settled consumed-packet state rather than a page-owned timing guess.
 const readDemoMomentState = () => page.evaluate(async ([spec, names]) => {
 	const { currentBridge } = await import(spec);
 	const state = await currentBridge().state();
@@ -288,13 +288,13 @@ const readDemoMomentState = () => page.evaluate(async ([spec, names]) => {
 
 const demoMomentSignature = (state) => JSON.stringify(state.elements);
 
-async function waitForDemoMoment(previousSignature, label) {
+async function waitForDemoMoment(label) {
 	let lastSignature = null;
 	let stableReads = 0;
 	return eventually(async () => {
 		const state = await readDemoMomentState();
 		const signature = demoMomentSignature(state);
-		if (state.speed !== '0' || signature === previousSignature) {
+		if (state.speed !== '0') {
 			lastSignature = null;
 			stableReads = 0;
 			return null;
@@ -1033,7 +1033,7 @@ try {
 		},
 		...DEMO_MOMENTS.map((moment) => ({
 			issue: 23,
-			label: `${moment.label} demo moment`,
+			label: `${moment.label} Jump to point`,
 			target: { selector: `[data-demo-jump="${moment.target}"]` },
 			operation: { kind: 'click' },
 			moment,
@@ -1632,13 +1632,13 @@ try {
 		}, `${candidate.name} screen placement ${x},${y}`, UI_WAIT);
 		await waitEditorCaughtUp(candidate.name);
 	};
-	const dragSubject = async (dx, dy, { alt = false, beforeUp = null } = {}) => {
+	const dragSubject = async (dx, dy, { modifier = null, beforeUp = null } = {}) => {
 		await selectForPlacement(candidate.name);
 		const beforeDrag = (await readState(candidate.name)).element;
 		const subjectBox = page.locator('#overlay .box[data-selected="true"]');
 		const rect = await subjectBox.boundingBox();
 		assert(rect, `${candidate.name} has no box for drag assistance`);
-		if (alt) await page.keyboard.down('Alt');
+		if (modifier) await page.keyboard.down(modifier);
 		try {
 			await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
 			await page.mouse.down();
@@ -1647,7 +1647,7 @@ try {
 			if (beforeUp) await beforeUp();
 			await page.mouse.up();
 		} finally {
-			if (alt) await page.keyboard.up('Alt');
+			if (modifier) await page.keyboard.up(modifier);
 		}
 		return eventually(async () => {
 			const state = (await readState(candidate.name)).element;
@@ -1710,20 +1710,29 @@ try {
 		});
 
 		await snapGrid.click();
-		await snapMagnet.click();
 		await snapStep.fill('8');
+		const instruction = await snapGrid.evaluate((node) =>
+			node.closest('section')?.querySelector('.font-state')?.textContent?.trim() ?? '');
+		const modifierMatch = /^Hold ([A-Za-z]+) while dragging to bypass both\.$/.exec(instruction);
+		assert(modifierMatch,
+			`drag-assistance label does not name a modifier: ${JSON.stringify(instruction)}`);
+		const documentedModifier = modifierMatch[1];
+
 		await placeSubject(14, 80);
-		const bypassResult = await dragSubject(7, 0, {
-			alt: true,
-			beforeUp: async () => assert(await page.locator('#overlay .snap-guide').count() === 0,
-				'Alt bypass still drew a live guide'),
-		});
+		const altResult = await dragSubject(7, 0, { modifier: 'Alt' });
+		assert(Number(altResult.pos_x) % 8 === 0,
+			`Alt still bypassed the live grid at pos_x=${altResult.pos_x}`);
+
+		await placeSubject(14, 80);
+		const bypassResult = await dragSubject(7, 0, { modifier: documentedModifier });
 		assert(Number(bypassResult.pos_x) % 8 !== 0,
-			`Alt bypass still grid-snapped live pos_x=${bypassResult.pos_x}`);
+			`${documentedModifier} still grid-snapped live pos_x=${bypassResult.pos_x}`);
+		assert(await page.evaluate(() => window.getSelection()?.toString() === ''),
+			`${documentedModifier}-drag selected page text`);
 		const dragAssistExport = await readExport();
 		assert(!/snap|magnet/i.test(dragAssistExport),
 			'drag assistance leaked editor-only state into the full export');
-		pass(nextCase++, `${candidate.name} drag: 8/5 grids, free pixels, magnet guide + exact engine edge, Alt bypass, clean export`);
+		pass(nextCase++, `${candidate.name} drag: 8/5 grids, free pixels, magnet guide + exact engine edge, ${documentedModifier} bypass, Alt snap, clean export`);
 	} finally {
 		if (await snapGrid.isChecked()) await snapGrid.click().catch(() => {});
 		if (await snapMagnet.isChecked()) await snapMagnet.click().catch(() => {});
@@ -1739,46 +1748,55 @@ try {
 		}, { name: candidate.name, original: dragSubjectOriginal }).catch(() => {});
 	}
 
-	// ---- #23 deterministic moments against the real wasm engine -------------
-	// Case 6 already selected the bundled tb4gf match. Drive each new authored
-	// button while paused, then compare compact engine-state projections: all
-	// three points must differ, and a second Scoreboard run must match the first.
-	// The exact demo_jump command/argument is independently asserted in tier 3F.
+	// ---- #23 Jump to against the real wasm engine ----------------------------
+	// Case 6 already selected the bundled tb4gf match. Drive every authored
+	// button from running playback: every point must settle paused, and a second
+	// Scoreboard run must match the first. Exact command order and target strings
+	// are independently asserted in tier 3F.
 	await eventually(async () => {
 		const state = await readState();
 		return state.demo?.cl_demospeed === '1'
 			&& await pauseButton.getAttribute('aria-pressed') === 'false'
 			&& await pauseButton.isEnabled() ? true : null;
-	}, 'normal playback to reach the pause toggle before demo moments', UI_WAIT);
-	await pauseButton.click();
-	await eventually(async () => (await readState()).demo?.cl_demospeed === '0'
-		&& await pauseButton.getAttribute('aria-pressed') === 'true' ? true : null,
-	'the demo moments to start from paused engine state', UI_WAIT);
+	}, 'normal playback before Jump to', UI_WAIT);
 
 	const momentRows = new Map(controlCases
 		.filter((entry) => entry.issue === 23)
 		.map((row) => [row.moment.target, row]));
 	const momentStates = new Map();
-	let previousMoment = demoMomentSignature(await readDemoMomentState());
 	const momentSubjectOriginal = (await readState(candidate.name)).element;
+	const jumpOrder = ['20:10', '0:00', '10:00', '20:10'];
 	try {
-		for (const target of ['20:10', '0:10', '9:00', '20:10']) {
+		for (const [index, target] of jumpOrder.entries()) {
 			const row = momentRows.get(target);
-			assert(row, `missing declarative 4F row for demo moment ${target}`);
+			assert(row, `missing declarative 4F row for Jump to ${target}`);
 			await operateControl(row);
-			const settledMoment = await waitForDemoMoment(previousMoment, row.label);
+			const settledMoment = await waitForDemoMoment(row.label);
+			await sleep(300);
+			const heldMoment = await readDemoMomentState();
+			assert(heldMoment.speed === '0', `${row.label} resumed after its paused landing`);
+			assert(demoMomentSignature(heldMoment) === settledMoment.signature,
+				`${row.label} engine state changed after its paused landing`);
 			const first = momentStates.get(target);
 			if (first) {
 				assert(settledMoment.signature === first,
 					`${row.label} was not repeatable: ${first} != ${settledMoment.signature}`);
 			} else {
 				momentStates.set(target, settledMoment.signature);
-				pass(nextCase++, `${row.label} — visible seek reached a settled paused engine state`);
+				pass(nextCase++, `${row.label} — running playback reached a settled paused engine state`);
 			}
-			previousMoment = settledMoment.signature;
+			if (index < jumpOrder.length - 1) {
+				await eventually(async () => await pauseButton.getAttribute('aria-pressed') === 'true'
+					&& await pauseButton.isEnabled() ? true : null,
+				`${row.label} paused readback to reach Resume`, UI_WAIT);
+				await pauseButton.click();
+				await eventually(async () => (await readState()).demo?.cl_demospeed === '1'
+					&& await pauseButton.getAttribute('aria-pressed') === 'false' ? true : null,
+				`${row.label} cleanup to running playback`, UI_WAIT);
+			}
 		}
-		assert(new Set(momentStates.values()).size === DEMO_MOMENTS.length,
-			`the three demo controls did not reach distinct engine states: ${JSON.stringify([...momentStates])}`);
+		assert(momentStates.size === DEMO_MOMENTS.length,
+			`expected three settled Jump to states, got ${momentStates.size}`);
 
 		// A visible placement edit while the same consumed-packet cursor is frozen
 		// must still cross into the engine and into the user's full config export.

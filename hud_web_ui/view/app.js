@@ -9,10 +9,12 @@ import {
 	needsRecalculate, parseColor, resizeTo, resizedRect,
 } from '../core/model.js';
 import {
-	consoleToFrame, displayDeltaToConsole, elementAt, normaliseElementName,
+	alignmentBase, consoleToFrame, displayDeltaToConsole, elementAt, normaliseElementName,
 	quantize, scaleFactors,
 } from '../core/geometry.js';
-import { magnetizeRect, snapToGrid } from '../core/snapping.js';
+import {
+	gridLines, magnetizeRect, screenMagnetTarget, snapToGrid,
+} from '../core/snapping.js';
 import * as syslog from '../core/log.js';
 import { initDebugPanel } from './debug.js';
 
@@ -22,7 +24,7 @@ const el = {
 	sbCursor: $('sb-cursor'), sbDrawn: $('sb-drawn'), sbEngine: $('engine'),
 	sbFont: $('sb-font'), sbFrame: $('sb-frame'),
 	filter: $('filter'), showHidden: $('show-hidden'), showSpectator: $('show-spectator'), tree: $('tree'), treeCount: $('tree-count'),
-	stage: $('stage'), frame: $('frame'), overlay: $('overlay'), empty: $('empty'),
+	stage: $('stage'), frame: $('frame'), overlay: $('overlay'), dragAssistLive: $('drag-assist-live'), empty: $('empty'),
 	emptyTitle: $('empty-title'), emptyBody: $('empty-body'),
 	inspector: $('inspector'), fontPanel: $('fonts'), groupPanel: $('groups'),
 	saveOpen: $('save-open'), saveDialog: $('save-dialog'),
@@ -30,7 +32,11 @@ const el = {
 	snapGrid: $('snap-grid'), snapStep: $('snap-step'), snapMagnet: $('snap-magnet'),
 };
 
-const dragAssist = { grid: false, step: 8, magnet: false, thresholdCss: 8 };
+// step 32 by default (owner, 2026-08-09): a HUD is laid out in a handful of
+// coarse positions, so the useful default is one you can see and aim at rather
+// than the finest one the engine allows. The markup's value attribute is the
+// same number -- they are read independently, so they have to agree.
+const dragAssist = { grid: false, step: 32, magnet: false, thresholdCss: 8 };
 
 // Editor chrome scale is browser-local preference, not HUD state. Keeping the
 // accepted values closed avoids a corrupted localStorage entry producing an
@@ -598,6 +604,9 @@ function renderOverlay() {
 	}
 	const displayScale = shown / natural;
 
+	// Before the boxes, so element edges stay readable against it.
+	renderGrid();
+
 	const selected = model.selectedElement;
 	if (selected?.parent && selected.rect) {
 		const parent = model.element(selected.parent);
@@ -856,6 +865,85 @@ function clearSnapGuides() {
 	el.overlay.querySelectorAll('.snap-guide').forEach((guide) => guide.remove());
 }
 
+function updateDragAssistHint(bypass) {
+	if (!dragAssist.grid && !dragAssist.magnet) {
+		el.dragAssistLive.hidden = true;
+		return;
+	}
+	el.dragAssistLive.hidden = false;
+	el.dragAssistLive.dataset.bypass = String(bypass);
+	el.dragAssistLive.textContent = bypass
+		? 'Free move · Shift held'
+		: 'Hold Shift for free move';
+}
+
+function clearDragAssistHint() {
+	el.dragAssistLive.hidden = true;
+	el.dragAssistLive.removeAttribute('data-bypass');
+	el.dragAssistLive.textContent = '';
+}
+
+// The closest the grid may be drawn, in displayed CSS pixels. Chosen by looking
+// at candidate spacings composited over a real recorded frame (412x231 console
+// on an 830px stage, warm brown Quake geometry, not the near-black test fake):
+// at 16 it reads as a grid, at 10 as a veil, at 6 it visibly dims the picture.
+// A step under this is coarsened to a multiple of itself, never blanked.
+const GRID_MIN_CSS = 12;
+
+function clearGrid() {
+	el.overlay.querySelectorAll('.snap-grid').forEach((line) => line.remove());
+}
+
+
+// Draw the grid a drag would snap to. Called from renderOverlay (which wipes the
+// overlay) and directly from the Grid and Step controls, because toggling them
+// changes nothing the overlay's staleness check looks at.
+function renderGrid() {
+	clearGrid();
+	if (!dragAssist.grid || !model.frameReady) {
+		return;
+	}
+	const s = model.screen;
+	const p = model.physical;
+	const natural = el.frame.naturalWidth;
+	const shown = el.frame.clientWidth;
+	if (!s || !p || !p[0] || !p[1] || !natural || !shown) {
+		return;
+	}
+	const displayScale = shown / natural;
+	// The floor is a display measurement, and the step is in console units. Send
+	// it through the transform the drag itself uses rather than comparing the two
+	// directly: at any UI scale but 1 they are different quantities.
+	const floor = displayDeltaToConsole(GRID_MIN_CSS, GRID_MIN_CSS, s, p, shown);
+	// One fixed lattice on the screen, the same for every element. That is what
+	// makes it something you can snap things INTO: two elements dragged onto the
+	// same line end up aligned with each other. A per-element lattice would be
+	// truthful about one element at a time and useless for lining up two.
+	const lines = gridLines(
+		dragAssist.step,
+		{ w: s.vid_width, h: s.vid_height },
+		{ x: Math.abs(floor.dx), y: Math.abs(floor.dy) },
+	);
+	const fragment = document.createDocumentFragment();
+	for (const axis of ['x', 'y']) {
+		for (const value of lines[axis]) {
+			const projected = consoleToFrame(
+				{ x: axis === 'x' ? value : 0, y: axis === 'y' ? value : 0, w: 0, h: 0 },
+				s, p,
+			);
+			const node = document.createElement('div');
+			node.className = `snap-grid snap-grid--${axis}`;
+			if (axis === 'x') {
+				node.style.left = `${projected.x * displayScale}px`;
+			} else {
+				node.style.top = `${projected.y * displayScale}px`;
+			}
+			fragment.append(node);
+		}
+	}
+	el.overlay.prepend(fragment);
+}
+
 function renderSnapGuides(guides) {
 	clearSnapGuides();
 	const displayScale = el.frame.clientWidth / (el.frame.naturalWidth || 1);
@@ -885,16 +973,25 @@ function beginDrag(ev, item) {
 	const originX = Number(item.pos_x) || 0;
 	const originY = Number(item.pos_y) || 0;
 	const rect = { ...item.rect };
+	// Where the engine's alignment puts this element before its offset, in whole
+	// console pixels. Fixed for the gesture: the anchor cannot move under a drag.
+	const baseX = alignmentBase(rect.x, item.pos_x);
+	const baseY = alignmentBase(rect.y, item.pos_y);
 	const excluded = descendantNames(item.name, new Set([item.name]));
 	const magnetTargets = model.placedElements
 		.filter((target) => !excluded.has(target.name))
 		.map((target) => ({ name: target.name, rect: { ...target.rect } }));
+	// One rectangle exposes all four screen edges and both centre lines through
+	// the same start/centre/end matching and guide path as normal elements.
+	const screenTarget = screenMagnetTarget(model.screen);
+	if (screenTarget) magnetTargets.push(screenTarget);
 	// Claim the overlay before changing the selection. Selecting re-renders, and a
 	// re-render calls replaceChildren() -- which would leave every placeBox()
 	// below writing to a node that is no longer in the document, so the drag would
 	// look frozen until release. Style the live node instead; the full render with
 	// handles arrives when the gesture ends.
 	const gesture = beginGesture();
+	updateDragAssistHint(ev.shiftKey);
 	model.set({ selected: item.name });
 	for (const other of el.overlay.querySelectorAll('.box[data-selected="true"]')) {
 		other.dataset.selected = 'false';
@@ -904,21 +1001,34 @@ function beginDrag(ev, item) {
 	let last = null;
 
 	const move = (e) => {
+		updateDragAssistHint(e.shiftKey);
 		const { dx, dy } = displayDeltaToConsole(
 			e.clientX - startX, e.clientY - startY,
 			model.screen, model.physical, el.frame.clientWidth,
 		);
 		// Quantize to what the engine will actually store, so the preview never
-		// promises sub-pixel precision the engine discards. Grid changes offsets;
-		// magnet then makes the resulting engine rect meet another rect exactly.
-		const bypass = e.altKey;
+		// promises sub-pixel precision the engine discards. Magnet then makes the
+		// resulting engine rect meet another rect exactly.
+		const bypass = e.shiftKey;
 		let nx = quantize(originX + dx);
 		let ny = quantize(originY + dy);
 		if (!bypass && dragAssist.grid) {
-			nx = snapToGrid(nx, dragAssist.step);
-			ny = snapToGrid(ny, dragAssist.step);
+			// Snap the element's POSITION onto the screen lattice, then solve back
+			// for the offset that puts it there. Snapping the offset instead gives
+			// every element its own lattice, offset by wherever its anchor sits, so
+			// two elements on the same grid setting never line up with each other --
+			// which is the one thing a grid is for. The base is whole, so the offset
+			// this produces is whole too and the engine stores it exactly.
+			nx = snapToGrid(baseX + nx, dragAssist.step) - baseX;
+			ny = snapToGrid(baseY + ny, dragAssist.step) - baseY;
 		}
-		let nextRect = { ...rect, x: rect.x + (nx - originX), y: rect.y + (ny - originY) };
+		// Where the engine will put it: base plus a whole offset. Computing this as
+		// `rect + (nx - originX)` instead carried frac(pos_x) into the preview --
+		// rect is the engine's already-truncated int while originX is the raw float
+		// cvar -- so the box hovered up to a pixel short of the line it had snapped
+		// to for the whole gesture and jumped onto it on release. The magnet reads
+		// this rect too, so its guide missed by the same fraction.
+		let nextRect = { ...rect, x: baseX + nx, y: baseY + ny };
 		let guides = [];
 		if (!bypass && dragAssist.magnet) {
 			const threshold = displayDeltaToConsole(
@@ -929,7 +1039,7 @@ function beginDrag(ev, item) {
 				{ x: Math.abs(threshold.dx), y: Math.abs(threshold.dy) });
 			nx = quantize(nx + magnetized.delta.x);
 			ny = quantize(ny + magnetized.delta.y);
-			nextRect = { ...rect, x: rect.x + (nx - originX), y: rect.y + (ny - originY) };
+			nextRect = { ...rect, x: baseX + nx, y: baseY + ny };
 			guides = magnetized.guides;
 		}
 		renderSnapGuides(guides);
@@ -950,6 +1060,7 @@ function beginDrag(ev, item) {
 		window.removeEventListener('pointermove', move);
 		window.removeEventListener('pointerup', up);
 		clearSnapGuides();
+		clearDragAssistHint();
 		gesture.end();
 	};
 	window.addEventListener('pointermove', move);
@@ -2145,12 +2256,25 @@ el.uiScale.addEventListener('change', () => applyUiScale(el.uiScale.value, { per
 el.snapGrid.addEventListener('change', () => {
 	dragAssist.grid = el.snapGrid.checked;
 	el.snapStep.disabled = !dragAssist.grid;
+	renderGrid();
 });
 el.snapMagnet.addEventListener('change', () => { dragAssist.magnet = el.snapMagnet.checked; });
 const updateSnapStep = () => {
 	const value = Number(el.snapStep.value);
 	if (Number.isFinite(value) && value >= 1) {
-		dragAssist.step = Math.min(64, Math.round(value));
+		const next = Math.min(64, Math.round(value));
+		// Only on a real change. This does NOT stop the per-keystroke rebuild: type
+		// "16" into an empty field and the "1" is a real change, so a step-1 grid
+		// is drawn and replaced on the "6". That is kept on purpose -- the step the
+		// drag uses is updated on the same keystroke, so the intermediate grid is
+		// what a drag would actually do at that instant, and suppressing it would
+		// put the picture and the behaviour out of step.
+		// With the field empty, Number('') is 0 and fails the >= 1 guard, so the
+		// step is left alone and the drawn grid still matches it.
+		if (next !== dragAssist.step) {
+			dragAssist.step = next;
+			renderGrid();
+		}
 	}
 };
 el.snapStep.addEventListener('input', updateSnapStep);
@@ -2161,7 +2285,14 @@ el.snapStep.addEventListener('change', () => {
 el.snapStep.disabled = true;
 el.saveOpen.addEventListener('click', () => openSave());
 el.frame.addEventListener('load', renderOverlay);
-window.addEventListener('resize', renderOverlay);
+window.addEventListener('resize', () => {
+	renderOverlay();
+	// renderOverlay returns early mid-gesture, but placeBox and renderSnapGuides
+	// both recompute from the live frame width on every pointermove. Without this
+	// the grid is the one drawn thing on the stage that freezes while the box it
+	// describes keeps moving.
+	renderGrid();
+});
 
 // Click empty stage to deselect; click a rendered element to select it, which
 // keeps the canvas behaving the way the tree does.

@@ -293,13 +293,19 @@ try {
 			return regions.has(name) ? null : fake.state.elements.find((e) => e.name === name)?.name ?? null;
 		};
 		const aligned = (start, size, content, align, offset) => {
+			let base;
 			switch (align) {
-			case 'center': return start + Math.trunc((size - content) / 2) + offset;
-			case 'right': case 'bottom': return start + size - content + offset;
-			case 'before': return start - content + offset;
-			case 'after': return start + size + offset;
-			default: return start + offset;
+			case 'center': base = start + Math.trunc((size - content) / 2); break;
+			case 'right': case 'bottom': base = start + size - content; break;
+			case 'before': base = start - content; break;
+			case 'after': base = start + size; break;
+			default: base = start; break;
 			}
+			// libhud_place.c:149 is `int x; x += props->pos_x` against a float cvar,
+			// and hud_web_state.c:218 emits the rect as %d. Truncating here is what
+			// makes a fractional pos_x behave in the fake the way it does in the
+			// engine; without it nothing downstream can tell the two apart.
+			return Math.trunc(base + offset);
 		};
 		// Minimal fake of the engine-owned placement boundary: enough to fold the
 		// fixture's screen/element anchors and recursively move children. Product
@@ -1019,12 +1025,12 @@ try {
 				=== `${current.rect.x},${current.rect.y}`;
 		}, name);
 	};
-	const dragHealth = async (dx, dy, { alt = false, beforeUp = null } = {}) => {
+	const dragHealth = async (dx, dy, { modifier = null, beforeUp = null } = {}) => {
 		await page.locator('.tree__row[data-name="health"]').click();
 		const selectedHealth = page.locator('#overlay .box[data-selected="true"]');
 		const rect = await selectedHealth.boundingBox();
 		assert(rect, 'health has no draggable box for snap/magnet cases');
-		if (alt) await page.keyboard.down('Alt');
+		if (modifier) await page.keyboard.down(modifier);
 		try {
 			await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
 			await page.mouse.down();
@@ -1033,26 +1039,242 @@ try {
 			if (beforeUp) await beforeUp();
 			await page.mouse.up();
 		} finally {
-			if (alt) await page.keyboard.up('Alt');
+			if (modifier) await page.keyboard.up(modifier);
 		}
 		return named(await engineState(), 'health');
 	};
 
-	await gridToggle.click();
-	await setEnginePlacement('health', 13, 24);
-	let snapped = await dragHealth(19, 0);
-	assert(Number(snapped.pos_x) % 8 === 0,
-		`8px grid produced pos_x=${snapped.pos_x}`);
-	await gridStep.fill('5');
-	await gridStep.press('Enter');
-	await setEnginePlacement('health', 13, 24);
-	snapped = await dragHealth(19, 0);
-	assert(Number(snapped.pos_x) % 5 === 0,
-		`5px grid produced pos_x=${snapped.pos_x}`);
+	// The field's value attribute and dragAssist.step are read independently, so
+	// they can drift apart silently: the box would say one number while a drag
+	// used another. Pin them to each other at boot, before anything is typed.
+	assert(await gridStep.inputValue() === '32',
+		`the Step field boots at ${await gridStep.inputValue()}, not the documented default`);
+	const gridLineCount = () => page.locator('#overlay .snap-grid').count();
+	assert(await gridLineCount() === 0,
+		'grid lines were drawn before the Grid toggle was ever switched on');
 
 	await gridToggle.click();
+	// #102: the toggle is called Grid and used to draw nothing. Assert the lines
+	// exist AND that they predict where a drag lands — a grid drawn anywhere but
+	// on the snap positions is a promise the editor breaks on every drag, and it
+	// would pass a count-only check.
+	const lines8 = await gridLineCount();
+	assert(lines8 > 0, 'Grid is on and no grid lines are drawn');
 	await setEnginePlacement('health', 13, 24);
-	const free = await dragHealth(5, 0);
+	let snapped = await dragHealth(19, 0);
+	// The POSITION lands on the lattice, not the offset. For a screen-placed,
+	// left-aligned element the two are the same number, which is why asserting
+	// the offset here used to look like it covered the contract; it did not, and
+	// the armor case below is the one that tells them apart.
+	assert(snapped.rect.x % 8 === 0,
+		`8px grid produced rect.x=${snapped.rect.x} (pos_x=${snapped.pos_x})`);
+	// The promise a drawn grid makes is "aim at a line and you land on it". Not
+	// every snap position carries a line — under the legibility floor the cadence
+	// is a multiple of the step — so asserting the reverse would fail by design
+	// and tempt the next person to weaken it. Aim at a real line instead.
+	const lineOffsets = async (axis) => {
+		const out = [];
+		for (const line of await page.locator(`#overlay .snap-grid--${axis}`).all()) {
+			const box = await line.boundingBox();
+			if (box) out.push(axis === 'x' ? box.x : box.y);
+		}
+		assert(out.length > 1, `fewer than two ${axis} grid lines to measure`);
+		return out.sort((a, b) => a - b);
+	};
+	const aimAtALine = async (drag, label) => {
+		const before = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+		const wanted = before.x + 40;
+		const target = (await lineOffsets('x'))
+			.reduce((best, x) => (Math.abs(x - wanted) < Math.abs(best - wanted) ? x : best), Infinity);
+		await drag(target - before.x, 0);
+		const landed = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+		assert(Math.abs(landed.x - target) <= 1,
+			`${label}: aimed at the grid line drawn at x=${target.toFixed(2)} and it landed at ${landed.x.toFixed(2)}`);
+	};
+	// Boot default untouched: the drawn spacing must be the field's own number
+	// through the transform, not some other step the code kept to itself.
+	const bootFrame = await page.locator('#frame').boundingBox();
+	const bootConsole = await page.evaluate(() => window.__fake.state.screen.vid_width);
+	const bootLines = await lineOffsets('x');
+	const bootConsoleSpacing = (bootLines[1] - bootLines[0]) / (bootFrame.width / bootConsole);
+	assert(Math.abs(bootConsoleSpacing - 32) < 0.05,
+		`Step reads 32 but the grid is drawn every ${bootConsoleSpacing.toFixed(2)} console px`);
+	await gridStep.fill('8');
+	await gridStep.press('Enter');
+	const spacing8 = (await lineOffsets('x'))[1] - (await lineOffsets('x'))[0];
+	// The horizontal and vertical console ratios are separate (scaleFactors), and
+	// only the y path exercises ky. Pin both against the frame's own size so a
+	// ky->kx slip cannot hide behind a console that matches its canvas aspect.
+	const frameBox = await page.locator('#frame').boundingBox();
+	const consoleSize = await page.evaluate(() => [
+		window.__fake.state.screen.vid_width, window.__fake.state.screen.vid_height]);
+	const ySpacing = (await lineOffsets('y'))[1] - (await lineOffsets('y'))[0];
+	const xSpacing = spacing8;
+	const cadence = Math.round(xSpacing / (frameBox.width / consoleSize[0]));
+	assert(Math.abs(ySpacing - cadence * (frameBox.height / consoleSize[1])) < 0.5,
+		`y lines are ${ySpacing.toFixed(2)}px apart, but a cadence of ${cadence} console px is ${(cadence * (frameBox.height / consoleSize[1])).toFixed(2)}px on this frame`);
+	await aimAtALine(dragHealth, 'screen-placed, left-aligned');
+
+	// health is screen-placed and left-aligned, so its base is 0 mod the step and
+	// a grid drawn at plain multiples of the step passes the check above. The
+	// drag snaps pos_x, and the edge lands on base + k*step, so give an element a
+	// base that is NOT on the step lattice and aim at a line again. This is the
+	// case the first version of this feature got wrong.
+	// An odd width so centring cannot land on the step lattice by accident. The
+	// fake only reflows when a placement cvar comes through the bridge, so widen
+	// first and let the align_x change below recompute the rect.
+	await page.evaluate(() => {
+		window.__fake.state.elements.find((e) => e.name === 'armor').rect.w = 41;
+	});
+	await page.locator('.tree__row[data-name="armor"]').click();
+	await setPlacementField('f-armor-align_x', 'center');
+	await page.waitForFunction(() => {
+		const armor = window.__fake.state.elements.find((e) => e.name === 'armor');
+		// trunc((640 - 41) / 2) === 299, which is 3 mod 8.
+		return armor.rect.x - Number(armor.pos_x) === 299;
+	});
+	const dragArmor = async (dx, dy) => {
+		await page.locator('.tree__row[data-name="armor"]').click();
+		const rect = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+		await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(rect.x + rect.width / 2 + dx, rect.y + rect.height / 2 + dy, { steps: 4 });
+		await page.mouse.up();
+		return named(await engineState(), 'armor');
+	};
+	await page.locator('.tree__row[data-name="armor"]').click();
+	await aimAtALine(dragArmor, 'centred element, base 3 mod 8');
+	// The claim the fixed grid rests on: a centred element whose base is 3 mod 8
+	// still lands ON the lattice, so it can line up with health. If the drag
+	// snapped the offset instead, this rect would be 3 mod 8 forever.
+	const armorLanded = named(await engineState(), 'armor');
+	assert(armorLanded.rect.x % 8 === 0,
+		`a centred element landed at rect.x=${armorLanded.rect.x}, off the shared lattice`);
+
+	// The common flow: tick Grid, then grab an element that is NOT already
+	// selected. beginGesture() sets `dragging` before the selection changes, so
+	// renderOverlay returns early and the grid would keep the previous element's
+	// lattice for the whole gesture -- drawn lines that predict nothing, on the
+	// path a user takes first.
+	await page.locator('.tree__row[data-name="health"]').click();
+	const armorBox = await page.locator('#overlay .box[data-name="armor"]').boundingBox();
+	await page.mouse.move(armorBox.x + armorBox.width / 2, armorBox.y + armorBox.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(armorBox.x + armorBox.width / 2 + 4, armorBox.y + armorBox.height / 2,
+		{ steps: 2 });
+	const midDrag = await lineOffsets('x');
+	const midBox = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+	await page.mouse.up();
+	assert(await page.locator('#inspector .inspect__name').textContent() === 'armor',
+		'grabbing armor did not select it, so this case proves nothing');
+	const nearestMid = midDrag.reduce(
+		(best, x) => (Math.abs(x - midBox.x) < Math.abs(best - midBox.x) ? x : best), Infinity);
+	assert(Math.abs(nearestMid - midBox.x) <= 1,
+		`mid-drag the grid describes another element: the dragged box sits at ${midBox.x.toFixed(2)} and the nearest drawn line is ${nearestMid.toFixed(2)}`);
+
+	// A fractional pos_x, which is what the engine actually reports: the cvar is a
+	// float and only the rect is whole. A base taken as `rect - pos` instead of
+	// undoing the engine's truncation puts every line on a coordinate no element
+	// can occupy, and every earlier fixture value here was a whole number, so
+	// nothing could see it.
+	await page.evaluate(async () => {
+		const bridge = (await import('/core/bridge.js')).currentBridge();
+		await bridge.setCvar('hud_armor_pos_x', 12.6);
+	});
+	// Fence on the EDITOR's own state, not the fake's. Waiting on window.__fake
+	// only proves the engine side moved; the editor is a poll behind, and a drag
+	// started there reads the previous pos_x -- which quietly made this whole
+	// case measure nothing.
+	await page.waitForFunction(() => {
+		const armor = window.__fake.state.elements.find((e) => e.name === 'armor');
+		if (Math.abs(Number(armor.pos_x) - 12.6) > 1e-9) return false;
+		const meta = document.querySelector('.tree__row[data-name="armor"] .tree__meta');
+		return meta?.textContent === `${armor.rect.x},${armor.rect.y}`;
+	});
+	// MID-DRAG, with that fractional pos_x still in place. Every instrument in
+	// this feature until now read the box after pointerup, which is the one
+	// moment the preview and the engine agree: refresh() has re-rendered from
+	// engine state by then. A preview built from `rect + (nx - originX)` mixes
+	// the truncated rect with the raw float cvar and hovers frac(pos) short of
+	// the line for the whole gesture, then jumps onto it on release.
+	await page.locator('.tree__row[data-name="armor"]').click();
+	const preBox = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+	await page.mouse.move(preBox.x + preBox.width / 2, preBox.y + preBox.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(preBox.x + preBox.width / 2 + 37, preBox.y + preBox.height / 2,
+		{ steps: 6 });
+	const heldBox = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+	await page.mouse.up();
+	// Not "is it on a line": the cadence is coarsened above the step, so a snap
+	// position legitimately falls between two drawn lines. The claim is that the
+	// preview is where the ENGINE will put it, and the tell is that the box does
+	// not move when the pointer is released and the real state comes back.
+	const restBox = await page.locator('#overlay .box[data-selected="true"]').boundingBox();
+	assert(Math.abs(restBox.x - heldBox.x) <= 0.1,
+		`the box jumped ${Math.abs(restBox.x - heldBox.x).toFixed(3)}px on release: the preview was not where the engine put it`);
+
+	await page.locator('.tree__row[data-name="armor"]').click();
+	// Every line must sit on a whole console pixel. A base taken as `rect - pos`
+	// carries the fraction the engine discarded, so the lines land between the
+	// positions an element can occupy -- which no drag can ever reach.
+	const frameForFraction = await page.locator('#frame').boundingBox();
+	const consoleForFraction = await page.evaluate(
+		() => window.__fake.state.screen.vid_width);
+	const perConsolePx = frameForFraction.width / consoleForFraction;
+	for (const lineX of await lineOffsets('x')) {
+		const consoleX = (lineX - frameForFraction.x) / perConsolePx;
+		assert(Math.abs(consoleX - Math.round(consoleX)) < 0.02,
+			`with pos_x=12.6 a grid line sits at console x=${consoleX.toFixed(3)}, which no element can occupy`);
+	}
+
+	await page.locator('.tree__row[data-name="health"]').click();
+
+	await gridStep.fill('5');
+	await gridStep.press('Enter');
+	// Per axis, not a summed count: two different grids can share a total. At one
+	// stage width step 8 gives 41 x + 13 y and step 5 gives 33 x + 21 y — both 54.
+	const spacing5 = (await lineOffsets('x'))[1] - (await lineOffsets('x'))[0];
+	assert(Math.abs(spacing5 - spacing8) > 0.5,
+		`changing the step from 8 to 5 left the drawn x spacing at ${spacing5.toFixed(2)}px`);
+	await setEnginePlacement('health', 13, 24);
+	snapped = await dragHealth(19, 0);
+	assert(snapped.rect.x % 5 === 0,
+		`5px grid produced rect.x=${snapped.rect.x} (pos_x=${snapped.pos_x})`);
+
+	await gridToggle.click();
+	assert(await gridLineCount() === 0,
+		'grid lines survived the Grid toggle being switched off');
+
+	// Screen edges as magnet targets. A HUD hangs off the bottom and right edges,
+	// and the grid cannot reach them: the console extent is not a whole number of
+	// steps, so the last line always stops short. Snapping to the edge is what
+	// makes the corner reachable -- without it the one place a HUD actually sits
+	// is the one place drag assistance does not help.
+	await magnetToggle.click();
+	const screenSize = await page.evaluate(() => [
+		window.__fake.state.screen.vid_width, window.__fake.state.screen.vid_height]);
+	await setEnginePlacement('health', 40, screenSize[1] - 24 - 5);
+	// The guide only exists while the button is down -- it is cleared on release,
+	// so counting after the drag would find nothing and prove nothing.
+	let heldEdgeGuides = -1;
+	const nearBottom = await dragHealth(0, 6, {
+		beforeUp: async () => {
+			heldEdgeGuides = await page.locator('#overlay .snap-guide[data-target="screen"]').count();
+		},
+	});
+	assert(nearBottom.rect.y + nearBottom.rect.h === screenSize[1],
+		`dragged to the bottom edge and landed at ${nearBottom.rect.y + nearBottom.rect.h}, screen is ${screenSize[1]}`);
+	assert(heldEdgeGuides === 1,
+		`the screen edge was caught but ${heldEdgeGuides} guides named it -- a snap nobody can see is indistinguishable from a slip`);
+	await magnetToggle.click();
+	await setEnginePlacement('health', 13, 24);
+	const liveHint = page.locator('#drag-assist-live');
+	assert(await liveHint.isHidden(),
+		'drag-assistance stage hint was visible before a drag');
+	const free = await dragHealth(5, 0, {
+		beforeUp: async () => assert(await liveHint.isHidden(),
+			'drag-assistance stage hint appeared while both helpers were off'),
+	});
 	assert(Number(free.pos_x) % 5 !== 0,
 		`grid-off drag still quantized pos_x=${free.pos_x} to step 5`);
 
@@ -1083,29 +1305,70 @@ try {
 	assert(freeNearEdge.rect.y + freeNearEdge.rect.h !== named(await engineState(), 'armor').rect.y,
 		'magnet-off drag still aligned the two edges');
 
+	// Modifier contract: isolate the guaranteed grid mechanism. If magnet is on,
+	// a single "snapped" result can be true for the wrong reason. The raw landing
+	// is measured from this browser's frame width and must not already be on the
+	// 8px lattice, or both modifier cases would pass without exercising the grid.
 	await gridToggle.click();
-	await magnetToggle.click();
 	await gridStep.fill('8');
 	await gridStep.press('Enter');
+	const instruction = await gridToggle.evaluate((node) =>
+		node.closest('section')?.querySelector('.font-state')?.textContent?.trim() ?? '');
+	const modifierMatch = /^Hold ([A-Za-z]+) while dragging to bypass both\.$/.exec(instruction);
+	assert(modifierMatch, `drag-assistance label does not name a modifier: ${JSON.stringify(instruction)}`);
+	const documentedModifier = modifierMatch[1];
+	const bypassCssDelta = 5;
+	const bypassFrameWidth = await page.locator('#frame').evaluate((node) => node.clientWidth);
+	const rawBypassDelta = displayDeltaToConsole(
+		bypassCssDelta, 0, SCREEN, CANVAS, bypassFrameWidth,
+	).dx;
+	const rawBypassX = Math.trunc(17 + rawBypassDelta);
+	assert(rawBypassX % 8 !== 0,
+		`modifier fixture is a grid no-op: raw pos_x=${rawBypassX} is already on the 8px lattice`);
+
 	await setEnginePlacement('health', 17, 30);
-	const bypassed = await dragHealth(5, 0, {
-		alt: true,
-		beforeUp: async () => assert(await page.locator('#overlay .snap-guide').count() === 0,
-			'Alt bypass still drew a magnet guide'),
+	const altResult = await dragHealth(bypassCssDelta, 0, {
+		modifier: 'Alt',
+		beforeUp: async () => {
+			assert(await liveHint.isVisible(),
+				'drag-assistance help was not visible on the stage during a live assisted drag');
+			assert(await liveHint.textContent() === `Hold ${documentedModifier} for free move`,
+				`live drag help disagrees with the documented modifier: ${JSON.stringify(await liveHint.textContent())}`);
+			assert(await liveHint.getAttribute('data-bypass') === 'false',
+				'Alt made the live help claim free movement');
+		},
 	});
-	assert(Number(bypassed.pos_x) % 8 !== 0,
-		`Alt bypass still snapped pos_x=${bypassed.pos_x}`);
+	assert(Number(altResult.pos_x) % 8 === 0 && Number(altResult.pos_x) !== rawBypassX,
+		`Alt still bypassed the live grid: raw=${rawBypassX}, landed=${altResult.pos_x}`);
+	assert(await liveHint.isHidden(),
+		'drag-assistance stage hint remained visible after pointerup');
+
+	await setEnginePlacement('health', 17, 30);
+	const bypassed = await dragHealth(bypassCssDelta, 0, {
+		modifier: documentedModifier,
+		beforeUp: async () => {
+			assert(await liveHint.isVisible(),
+				'drag-assistance help was not visible during the bypass drag');
+			assert(await liveHint.textContent() === `Free move · ${documentedModifier} held`,
+				`live drag help did not confirm free movement: ${JSON.stringify(await liveHint.textContent())}`);
+			assert(await liveHint.getAttribute('data-bypass') === 'true',
+				'live drag help did not expose the active bypass state');
+		},
+	});
+	assert(Number(bypassed.pos_x) === rawBypassX,
+		`${documentedModifier} did not bypass the live grid: expected raw ${rawBypassX}, landed=${bypassed.pos_x}`);
+	assert(await page.evaluate(() => window.getSelection()?.toString() === ''),
+		`${documentedModifier}-drag selected page text`);
 	const dragExport = await page.evaluate(async () =>
 		(await import('/core/bridge.js')).currentBridge().exportFullCfg());
 	assert(!/snap|magnet/i.test(dragExport),
 		'drag-assistance editor state leaked into the exported cfg');
 
 	await gridToggle.click();
-	await magnetToggle.click();
 	await page.evaluate(async () => (await import('/core/bridge.js')).currentBridge().send('hud_reset_layout'));
 	await page.waitForFunction(() => window.__fake.state.elements
 		.find((e) => e.name === 'health').pos_x === '16');
-	console.log('  14 drag assistance: grid steps, free drag, edge magnet + guide, Alt bypass, clean export');
+	console.log(`  14 drag assistance: grid steps, free drag, edge magnet + guide, ${documentedModifier} bypass, Alt snap, clean export`);
 
 	// ---- 15. editor window scaling (#25) ------------------------------------
 	// The control scales editor chrome, never HUD coordinates. Its CSS change
@@ -1183,75 +1446,81 @@ try {
 	await page.waitForFunction(() => localStorage.getItem('ezhud.ui.scale') === '1.25');
 	console.log('  15 editor scale: 1440p minimums, visible presets, persistence seed, canvas and state propagation');
 
-	// ---- 16. deterministic demo moments (#23) -------------------------------
+	// ---- 16. deterministic Jump to points (#23) ------------------------------
 	// These are points in the bundled tb4gf match, not editor-owned timestamps.
 	// Start on the other bundled demo so the first control must select its own
 	// match and wait for the engine-owned title signal before it seeks.
 	await page.waitForFunction(() => document.querySelectorAll('[data-demo-jump]').length === 3);
+	assert(await page.locator('#fte-moments').getAttribute('aria-label') === 'Jump to',
+		'the control group is not named Jump to');
 	await page.evaluate(() => { window.__fake.refuseDemo = false; });
 	await page.selectOption('#fte-demo', 'qw/demos/hudtest_src.mvd');
 	await page.waitForFunction(() => document.title.includes('hudtest_src.mvd'));
 
-	const fullHud = page.locator('[data-demo-jump="9:00"]');
-	const sentBeforeRunningMoment = (await sentLines()).length;
-	await fullHud.click();
-	await page.waitForFunction(() => window.__fake.state.demo.position === '9:00');
-	const runningMomentLines = (await sentLines()).slice(sentBeforeRunningMoment);
-	assert(JSON.stringify(runningMomentLines) === JSON.stringify([
+	const prewar = page.locator('[data-demo-jump="0:00"]');
+	const sentBeforeRunningJump = (await sentLines()).length;
+	await prewar.click();
+	await page.waitForFunction(() => window.__fake.state.demo.position === '0:00'
+		&& window.__fake.state.demo.cl_demospeed === '0');
+	const runningJumpLines = (await sentLines()).slice(sentBeforeRunningJump);
+	assert(JSON.stringify(runningJumpLines) === JSON.stringify([
 		'playdemo demos/tb4gf_book_vs_s.mvd',
+		'demo_setspeed 0',
 		'demo_jump 0:00',
-		'demo_jump 9:00',
-	]), `running Full HUD sent ${JSON.stringify(runningMomentLines)}`);
-	assert((await engineState()).demo.cl_demospeed === '1',
-		'selecting a moment paused normal playback');
-	const runningFromMoment = await page.evaluate(() => window.__fake.demoCursor);
+		'demo_jump 0:00',
+		'demo_setspeed 0',
+	]), `running Prewar sent ${JSON.stringify(runningJumpLines)}`);
+	const parkedAtPrewar = await page.evaluate(() => window.__fake.demoCursor);
 	await page.waitForTimeout(300);
-	assert(await page.evaluate(() => window.__fake.demoCursor) > runningFromMoment,
-		'the fake demo cursor did not continue after a running moment seek');
+	assert(await page.evaluate(() => window.__fake.demoCursor) === parkedAtPrewar,
+		'Prewar did not stay parked after a running Jump to gesture');
 
-	// Keep playback frozen for the repeatability and paused-edit cases.
-	await page.evaluate(() => window.FTEC.cbufadd('demo_setspeed 0\n'));
-	await page.waitForFunction(async () =>
-		(await import('/core/bridge.js')).currentBridge()?.lastState?.demo?.cl_demospeed === '0');
+	// Prove each authored point pauses running playback. The exact command order
+	// also guards the required origin reset and pause-after-seek semantics.
 	for (const expected of [
-		{ target: '9:00', label: 'Full HUD' },
+		{ target: '0:00', label: 'Prewar' },
+		{ target: '10:00', label: '10:00' },
 		{ target: '20:10', label: 'Scoreboard' },
-		{ target: '0:10', label: 'Quiet' },
 	]) {
+		await page.evaluate(() => window.FTEC.cbufadd('demo_setspeed 100\n'));
+		await page.waitForFunction(() => window.__fake.state.demo.cl_demospeed === '1');
 		const control = page.locator(`[data-demo-jump="${expected.target}"]`);
 		assert(await control.textContent() === expected.label,
-			`moment ${expected.target} has the wrong label`);
-		const sentBeforeMoment = (await sentLines()).length;
+			`Jump to ${expected.target} has the wrong label`);
+		const sentBeforeJump = (await sentLines()).length;
 		await control.click();
-		await page.waitForFunction((count) => window.__fake.sent.length >= count + 3,
-			sentBeforeMoment);
-		await page.waitForFunction((target) => window.__fake.state.demo.position === target,
-			expected.target);
-		const momentLines = (await sentLines()).slice(sentBeforeMoment);
-		assert(JSON.stringify(momentLines) === JSON.stringify([
-			'demo_setspeed 0', 'demo_jump 0:00', `demo_jump ${expected.target}`,
-		]), `${expected.label} sent ${JSON.stringify(momentLines)}`);
-		assert((await engineState()).demo.cl_demospeed === '0',
-			`${expected.label} unexpectedly resumed paused playback`);
+		await page.waitForFunction((count) => window.__fake.sent.length >= count + 4,
+			sentBeforeJump);
+		await page.waitForFunction((target) => window.__fake.state.demo.position === target
+			&& window.__fake.state.demo.cl_demospeed === '0', expected.target);
+		const jumpLines = (await sentLines()).slice(sentBeforeJump);
+		assert(JSON.stringify(jumpLines) === JSON.stringify([
+			'demo_setspeed 0', 'demo_jump 0:00', `demo_jump ${expected.target}`, 'demo_setspeed 0',
+		]), `${expected.label} sent ${JSON.stringify(jumpLines)}`);
+		const parkedCursor = await page.evaluate(() => window.__fake.demoCursor);
+		await page.waitForTimeout(300);
+		assert(await page.evaluate(() => window.__fake.demoCursor) === parkedCursor,
+			`${expected.label} did not stay parked after the jump`);
 	}
 
 	// The same command must reset the engine-owned cursor to the same value,
 	// rather than accumulate a relative editor-side offset.
+	const scoreboard = page.locator('[data-demo-jump="20:10"]');
 	let sentBeforeRepeat = (await sentLines()).length;
-	await fullHud.click();
-	await page.waitForFunction((count) => window.__fake.sent.length >= count + 3,
+	await scoreboard.click();
+	await page.waitForFunction((count) => window.__fake.sent.length >= count + 4,
 		sentBeforeRepeat);
-	const firstFullHudCursor = await page.evaluate(() => window.__fake.demoCursor);
+	const firstScoreboardCursor = await page.evaluate(() => window.__fake.demoCursor);
 	sentBeforeRepeat = (await sentLines()).length;
-	await fullHud.click();
-	await page.waitForFunction((count) => window.__fake.sent.length >= count + 3,
+	await scoreboard.click();
+	await page.waitForFunction((count) => window.__fake.sent.length >= count + 4,
 		sentBeforeRepeat);
 	await page.waitForTimeout(250);
-	assert(await page.evaluate(() => window.__fake.demoCursor) === firstFullHudCursor,
-		'two Full HUD seeks did not land on the same paused engine cursor');
+	assert(await page.evaluate(() => window.__fake.demoCursor) === firstScoreboardCursor,
+		'two Scoreboard jumps did not land on the same paused engine cursor');
 
 	// A placement gesture while the demo is paused still crosses the engine
-	// boundary and is present in the export. The moment controls must not own or
+	// boundary and is present in the export. The Jump to controls must not own or
 	// block editor placement state.
 	await page.locator('.tree__row[data-name="health"]').click();
 	const pausedPos = page.locator('#f-health-pos_x');
@@ -1271,7 +1540,7 @@ try {
 		window.FTEC.cbufadd('demo_setspeed 100\n');
 	});
 	await page.waitForFunction(() => window.__fake.state.demo.cl_demospeed === '1');
-	console.log('  16 demo moments: own match selection, three seeks, repeatable point, paused edit + export');
+	console.log('  16 Jump to: own match selection, three paused seeks, repeatable point, paused edit + export');
 
 	// ---- 17. volume ----------------------------------------------------------
 	// The page's own sound knob (#10). The engine side is a plain cvar write, so

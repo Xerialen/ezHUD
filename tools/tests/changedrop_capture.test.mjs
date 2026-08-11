@@ -180,9 +180,127 @@ test('case 4: repeat runs compare the complete action sequence while allowing ti
 	assert.throws(() => capture.assertRepeatableStructure(first, outsideTolerance), /duration.*snap-magnet.*tolerance/i);
 });
 
+test('case 5: drag holds its modifier through mouse down, every visible move, and mouse up', async () => {
+	assert.ifError(loadError);
+	assert.equal(typeof capture.executeDrag, 'function');
+	const events = [];
+	const held = new Set();
+	let dragging = false;
+	let dragStart;
+	let pointer;
+	let sourceBox = { x: 300, y: 200, width: 80, height: 40 };
+	const boxes = new Map([
+		['#left-corner', { x: 40, y: 60, width: 20, height: 20 }],
+	]);
+	const page = {
+		locator(selector) {
+			return {
+				waitFor: async () => {},
+				boundingBox: async () => selector === '.box[data-name="gameclock"]' ? { ...sourceBox } : boxes.get(selector) ?? null,
+			};
+		},
+		keyboard: {
+			down: async (modifier) => { held.add(modifier); events.push(['key-down', modifier]); },
+			up: async (modifier) => { events.push(['key-up', modifier]); held.delete(modifier); },
+		},
+		mouse: {
+			move: async (x, y) => {
+				pointer = { x, y };
+				if (dragging) events.push(['move', x, y, held.has('Shift')]);
+			},
+			down: async () => {
+				dragging = true;
+				dragStart = { ...pointer };
+				events.push(['mouse-down', held.has('Shift')]);
+			},
+			up: async () => {
+				events.push(['mouse-up', held.has('Shift')]);
+				sourceBox = {
+					...sourceBox,
+					x: sourceBox.x + pointer.x - dragStart.x,
+					y: sourceBox.y + pointer.y - dragStart.y,
+				};
+				dragging = false;
+			},
+		},
+		waitForTimeout: async () => {},
+	};
+
+	await capture.executeDrag(page, {
+		selector: '.box[data-name="gameclock"]',
+		target: { selector: '#left-corner' },
+		modifier: 'Shift',
+	}, 1_000);
+
+	const dragEvents = events.filter(([name]) => name === 'mouse-down' || name === 'move' || name === 'mouse-up');
+	assert.ok(dragEvents.filter(([name]) => name === 'move').length > 1, 'drag must contain visible intermediate moves');
+	assert.ok(dragEvents.every((event) => event.at(-1) === true), 'Shift must be down for the complete drag gesture');
+	assert.ok(events.findIndex(([name]) => name === 'key-down') < events.findIndex(([name]) => name === 'mouse-down'));
+	assert.ok(events.findIndex(([name]) => name === 'key-up') > events.findIndex(([name]) => name === 'mouse-up'));
+	assert.equal(held.size, 0);
+
+	events.length = 0;
+	await capture.executeDrag(page, {
+		selector: '.box[data-name="gameclock"]',
+		target: { x: 80, y: 100 },
+	}, 1_000);
+	const coordinateMoves = events.filter(([name]) => name === 'move');
+	assert.deepEqual(coordinateMoves.at(-1), ['move', 80, 100, false]);
+	assert.equal(events.some(([name]) => name.startsWith('key-')), false, 'modifier is optional');
+});
+
+test('case 5b: drag rejects a gesture that leaves the source at the same position', async () => {
+	assert.ifError(loadError);
+	const box = { x: 300, y: 200, width: 80, height: 40 };
+	const page = {
+		locator: () => ({ waitFor: async () => {}, boundingBox: async () => ({ ...box }) }),
+		keyboard: { down: async () => {}, up: async () => {} },
+		mouse: { move: async () => {}, down: async () => {}, up: async () => {} },
+		waitForTimeout: async () => {},
+	};
+	await assert.rejects(capture.executeDrag(page, {
+		selector: '.box[data-name="gameclock"]',
+		target: { x: 80, y: 100 },
+		modifier: 'Shift',
+	}, 1_000), /drag.*did not move|did not move.*drag/i);
+});
+
+test('case 6: drag validates selector and coordinate targets and is present in all script schemas', async () => {
+	assert.ifError(loadError);
+	const script = await fixture('capture-script.json');
+	const drag = {
+		instruction: 'Drag the clock freely.',
+		action: 'drag',
+		selector: '.box[data-name="gameclock"]',
+		target: { x: 80, y: 100 },
+		modifier: 'Shift',
+	};
+	script.segments[1].walkthrough.splice(1, 0, drag);
+	assert.equal(capture.validateCaptureScript(script), script);
+	const receipt = capture.buildTimingReceipt({
+		script,
+		recording: recording(),
+		observations: await fixture('capture-observations-a.json'),
+	});
+	assert.deepEqual(receipt.segments[1].actions[1], {
+		action: 'drag', selector: '.box[data-name="gameclock"]', target: { x: 80, y: 100 }, modifier: 'Shift',
+	});
+	const badModifier = structuredClone(script);
+	badModifier.segments[1].walkthrough[1].modifier = 'CapsLock';
+	assert.throws(() => capture.validateCaptureScript(badModifier), /drag modifier.*Shift/i);
+	const badCoordinate = structuredClone(script);
+	badCoordinate.segments[1].walkthrough[1].target.x = -1;
+	assert.throws(() => capture.validateCaptureScript(badCoordinate), /target x.*at least 0/i);
+
+	for (const name of ['changedrop-script.v1.json', 'changedrop-script-authoring.v1.json', 'changedrop-timings.v1.json']) {
+		const schema = JSON.parse(await readFile(path.join(repo, 'tools', 'changedrop', 'schemas', name), 'utf8'));
+		assert.match(JSON.stringify(schema), /"action":\{"const":"drag"\}/, `${name} must declare drag`);
+	}
+});
+
 test('supporting contract: closed safe DSL, bounded runtime, schema/privacy, npm wiring, and no browser in tier 1', async () => {
 	assert.ifError(loadError);
-	assert.deepEqual([...capture.ACTIONS], ['wait-for', 'resize', 'click', 'hold', 'highlight']);
+	assert.deepEqual([...capture.ACTIONS], ['wait-for', 'resize', 'click', 'hold', 'highlight', 'drag']);
 	assert.equal(capture.basePathFromIndex('<script type="importmap">{"imports":{"/ezHUD/core/bridge.js":"/ezHUD/core/fte-adapter.js"}}</script>'), '/ezHUD/');
 	assert.equal(capture.basePathFromIndex('<script type="importmap">{"imports":{"/core/bridge.js":"/core/fte-adapter.js"}}</script>'), '/');
 	assert.equal(capture.MAX_HOLD_MS, 5_000);

@@ -144,7 +144,7 @@ test('case 3: each changed surface has one budgeted segment and a keyed walkthro
 			`${segment.id} has no walkthrough steps`);
 		for (const step of segment.walkthrough) {
 			assert.ok(step.instruction.trim(), `${segment.id} has an empty walkthrough instruction`);
-			assert.match(step.action, /^(?:wait-for|resize|click|hold|highlight)$/);
+			assert.match(step.action, /^(?:wait-for|resize|click|hold|highlight|drag)$/);
 		}
 		const padding = segment.walkthrough.filter((step) => step.fit === 'narration');
 		assert.ok(padding.length >= 1, `${segment.id} has no narration padding`);
@@ -259,7 +259,7 @@ test('supporting contract: schemas, privacy, private CLI output, input validatio
 	const emittedActions = schema.$defs.step.oneOf.map((branch) => branch.properties.action.const);
 	// The schema now has two hold variants (duration_ms and floor_ms), so the
 	// action constants list will have a duplicate. The set of actions must match.
-	assert.deepEqual([...new Set(authoredActions)], ['wait-for', 'resize', 'click', 'hold', 'highlight']);
+	assert.deepEqual([...new Set(authoredActions)], ['wait-for', 'resize', 'click', 'drag', 'hold', 'highlight']);
 	assert.deepEqual([...new Set(emittedActions)], [...new Set(authoredActions)]);
 	assert.ok(authoringSchema.$defs.step.oneOf.every((branch) => branch.additionalProperties === false));
 	assert.ok(schema.$defs.step.oneOf.every((branch) => branch.additionalProperties === false));

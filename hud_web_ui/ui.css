@@ -82,6 +82,7 @@
 	--danger-wash: rgb(226 69 58 / 0.13);
 	--info: var(--qk-ice-400);
 	--info-wash: rgb(127 191 255 / 0.12);
+	--grid-line: rgb(127 191 255 / 0.18);   /* drag-assist grid over the render */
 
 	/* -- semantic: HUD element taxonomy ------------------------------------
 	   Tree rows are tinted by element family so 83 entries stay scannable.
@@ -571,6 +572,19 @@ button:focus-visible,
 	vector-effect: non-scaling-stroke;
 }
 
+/* The grid a drag snaps to. It sits under everything else on the stage: it is
+   the ruler the picture is judged against, not something to read in its own
+   right, so it never competes with an element edge or a magnet guide. */
+.snap-grid {
+	position: absolute;
+	z-index: 0;
+	pointer-events: none;
+	background: var(--grid-line);
+}
+
+.snap-grid--x { top: 0; bottom: 0; width: 1px; }
+.snap-grid--y { left: 0; right: 0; height: 1px; }
+
 .snap-guide {
 	position: absolute;
 	z-index: 4;
@@ -581,6 +595,32 @@ button:focus-visible,
 
 .snap-guide--x { top: 0; bottom: 0; width: 1px; }
 .snap-guide--y { left: 0; right: 0; height: 1px; }
+
+/* A compact reminder in the live surface, visible only while Grid or Magnet
+   can affect the active drag. Keeping it in the corner rather than beside the
+   pointer leaves the HUD pixels and snap target unobstructed. */
+.drag-assist__live {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	z-index: 5;
+	margin: 0;
+	padding: 5px 8px;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-sm);
+	background: rgb(10 11 12 / 0.88);
+	box-shadow: var(--shadow-md);
+	color: var(--text-strong);
+	font: var(--type-label);
+	line-height: 1.2;
+	pointer-events: none;
+	user-select: none;
+}
+
+.drag-assist__live[data-bypass="true"] {
+	border-color: var(--live);
+	color: var(--live);
+}
 
 .box {
 	position: absolute;

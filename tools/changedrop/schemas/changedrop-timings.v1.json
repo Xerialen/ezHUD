@@ -70,7 +70,7 @@
                 "timestamp_seconds": {"type": "number", "minimum": 0},
                 "selector": {
                   "type": "string",
-                  "pattern": "^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\\[data-changedrop=\"[a-z0-9]+(?:-[a-z0-9]+)*\"\\])$"
+                  "pattern": "^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\\[data-changedrop=\"[a-z0-9]+(?:-[a-z0-9]+)*\"\\]|\\.box\\[data-name=\"[A-Za-z_][A-Za-z0-9_]{0,63}\"\\])$"
                 },
                 "badge": {"type": "integer", "minimum": 1, "maximum": 99},
                 "source_basename": {
@@ -93,7 +93,26 @@
   "$defs": {
     "selector": {
       "type": "string",
-      "pattern": "^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\\[data-changedrop=\"[a-z0-9]+(?:-[a-z0-9]+)*\"\\])$"
+      "pattern": "^(?:#[A-Za-z][A-Za-z0-9_-]{0,63}|\\[data-changedrop=\"[a-z0-9]+(?:-[a-z0-9]+)*\"\\]|\\.box\\[data-name=\"[A-Za-z_][A-Za-z0-9_]{0,63}\"\\])$"
+    },
+    "dragTarget": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["selector"],
+          "properties": {"selector": {"$ref": "#/$defs/selector"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y"],
+          "properties": {
+            "x": {"type": "number", "minimum": 0},
+            "y": {"type": "number", "minimum": 0}
+          }
+        }
+      ]
     },
     "machine_action": {
       "oneOf": [
@@ -124,6 +143,17 @@
           "properties": {
             "action": {"const": "click"},
             "selector": {"$ref": "#/$defs/selector"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "selector", "target"],
+          "properties": {
+            "action": {"const": "drag"},
+            "selector": {"$ref": "#/$defs/selector"},
+            "target": {"$ref": "#/$defs/dragTarget"},
+            "modifier": {"enum": ["Alt", "Control", "Meta", "Shift"]}
           }
         },
         {

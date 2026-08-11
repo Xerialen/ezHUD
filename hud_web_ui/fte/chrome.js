@@ -181,14 +181,14 @@ function installDemoPause() {
 	setInterval(sync, 200);
 }
 
-// ---- deterministic demo moments --------------------------------------------
+// ---- deterministic Jump to points ------------------------------------------
 // These are reviewed points in the bundled tb4gf match, not page-owned clock
 // state. Every seek starts from the demo origin before advancing to its target:
 // FTE can otherwise land on a different nearby packet depending on which point
-// it sought from. Preserving cl_demospeed means a running demo continues from
-// the point while a parked demo stays parked.
+// it sought from. Pause before the reset so packet consumption cannot race the
+// two seeks, then pause again after the target seek as the landing guarantee.
 
-function installDemoMoments() {
+function installJumpTo() {
 	const buttons = [...document.querySelectorAll('[data-demo-jump]')];
 	let pending = false;
 
@@ -226,17 +226,11 @@ function installDemoMoments() {
 			pending = true;
 			for (const control of buttons) control.disabled = true;
 			try {
-				// Preserve the engine's state at the gesture, not a possibly stale
-				// app polling snapshot. In particular, a console pause immediately
-				// followed by a preset must remain paused after the seek.
-				const state = await bridge.state();
-				const wasPaused = Number(state.demo?.cl_demospeed) === 0;
 				await selectDemo(demoPath);
-				if (wasPaused) {
-					await bridge.send('demo_setspeed 0');
-				}
+				await bridge.send('demo_setspeed 0');
 				await bridge.send('demo_jump 0:00');
 				await bridge.send(`demo_jump ${target}`);
+				await bridge.send('demo_setspeed 0');
 			} catch (err) {
 				note(`Could not jump to ${target}: ${err.message ?? err}.`);
 			} finally {
@@ -469,6 +463,6 @@ function renderDrift(report) {
 
 buildDemoPicker();
 installDemoPause();
-installDemoMoments();
+installJumpTo();
 installVolume();
 installDropZone();
