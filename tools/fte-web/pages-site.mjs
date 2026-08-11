@@ -175,6 +175,66 @@ export async function guardArtifact(directory, basePath) {
   await guardArtifactAt(directory, basePath);
 }
 
+async function assertPreviewIndexMatches(siteDir, previews) {
+  if (!previews.length) return;
+  const index = await readFile(path.join(siteDir, 'preview/index.html'), 'utf8');
+  const linked = [...index.matchAll(/href="\/ezHUD\/preview\/([^"/]+)\/"/g)]
+    .map(match => match[1]).sort();
+  const live = previews.map(preview => preview.name).sort();
+  if (!arraysEqual(linked, live)) {
+    throw new Error(`preview index links do not match live previews (links: ${linked.join(', ') || 'none'}; live: ${live.join(', ')})`);
+  }
+}
+
+// The downloaded, already-deployed site is validated for integrity and safety
+// only: its bytes must match its own manifest (which attested its file set when
+// it was published) and it must never carry registered game data or personal
+// files. It is NOT compared to today's expectedArtifactPaths(): the fetch step
+// runs before any deploy can land, so judging an older site by a grown
+// allowlist would deadlock every future deploy.
+export async function guardDeployedSite(siteDir) {
+  const manifest = await readManifest(siteDir);
+  await assertBytesMatchManifest(siteDir, manifest);
+  if (manifest.files.some(file => poisonPath(file.path))) {
+    throw new Error('site contains registered game data or an owner/xerial personal file');
+  }
+  return manifest;
+}
+
+// The composed replacement artifact is validated section by section: the
+// subtree being (re)published now must equal today's allowlist exactly, while
+// every preserved subtree must be list- and byte-identical to the downloaded
+// site (baseline) whose integrity guardDeployedSite already attested.
+export async function guardComposedSite(siteDir, { baseline, republishPrefix }) {
+  const manifest = await guardDeployedSite(siteDir);
+  const inRepublished = republishPrefix === ''
+    ? relative => !relative.startsWith('dev/') && !relative.startsWith('preview/')
+    : relative => relative.startsWith(republishPrefix);
+
+  const expected = baseline.files.map(file => file.path)
+    .filter(relative => !inRepublished(relative) && relative !== 'preview/index.html');
+  expected.push(...expectedArtifactPaths(republishPrefix));
+  if (manifest.previews.length) expected.push('preview/index.html');
+  expected.sort();
+  const actual = manifest.files.map(file => file.path);
+  if (!arraysEqual(actual, expected)) {
+    throw new Error(`composed site does not match the preserved sections plus the current '${republishPrefix || 'release'}' allowlist\nexpected: ${expected.join('\n')}\nactual: ${actual.join('\n')}`);
+  }
+
+  const priorByPath = new Map(baseline.files.map(file => [file.path, file]));
+  for (const file of manifest.files) {
+    if (inRepublished(file.path) || file.path === 'preview/index.html') continue;
+    const prior = priorByPath.get(file.path);
+    if (prior.size !== file.size || prior.sha256 !== file.sha256) {
+      throw new Error(`preserved file differs from the downloaded site: ${file.path}`);
+    }
+  }
+
+  await guardArtifactAt(path.join(siteDir, republishPrefix), `/ezHUD/${republishPrefix}`);
+  await assertPreviewIndexMatches(siteDir, manifest.previews);
+  return manifest;
+}
+
 export async function guardSite(siteDir) {
   const manifest = await readManifest(siteDir);
   await assertBytesMatchManifest(siteDir, manifest);
@@ -195,15 +255,7 @@ export async function guardSite(siteDir) {
   for (const preview of manifest.previews) {
     await guardArtifactAt(path.join(siteDir, 'preview', preview.name), `/ezHUD/preview/${preview.name}/`);
   }
-  if (manifest.previews.length) {
-    const index = await readFile(path.join(siteDir, 'preview/index.html'), 'utf8');
-    const linked = [...index.matchAll(/href="\/ezHUD\/preview\/([^"/]+)\/"/g)]
-      .map(match => match[1]).sort();
-    const live = manifest.previews.map(preview => preview.name).sort();
-    if (!arraysEqual(linked, live)) {
-      throw new Error(`preview index links do not match live previews (links: ${linked.join(', ') || 'none'}; live: ${live.join(', ')})`);
-    }
-  }
+  await assertPreviewIndexMatches(siteDir, manifest.previews);
   return manifest;
 }
 
@@ -247,7 +299,7 @@ async function freshCopy(source, destination) {
 
 export async function composePreview({ currentDir, previewDir, outputDir, name, ref, commit, publishedAt, deployment }) {
   assertSafeName(name);
-  const current = await guardSite(currentDir);
+  const current = await guardDeployedSite(currentDir);
   await guardArtifact(previewDir, `/ezHUD/preview/${name}/`);
   await freshCopy(currentDir, outputDir);
   const target = path.join(outputDir, 'preview', name);
@@ -259,7 +311,7 @@ export async function composePreview({ currentDir, previewDir, outputDir, name, 
   previews.sort((a, b) => a.name.localeCompare(b.name));
   await writePreviewIndex(outputDir, previews);
   await createManifest(outputDir, { dev: current.dev, previews, deployment });
-  const composed = await guardSite(outputDir);
+  const composed = await guardComposedSite(outputDir, { baseline: current, republishPrefix: `preview/${name}/` });
   const rootProof = composed.files.find(file => file.path === 'index.html');
   console.log(`pages-site: preserved release index ${rootProof.sha256}.`);
   for (const prior of current.previews.filter(preview => preview.name !== name)) {
@@ -269,7 +321,7 @@ export async function composePreview({ currentDir, previewDir, outputDir, name, 
 }
 
 export async function composeDev({ currentDir, devDir, outputDir, ref, commit, publishedAt, deployment }) {
-  const current = await guardSite(currentDir);
+  const current = await guardDeployedSite(currentDir);
   await guardArtifact(devDir, '/ezHUD/dev/');
   await freshCopy(currentDir, outputDir);
   const target = path.join(outputDir, 'dev');
@@ -277,7 +329,7 @@ export async function composeDev({ currentDir, devDir, outputDir, ref, commit, p
   await cp(devDir, target, { recursive: true });
   const dev = validateDevMetadata({ ref, commit, publishedAt });
   await createManifest(outputDir, { dev, previews: current.previews, deployment });
-  const composed = await guardSite(outputDir);
+  const composed = await guardComposedSite(outputDir, { baseline: current, republishPrefix: 'dev/' });
   const rootProof = composed.files.find(file => file.path === 'index.html');
   console.log(`pages-site: preserved release index ${rootProof.sha256}.`);
   for (const preview of current.previews) {
@@ -287,7 +339,7 @@ export async function composeDev({ currentDir, devDir, outputDir, ref, commit, p
 }
 
 export async function composeRelease({ currentDir, releaseDir, outputDir, deployment }) {
-  const current = await guardSite(currentDir);
+  const current = await guardDeployedSite(currentDir);
   await guardArtifact(releaseDir, '/ezHUD/');
   await freshCopy(releaseDir, outputDir);
   if (current.dev) await cp(path.join(currentDir, 'dev'), path.join(outputDir, 'dev'), { recursive: true });
@@ -299,7 +351,7 @@ export async function composeRelease({ currentDir, releaseDir, outputDir, deploy
   }
   await writePreviewIndex(outputDir, current.previews);
   await createManifest(outputDir, { dev: current.dev, previews: current.previews, deployment });
-  const composed = await guardSite(outputDir);
+  const composed = await guardComposedSite(outputDir, { baseline: current, republishPrefix: '' });
   for (const prior of current.previews) {
     const proof = composed.files.find(file => file.path === `preview/${prior.name}/index.html`);
     console.log(`pages-site: preserved preview ${prior.name} index ${proof.sha256}.`);
@@ -345,13 +397,13 @@ export async function fetchCurrentSite({ baseUrl, bootstrapManifest, outputDir, 
     await writeFile(target, bytes);
   }
   await writeFile(path.join(outputDir, MANIFEST_NAME), `${JSON.stringify(manifest, null, 2)}\n`);
-  await guardSite(outputDir);
+  await guardDeployedSite(outputDir);
   console.log(`pages-site: preserved ${manifest.files.length} files from ${source} (${manifest.previews.length} previews).`);
   return manifest;
 }
 
 export async function createVerificationBundle(siteDir, outputDir) {
-  const manifest = await guardSite(siteDir);
+  const manifest = await guardDeployedSite(siteDir);
   await rm(outputDir, { recursive: true, force: true });
   await mkdir(outputDir, { recursive: true });
   await cp(path.join(siteDir, MANIFEST_NAME), path.join(outputDir, MANIFEST_NAME));
@@ -366,7 +418,7 @@ export async function createVerificationBundle(siteDir, outputDir) {
 }
 
 export async function verifyRemote({ baseUrl, expectedDir, expectedManifest, proofDir, attempts = 40, delayMs = 15000, cacheKey = '' }) {
-  const expected = expectedDir ? await guardSite(expectedDir) :
+  const expected = expectedDir ? await guardDeployedSite(expectedDir) :
     validateManifest(JSON.parse(await readFile(expectedManifest, 'utf8')));
   const localProofDir = proofDir ?? expectedDir;
   let remote;

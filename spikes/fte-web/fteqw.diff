@@ -300,3 +300,73 @@ index a8a1171..32c352b 100644
 +	return ezhud_state_buf;
 +}
 +#endif	//__EMSCRIPTEN__
+diff --git a/plugins/ezhud/hud_common.c b/plugins/ezhud/hud_common.c
+index 69f2b5f..2b1b7f1 100644
+--- a/plugins/ezhud/hud_common.c
++++ b/plugins/ezhud/hud_common.c
+@@ -578,15 +578,19 @@ void SCR_HUD_DrawTracking(hud_t *hud)
+ 	height *= hud_tracking_scale->value;
+ 	width *= hud_tracking_scale->value;
+ 
+-	if (!(cl.spectator && autocam == CAM_TRACK))
+-		height = 0;
+-
++	// #87: lay out the real text footprint before deciding whether there is
++	// anything to draw. ezQuake computes `height = 8 * scale` unconditionally
++	// and gates only the Draw_SString call on CAM_TRACK (hud_tracking.c:53-60).
++	// Zeroing the height first published a w>0,h=0 rect, and the /state
++	// contract says a rect means "laid out this frame" -- never "laid out with
++	// no area". Consumers inherit that: the editor would place a zero-height
++	// box and believe it.
+ 	if(!HUD_PrepareDraw(hud, width, height, &x, &y))
+ 	{
+ 		return;
+ 	}
+ 
+-	if (height == 0)
++	if (!(cl.spectator && autocam == CAM_TRACK))
+ 		return;
+ 
+ #ifdef HAXX
+@@ -6662,11 +6666,15 @@ void SCR_HUD_DrawOwnFrags(hud_t *hud)
+ 	alpha = 2 - age / hud_ownfrags_timeout->value * 2;
+ 	alpha = bound(0, alpha, 1);
+ 
++	// #87: with no frag message, or one past its timeout, there is no layout to
++	// report. ezQuake returns before HUD_PrepareDraw in both cases
++	// (hud_scores.c:755-762), so the element reports null -- "the engine did not
++	// lay it out". Publishing a w=0 rect instead told consumers "it is here, and
++	// it is nothing", which is the one thing the /state contract forbids.
++	// The editor still gets a footprint: hud_editor substitutes "Own Frags"
++	// above, so width is positive on that path.
+ 	if (!width)
+-	{
+-		HUD_PrepareDraw(hud, width, height, NULL, NULL);
+ 		return;
+-	}
+ 	if (!HUD_PrepareDraw(hud, width, height, &x, &y))
+ 		return;
+ 
+diff --git a/plugins/ezhud/vx_tracker.c b/plugins/ezhud/vx_tracker.c
+index eebd109..d95e169 100644
+--- a/plugins/ezhud/vx_tracker.c
++++ b/plugins/ezhud/vx_tracker.c
+@@ -347,11 +347,15 @@ void SCR_HUD_DrawTracker(hud_t *hud)
+ 		hud_tracker_align_right = HUD_FindVar(hud, "align_right");
+ 	}
+ 
++	// #87: with the content path switched off there is no layout to report, so
++	// publish nothing and let /state say null. The 0x0 call published a rect at
++	// the element's aligned position instead -- with right alignment and a
++	// positive offset that lands outside the console entirely (the issue's
++	// x=934 on a 640px screen), and a consumer cannot tell an off-screen
++	// zero-area rect from a real placement. ezQuake's own draw paths return
++	// before HUD_PrepareDraw in this situation.
+ 	if (!r_tracker->ival)
+-	{
+-		HUD_PrepareDraw(hud, 0, 0, NULL, NULL);
+ 		return;
+-	}
+ 
+ 	// ezhud #15 P2 FIX4: clamp both inputs to the rect size so a stray cvar
+ 	// value (hud_tracker_scale set to 0, or r_tracker_messages set to 0 by a

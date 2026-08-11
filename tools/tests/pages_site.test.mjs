@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import * as pagesSite from '../fte-web/pages-site.mjs';
 import {
   PUBLIC_ARTIFACT_PATHS,
   composeDev,
@@ -14,8 +15,9 @@ import {
   guardSite,
 } from '../fte-web/pages-site.mjs';
 
-async function artifact(root, label, basePath) {
+async function artifact(root, label, basePath, { omit = [] } = {}) {
   for (const relative of PUBLIC_ARTIFACT_PATHS) {
+    if (omit.includes(relative)) continue;
     const target = path.join(root, relative);
     await mkdir(path.dirname(target), { recursive: true });
     let contents = `${label}:${relative}\n`;
@@ -176,6 +178,118 @@ test('the public allowlist rejects registered game data in a preview', async () 
     await artifact(run, 'preview', '/ezHUD/preview/safe/');
     await writeFile(path.join(run, 'id1/pak1.pak'), 'registered data');
     await assert.rejects(guardArtifact(run, '/ezHUD/preview/safe/'), /outside the public allowlist/);
+  } finally {
+    await rm(run, { recursive: true, force: true });
+  }
+});
+
+test('the deployed site is validated by its own manifest, not by today\'s allowlist', async () => {
+  const run = await mkdtemp(path.join(os.tmpdir(), 'ezhud-pages-old-deploy-'));
+  try {
+    // A site published before the allowlist grew: no core/snapping.js anywhere,
+    // but every byte matches the manifest that attested it at publication time.
+    const site = path.join(run, 'site');
+    await artifact(site, 'release-old', '/ezHUD/', { omit: ['core/snapping.js'] });
+    await createManifest(site, { previews: [], deployment: 'release-old' });
+
+    // The equality guard can never accept it, which deadlocked every deploy
+    // once the allowlist grew (run 31479855094).
+    await assert.rejects(guardSite(site), /outside the release\/preview allowlist/);
+
+    // The fetch path validates integrity and safety against the site's own manifest.
+    const manifest = await pagesSite.guardDeployedSite(site);
+    assert.equal(manifest.deployment, 'release-old');
+  } finally {
+    await rm(run, { recursive: true, force: true });
+  }
+});
+
+test('the composed gate still fails on an extra or missing file in the republished section', async () => {
+  const run = await mkdtemp(path.join(os.tmpdir(), 'ezhud-pages-composed-gate-'));
+  try {
+    const initial = path.join(run, 'initial');
+    const preview = path.join(run, 'preview');
+    const site = path.join(run, 'site');
+    await artifact(initial, 'release-one', '/ezHUD/');
+    await createManifest(initial, { previews: [], deployment: 'release-1' });
+    await artifact(preview, 'grid', '/ezHUD/preview/grid/');
+    await composePreview({ currentDir: initial, previewDir: preview, outputDir: site,
+      name: 'grid', ref: 'feature/grid', commit: 'a'.repeat(40), publishedAt: '2026-08-09T18:00:00Z', deployment: 'run-a' });
+    const baseline = await pagesSite.guardDeployedSite(initial);
+    const remanifest = async () => {
+      const manifest = JSON.parse(await readFile(path.join(site, 'pages-manifest.json'), 'utf8'));
+      await createManifest(site, { previews: manifest.previews, deployment: manifest.deployment });
+    };
+
+    const extra = path.join(site, 'preview/grid/extra.js');
+    await writeFile(extra, 'stray file');
+    await remanifest();
+    await assert.rejects(
+      pagesSite.guardComposedSite(site, { baseline, republishPrefix: 'preview/grid/' }),
+      /does not match the preserved sections/);
+
+    await rm(extra);
+    await rm(path.join(site, 'preview/grid/core/snapping.js'));
+    await remanifest();
+    await assert.rejects(
+      pagesSite.guardComposedSite(site, { baseline, republishPrefix: 'preview/grid/' }),
+      /does not match the preserved sections/);
+  } finally {
+    await rm(run, { recursive: true, force: true });
+  }
+});
+
+test('a preserved section with an older file set passes the composed gate', async () => {
+  const run = await mkdtemp(path.join(os.tmpdir(), 'ezhud-pages-old-preserved-'));
+  try {
+    // The deployed release root predates core/snapping.js; publishing a preview
+    // must preserve it byte for byte without judging it by today's allowlist.
+    const initial = path.join(run, 'initial');
+    const preview = path.join(run, 'preview');
+    const site = path.join(run, 'site');
+    await artifact(initial, 'release-old', '/ezHUD/', { omit: ['core/snapping.js'] });
+    await createManifest(initial, { previews: [], deployment: 'release-old' });
+    await artifact(preview, 'grid', '/ezHUD/preview/grid/');
+
+    await composePreview({ currentDir: initial, previewDir: preview, outputDir: site,
+      name: 'grid', ref: 'feature/grid', commit: 'a'.repeat(40), publishedAt: '2026-08-09T18:00:00Z', deployment: 'run-a' });
+
+    assert.deepEqual(await readFile(path.join(site, 'index.html')),
+      await readFile(path.join(initial, 'index.html')));
+    const manifest = JSON.parse(await readFile(path.join(site, 'pages-manifest.json'), 'utf8'));
+    const paths = manifest.files.map(file => file.path);
+    assert.ok(paths.includes('preview/grid/core/snapping.js'));
+    assert.ok(!paths.includes('core/snapping.js'));
+  } finally {
+    await rm(run, { recursive: true, force: true });
+  }
+});
+
+test('registered game data and owner files are rejected on both guard paths', async () => {
+  const run = await mkdtemp(path.join(os.tmpdir(), 'ezhud-pages-poison-'));
+  try {
+    const deployed = path.join(run, 'deployed');
+    await artifact(deployed, 'release-old', '/ezHUD/', { omit: ['core/snapping.js'] });
+    await writeFile(path.join(deployed, 'id1/pak1.pak'), 'registered data');
+    await createManifest(deployed, { previews: [], deployment: 'release-old' });
+    await assert.rejects(pagesSite.guardDeployedSite(deployed),
+      /registered game data or an owner/);
+
+    const initial = path.join(run, 'initial');
+    const preview = path.join(run, 'preview');
+    const site = path.join(run, 'site');
+    await artifact(initial, 'release-one', '/ezHUD/');
+    await createManifest(initial, { previews: [], deployment: 'release-1' });
+    await artifact(preview, 'grid', '/ezHUD/preview/grid/');
+    await composePreview({ currentDir: initial, previewDir: preview, outputDir: site,
+      name: 'grid', ref: 'feature/grid', commit: 'a'.repeat(40), publishedAt: '2026-08-09T18:00:00Z', deployment: 'run-a' });
+    const baseline = await pagesSite.guardDeployedSite(initial);
+    await writeFile(path.join(site, 'owner-notes.txt'), 'personal data');
+    const manifest = JSON.parse(await readFile(path.join(site, 'pages-manifest.json'), 'utf8'));
+    await createManifest(site, { previews: manifest.previews, deployment: manifest.deployment });
+    await assert.rejects(
+      pagesSite.guardComposedSite(site, { baseline, republishPrefix: 'preview/grid/' }),
+      /registered game data or an owner/);
   } finally {
     await rm(run, { recursive: true, force: true });
   }

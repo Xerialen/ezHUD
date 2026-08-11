@@ -1841,6 +1841,21 @@ try {
 		pass(nextCase++, `${row.label} — ${effect}`);
 	}
 
+	// #87 preflight: the jump-to cases above leave the demo resumed at the
+	// Scoreboard moment — the end of the match. EndOfDemo disconnects the
+	// client and stops every ca_active element from laying out, so the two
+	// placement-contract cases below would race the last seconds of playback
+	// (preview run 31478860531: "svc_disconnect: EndOfDemo" landed between
+	// case 48 passing and case 49's restore wait). Freeze playback: these
+	// cases read layout, not motion.
+	await page.evaluate(() => {
+		const channel = window.EZHUD_FTE?.engine()?.ftec;
+		if (!channel) throw new Error('the live FTE command channel is unavailable');
+		channel.cbufadd('cl_demospeed 0\n');
+	});
+	await eventually(async () => await readCvar('cl_demospeed') === '0' ? true : null,
+		'the demo to freeze before the #87 placement-contract cases', UI_WAIT);
+
 	// ---- #87: native-sized empty layouts stay positive ----------------------
 	// Native ezQuake prepares tracking's real text footprint before deciding
 	// whether there is tracking text to draw, and prepares net's fixed footprint
@@ -1964,7 +1979,7 @@ try {
 			channel.cbufadd(`r_tracker 1\nset hud_tracker_place ${tracker.place}\n`
 				+ `set hud_tracker_align_x ${tracker.align_x}\nset hud_tracker_align_y ${tracker.align_y}\n`
 				+ `set hud_tracker_pos_x ${tracker.pos_x}\nset hud_tracker_pos_y ${tracker.pos_y}\n`
-				+ `set hud_${child.name}_place ${child.place}\nhud_recalculate\n`);
+				+ `set hud_${child.name}_place ${child.place}\ncl_demospeed 1\nhud_recalculate\n`);
 		}, { tracker: trackerLayout, child: anchoredChildLayout }).catch(() => {});
 	}
 	const trackerAfterEmpty = await eventually(async () => {
