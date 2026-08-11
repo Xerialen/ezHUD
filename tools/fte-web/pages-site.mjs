@@ -41,6 +41,12 @@ release-1/img/pause-resume-focused-annotated.png
 release-1/img/window-follow-focused-annotated.png
 release-1/index.html
 release-1/release-notes.html
+release-2/img/anchor-focused-annotated.png
+release-2/img/demo-moments-focused-annotated.png
+release-2/img/drag-assist-focused-annotated.png
+release-2/img/editor-size-focused-annotated.png
+release-2/index.html
+release-2/release-notes.html
 ui.css
 view/app.js
 view/debug.js`.split('\n'));

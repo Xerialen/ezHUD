@@ -61,6 +61,12 @@ release-1/img/pause-resume-focused-annotated.png
 release-1/img/window-follow-focused-annotated.png
 release-1/index.html
 release-1/release-notes.html
+release-2/img/anchor-focused-annotated.png
+release-2/img/demo-moments-focused-annotated.png
+release-2/img/drag-assist-focused-annotated.png
+release-2/img/editor-size-focused-annotated.png
+release-2/index.html
+release-2/release-notes.html
 ui.css
 view/app.js
 view/debug.js"
@@ -70,10 +76,12 @@ view/debug.js"
 engine_dir=$run_dir/engine
 game_data_dir=$run_dir/game-data
 release_docs_dir=$run_dir/docs/release-1
+release2_docs_dir=$run_dir/docs/release-2
 dist_dir=$run_dir/dist
 
 mkdir -p "$engine_dir" "$game_data_dir/id1" "$game_data_dir/qw/demos" "$run_dir/docs"
 cp -R "$repo_dir/docs/release-1" "$release_docs_dir"
+cp -R "$repo_dir/docs/release-2" "$release2_docs_dir"
 # ftewebglcl.html exists here and must not be shipped: our index.html replaces
 # the stock FTE shell.
 for name in ftewebglcl.html ftewebglcl.js ftewebglcl.wasm; do
@@ -89,6 +97,7 @@ echo "placeholder owner config" > "$game_data_dir/owner-config.cfg"
 # A normal (non-dotfile) source beside the reviewed release files. A wildcard
 # over docs/release-1 would publish it; the explicit document allowlist must not.
 echo "release docs poison" > "$release_docs_dir/tier1-poison-do-not-ship.txt"
+echo "release docs poison" > "$release2_docs_dir/tier1-poison-do-not-ship.txt"
 
 # ---- build ----------------------------------------------------------------
 
@@ -96,6 +105,7 @@ DIST_DIR=$dist_dir \
 ENGINE_DIR=$engine_dir \
 GAME_DATA_DIR=$game_data_dir \
 RELEASE_DOCS_DIR=$release_docs_dir \
+RELEASE2_DOCS_DIR=$release2_docs_dir \
 BASE_PATH=/ezHUD/ \
 	bash "$repo_dir/tools/fte-web/assemble-public.sh" > "$run_dir/assemble.log" 2>&1 ||
 	{ cat "$run_dir/assemble.log" >&2; fail "assemble-public.sh failed"; }
@@ -112,7 +122,7 @@ fi
 # 2. poison, named explicitly so a failure says what leaked rather than "extra
 # file". Redundant with 1 by construction; cheap, and it is the assertion the
 # whole exercise is for.
-for poison in id1/pak1.pak owner-config.cfg release-1/tier1-poison-do-not-ship.txt; do
+for poison in id1/pak1.pak owner-config.cfg release-1/tier1-poison-do-not-ship.txt release-2/tier1-poison-do-not-ship.txt release-2/captures.json release-2/PROVENANCE.json; do
 	[ ! -e "$dist_dir/$poison" ] || fail "$poison reached the dist"
 done
 

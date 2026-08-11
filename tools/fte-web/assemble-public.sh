@@ -27,6 +27,7 @@ engine_dir=${ENGINE_DIR:-$workspace/fteqw/engine/release}
 # be pointed at a directory that also contains pak1 and the owner's files.
 game_data_dir=${GAME_DATA_DIR:-$workspace/game-data}
 release_docs_dir=${RELEASE_DOCS_DIR:-$repo_dir/docs/release-1}
+release2_docs_dir=${RELEASE2_DOCS_DIR:-$repo_dir/docs/release-2}
 base_path=${BASE_PATH:-/}
 ui_dir=$repo_dir/hud_web_ui
 
@@ -116,6 +117,22 @@ for rel in \
 	img/window-follow-focused-annotated.png
 do
 	copy "$release_docs_dir/$rel" "release-1/$rel"
+done
+
+# ---- Release 2 report -----------------------------------------------------
+
+# Same rule as release-1: every public path is named, no wildcards. The
+# focused-source captures/ directory and the JSON manifests stay out of the
+# dist; only the report pages and the annotated images ship.
+for rel in \
+	index.html \
+	release-notes.html \
+	img/anchor-focused-annotated.png \
+	img/demo-moments-focused-annotated.png \
+	img/drag-assist-focused-annotated.png \
+	img/editor-size-focused-annotated.png
+do
+	copy "$release2_docs_dir/$rel" "release-2/$rel"
 done
 
 # ---- the engine -----------------------------------------------------------

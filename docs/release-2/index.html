@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ezHUD Release 2 — "Place, don't pixel" — evidence report</title>
+<style>
+:root { color-scheme: light dark; --accent: #d97706; --ok: #16a34a; --bad: #dc2626; }
+body { font: 15px/1.55 system-ui, sans-serif; max-width: 62rem; margin: 2rem auto; padding: 0 1rem; }
+h1 { font-size: 1.6rem; } h2 { margin-top: 2.2rem; border-bottom: 2px solid var(--accent); padding-bottom: .2rem; }
+table { border-collapse: collapse; width: 100%; margin: .8rem 0; font-size: .92em; display: block; overflow-x: auto; }
+th, td { border: 1px solid #8884; padding: .35rem .55rem; text-align: left; }
+code, pre { font-family: ui-monospace, monospace; font-size: .92em; }
+pre { background: #8881; padding: .7rem; overflow-x: auto; border-radius: 6px; }
+img { max-width: 100%; border: 1px solid #8886; border-radius: 6px; }
+figure { margin: 1rem 0; } figcaption { font-size: .9em; opacity: .85; margin-top: .35rem; }
+.ok { color: var(--ok); font-weight: 600; } .bad { color: var(--bad); font-weight: 600; }
+.note { background: #d9770615; border-left: 4px solid var(--accent); padding: .5rem .8rem; margin: 1rem 0; }
+.release-nav { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin-bottom: 1.5rem; }
+.release-nav a { color: var(--accent); text-underline-offset: .18em; }
+</style>
+</head>
+<body>
+<nav class="release-nav" aria-label="Release links">
+<a href="./release-notes.html">Player release notes</a>
+<a href="../">Open ezHUD</a>
+</nav>
+<h1>ezHUD Release 2 — “Place, don't pixel”</h1>
+<p>Source commit: <code>a239ecc</code> on <code>release/2</code> (<code>Xerialen/ezHUD</code>);
+baseline <code>1950c15</code> on <code>main</code>. Full hashes in the Provenance section below.</p>
+
+<h2>Scope</h2>
+<p>Placing a HUD element is now a relationship rather than a pair of coordinates: anchor it to a parent or a screen
+edge, and let <code>pos_x</code>/<code>pos_y</code> be the fine-tune they were always meant to be. Drags snap to a grid
+and to other elements' edges, the editor scales to the screen you actually work on, and named demo moments put a real
+frame in front of you instead of an empty one. Exports remain byte-compatible ezQuake configs, with untouched lines
+preserved byte-for-byte.</p>
+<ul>
+<li><strong>#25 — the editor scales to your screen.</strong> A UI-scale control sets the editor chrome to a size you
+can work in, and it survives a reload.</li>
+<li><strong>#62 / #32 — anchor first, nudge second.</strong> The inspector leads with the anchor — a parent element or
+screen edge — and <code>pos_x</code>/<code>pos_y</code> become the offsets from that anchor.</li>
+<li><strong>#24, #102 — drags that land where you meant.</strong> Drags snap to a configurable grid and magnet to
+other elements' edges and centres, with guides showing what they caught.</li>
+<li><strong>#23 — demo moments worth aiming at.</strong> Named preset moments open a match demo at a deterministic
+point.</li>
+</ul>
+
+<h2>#25 — The editor scales to your screen (before / after)</h2>
+<p><strong>Before:</strong> The editor was cramped at 1440p, and moving the browser to a second monitor could collapse
+the layout outright.</p>
+<p><strong>After:</strong> A UI-scale control sets the editor chrome to a size you can work in, and it survives a
+reload. Moving the window between monitors keeps the layout intact.</p>
+<p><strong>Value:</strong> You can work at the size your screen deserves, and the editor stays where you put it.</p>
+<figure>
+<a href="img/editor-size-focused-annotated.png">
+<img src="img/editor-size-focused-annotated.png" alt="Focused crop with a ring and badge 1 around the UI-scale control">
+</a>
+<figcaption><strong>Focused proof.</strong> <strong>Marker 1</strong> identifies the UI-scale control that sets the
+editor chrome to a workable size and survives a reload; captured with the editor scale at 1.25.
+<a href="img/editor-size-focused-annotated.png">Open full size</a>.</figcaption>
+</figure>
+
+<h2>#62 / #32 — Anchor first, nudge second (before / after)</h2>
+<p><strong>Before:</strong> Placement meant typing raw coordinates, and nothing on screen told you what an element was
+positioned against.</p>
+<p><strong>After:</strong> The inspector leads with the anchor — a parent element or screen edge, an alignment and an
+order — and the stage draws the relationship. <code>pos_x</code> and <code>pos_y</code> become the offsets from that
+anchor. Raw coordinate entry is still there when you want it.</p>
+<p><strong>Value:</strong> A drag reads as "re-anchor plus offset" instead of a number you have to
+reverse-engineer later.</p>
+<figure>
+<a href="img/anchor-focused-annotated.png">
+<img src="img/anchor-focused-annotated.png" alt="Focused inspector crop with a ring and badge 1 around the anchor selector for the selected health element">
+</a>
+<figcaption><strong>Focused proof.</strong> <strong>Marker 1</strong> identifies the anchor selector whose choice the
+stage reflects, shown for the selected health element's inspector.
+<a href="img/anchor-focused-annotated.png">Open full size</a>.</figcaption>
+</figure>
+
+<h2>#24, #102 — Drags that land where you meant (before / after)</h2>
+<p><strong>Before:</strong> Lining two elements up was eyeballing, one pixel at a time.</p>
+<p><strong>After:</strong> Drags snap to a configurable grid and magnet to other elements' edges and centres, with
+guides showing what they caught. A visible toggle turns it off, and a held modifier bypasses it for one drag.</p>
+<p><strong>Value:</strong> Alignment stops being a test of patience. The export still contains final positions and
+nothing else.</p>
+<figure>
+<a href="img/drag-assist-focused-annotated.png">
+<img src="img/drag-assist-focused-annotated.png" alt="Focused crop with a ring and badge 1 around the Grid and Magnet toggles and their shared grid step">
+</a>
+<figcaption><strong>Focused proof.</strong> <strong>Marker 1</strong> identifies the Grid and Magnet toggles and the
+grid step they share — the visible controls for snap-to-grid and magnet alignment.
+<a href="img/drag-assist-focused-annotated.png">Open full size</a>.</figcaption>
+</figure>
+
+<h2>#23 — Demo moments worth aiming at (before / after)</h2>
+<p><strong>Before:</strong> Pause existed, but you had to wait for a useful frame to appear before there was anything
+to line the HUD up against.</p>
+<p><strong>After:</strong> Named preset moments open a match demo at a deterministic point — a frame with full HUD
+activity, a scoreboard moment, a quiet moment.</p>
+<p><strong>Value:</strong> The frame you need is one click away instead of a wait, and it is the same frame every
+time.</p>
+<figure>
+<a href="img/demo-moments-focused-annotated.png">
+<img src="img/demo-moments-focused-annotated.png" alt="Focused demo-bar crop with a ring and badge 1 around the named demo moment selector">
+</a>
+<figcaption><strong>Focused proof.</strong> <strong>Marker 1</strong> identifies the moment selector — the named
+preset moments that open a match demo at a deterministic point.
+<a href="img/demo-moments-focused-annotated.png">Open full size</a>.</figcaption>
+</figure>
+
+<h2>Provenance</h2>
+<p>Captures and annotations were produced from source commit
+<code>a239ecc9cace4ace3da62c5b7e2b529bda00de78</code> (<code>Xerialen/ezHUD</code>, ref <code>origin/release/2</code>),
+against baseline commit <code>1950c15068bf05c0db31dd0e0d709066d013c0a3</code> (<code>origin/main</code>). Engine:
+<code>Xerialen/fteqw</code> at <code>41e13638d62779b79e27defe74fe961910a260d3</code> (ref <code>ezhud-base</code>),
+artifact <code>ftewebglcl.wasm</code>
+sha256 <code>2055a054e3a918d268f37cfe809fbde5aeb50cebce30db6d13112bc6182948e2</code>. Per-file manifests, byte counts
+and sha256 hashes for every capture and annotated image live in <code>docs/release-2/PROVENANCE.json</code> in the
+source repository.</p>
+</body>
+</html>
