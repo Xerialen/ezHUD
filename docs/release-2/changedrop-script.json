@@ -119,7 +119,7 @@
       "source": {
         "before": "Lining two elements up was eyeballing, one pixel at a time.",
         "after": "Drags snap to a configurable grid and magnet to other elements' edges and centres, with guides showing what they caught. A visible toggle turns it off, and a held modifier bypasses it for one drag.",
-        "value": "Alignment stops being a test of patience. The export still contains final positions and nothing else."
+        "value": "The export still contains final positions and nothing else."
       },
       "text": "Switch on the grid and the magnet, and drags land where you meant instead of where you let go.",
       "walkthrough": [
