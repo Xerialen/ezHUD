@@ -1,0 +1,30 @@
+[
+ {
+  "element": "armor",
+  "dimension": "colour",
+  "claim": "ezQuake colours the number by armour type (yellow for YA); the FTE preview draws it white",
+  "source": "spikes/fte-web/PARITY.md, element table",
+  "observed": "2026-08-01"
+ },
+ {
+  "element": "gameclock",
+  "dimension": "colour",
+  "claim": "ezQuake's colour tints reproduce in the preview only as far as the element's own drawing code does; the orange clock is the known case",
+  "source": "spikes/fte-web/PARITY.md, 'Still open in this area'",
+  "observed": "2026-08-01"
+ },
+ {
+  "element": "itemsclock",
+  "dimension": "texture",
+  "claim": "the FTE plugin draws the literal text 'ITEMSCLOCK NOT IMPLEMENTED' where ezQuake draws item timers; a rect is reported either way, so only this claim catches it",
+  "source": "spikes/fte-web/PARITY.md, element table",
+  "observed": "2026-08-01"
+ },
+ {
+  "element": "notify",
+  "dimension": "texture",
+  "claim": "console text renders through FTE's own font system; the layout is right and the glyphs are not ezQuake's",
+  "source": "spikes/fte-web/PARITY.md, caveat 1",
+  "observed": "2026-08-01"
+ }
+]
