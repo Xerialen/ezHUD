@@ -1,6 +1,7 @@
 ---
 name: Behaviour change / feature
 about: Plan a user-visible behaviour change and its observable test cases
+labels: [enhancement]
 ---
 
 ## What
